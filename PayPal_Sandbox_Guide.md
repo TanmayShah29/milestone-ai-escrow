@@ -254,7 +254,7 @@ Catalog product (PROD-...)  ──▶  Plan (P-..., ACTIVE)  ──▶  Subscrip
 ## 11. Webhooks: how your app learns things happened
 
 - Set them up under Dashboard, then your App, then Webhooks, or with `POST /v1/notifications/webhooks` (URL plus event types, or `*`). **[DOCS]**
-- **[VERIFIED]** Your app has no webhooks registered yet.
+- **[VERIFIED Oct 20]** Webhook `2JC020923H9067634` registered for `https://milestone-ai-escrow.onrender.com/api/paypal/webhook` (17 event types) with `./scripts/register-webhook.sh <url>`, which is idempotent: it returns the existing id for the same URL.
 - The URL must be **public HTTPS**: a Vercel deployment, or ngrok or cloudflared for local development.
 - PayPal expects a 2xx response. Otherwise it retries up to 25 times over 3 days. **[DOCS]**
 - **Always verify the signature**: `POST /v1/notifications/verify-webhook-signature` with the headers (`paypal-transmission-id`, `-time`, `-sig`, `paypal-cert-url`, `paypal-auth-algo`), your `webhook_id` and the raw body. **[DOCS]**
