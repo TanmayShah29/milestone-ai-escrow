@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "paypal": {
+      "command": "/Users/tanmay/Paypal/scripts/paypal-mcp.sh"
+    }
+  }
+}

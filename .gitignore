@@ -1,0 +1,22 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.DS_Store
+
+# cloned reference repo (has its own git history; not part of our submission)
+agent-toolkit/
+
+# local Claude Code settings
+.claude/settings.local.json
+
+# next.js
+/.next/
+/out/
+/build
+/coverage
+*.tsbuildinfo
+next-env.d.ts
+*.pem
+npm-debug.log*
+.vercel
