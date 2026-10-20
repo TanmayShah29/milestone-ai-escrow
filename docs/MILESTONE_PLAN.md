@@ -57,11 +57,11 @@
 | Step | Endpoint | Tested on our sandbox? |
 |---|---|---|
 | Create hold order | `POST /v2/checkout/orders` (intent AUTHORIZE) | ✅ returns CREATED with an approve link |
-| Authorize | `POST /v2/checkout/orders/{id}/authorize` | not yet |
-| Capture hold | `POST /v2/payments/authorizations/{id}/capture` | not yet |
+| Authorize | `POST /v2/checkout/orders/{id}/authorize` | ✅ Oct 20 (needs Content-Type: application/json, else 415) |
+| Capture hold | `POST /v2/payments/authorizations/{id}/capture` | ✅ Oct 20, COMPLETED immediately |
 | Void | `POST /v2/payments/authorizations/{id}/void` | not yet |
 | Reauthorize | `POST /v2/payments/authorizations/{id}/reauthorize` | not yet |
-| Payout | `POST /v1/payments/payouts` | ✅ PENDING |
+| Payout | `POST /v1/payments/payouts` | ✅ SUCCESS in ~15 s (Oct 20, from a real capture) |
 | Refund | `POST /v2/payments/captures/{id}/refund` | not yet |
 | Disputes | `/v1/customer/disputes/...` | not yet |
 | Webhooks | `/v1/notifications/webhooks`, `verify-webhook-signature` | not yet |

@@ -49,7 +49,15 @@ async function runWrite<T>(m: Milestone, spec: WriteSpec<T>): Promise<Milestone>
   try {
     result = await spec.call(claim.request_id);
   } catch (err) {
-    const f = classify(err);
+    let f: PaypalFailure;
+    try {
+      f = classify(err);
+    } catch {
+      // Not a PayPal failure (a bug after the response, say). PayPal may have acted, so never leave
+      // the claim pending: mark it unknown so a sync re-reads PayPal.
+      await settleClaim(db(), claim.id, "unknown", { error: { message: String(err) } });
+      throw err;
+    }
     if (f.kind !== "unknown") {
       await settleClaim(db(), claim.id, "failed", { error: { message: f.message, ...f.detail } });
       await audit(db(), { milestoneId: m.id, actor: "paypal", event: `${spec.action}:refused`, paypalDebugId: f.detail.debugId ?? null, detail: f.detail });
@@ -165,7 +173,8 @@ export async function authorizeHold(milestoneId: string, returnedOrderId: string
     action: "authorize",
     actor: "client",
     call: async (requestId) => {
-      const res = await deps.paypal.orders.authorizeOrder({ id: orderId, payPalRequestId: requestId, prefer: PREFER, ...mockHeader(opts.mock) });
+      // body {} makes the SDK send Content-Type: application/json; without it PayPal answers 415.
+      const res = await deps.paypal.orders.authorizeOrder({ id: orderId, payPalRequestId: requestId, prefer: PREFER, ...mockHeader(opts.mock), body: {} });
       const a = readAuthorization(res.purchaseUnits);
       if (!a) throw new PaypalFailure("unknown", "authorizeOrder returned no authorization");
       if (a.status === "DENIED") throw new PaypalFailure("refused", "PayPal denied the authorization", { status: 422, reason: "Authorization denied", issue: "DENIED" });
@@ -305,7 +314,7 @@ export async function refreshHold(milestoneId: string, deps: Deps = defaultDeps(
     action: `reauthorize_${m.reauth_count + 1}`,
     actor: "system",
     call: async (requestId) => {
-      const a = await deps.paypal.payments.reauthorizePayment({ authorizationId, payPalRequestId: requestId, prefer: PREFER });
+      const a = await deps.paypal.payments.reauthorizePayment({ authorizationId, payPalRequestId: requestId, prefer: PREFER, body: {} }); // {} → Content-Type (see authorize)
       if (!a.id) throw new PaypalFailure("unknown", "reauthorize returned no authorization id");
       return { authorizationId: a.id, expiresAt: a.expirationTime ?? null };
     },

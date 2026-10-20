@@ -39,10 +39,19 @@ function bodyFromRaw(raw: ArrayBuffer): unknown {
   }
 }
 
+const KINDS = new Set(["api", "decode", "encode", "connection", "timeout", "auth"]);
+
+function isPaypalError(err: unknown): err is PaypalError {
+  if (err instanceof PaypalError) return true;
+  return typeof err === "object" && err !== null && "uri" in err && "method" in err && KINDS.has((err as { kind?: string }).kind ?? "");
+}
+
 /** Classify anything a PayPal SDK call rejected with. Rethrows what is outside the family (bugs, aborts). */
 export function classify(err: unknown): PaypalFailure {
   if (err instanceof PaypalFailure) return err;
-  if (!(err instanceof PaypalError)) throw err;
+  // Narrow on `kind` + `uri`, not instanceof: Next can load the SDK's ESM and CJS builds side by side,
+  // and instanceof is false across that boundary (seen in the Oct 20 sandbox run).
+  if (!isPaypalError(err)) throw err;
   switch (err.kind) {
     case "api": {
       // Every declared arm on our operations carries PayPal's Error body, or none (error500), or raw

@@ -14,7 +14,7 @@ payouts are small typed REST functions in `src/lib/paypal/payouts.ts`.
 | Item | Value |
 | --- | --- |
 | Runtime | Node 22.20 (SDK floor `>=20.3`). Next.js 15.5 app router, server code runs in the Node runtime (route handlers set `runtime = "nodejs"`) |
-| Module format | ESM everywhere (Next bundler + `tsx` scripts); one dialect per process, so `instanceof` on SDK errors is safe |
+| Module format | ESM source, but **Next's bundler loaded both SDK dialects** in the Oct 20 sandbox run, so `instanceof PaypalError` failed. Fixes: `serverExternalPackages: ["paypal"]` in `next.config.ts`, and `classify()` narrows on `kind`/`uri`/`method` |
 | Package manager | npm (`package-lock.json`) |
 | tsconfig | `strict: true`; no `exactOptionalPropertyTypes`, no `verbatimModuleSyntax` (still use `import type` for model types) |
 | Checks | `npx tsc --noEmit`, `npm run lint`, `npm test` (node:test via tsx), `npm run build` |
@@ -56,11 +56,12 @@ Response mode: throw-based (`await`) everywhere; none of these resolve to `undef
 | getOrder | `id` | path | stored `paypal_order_id` |
 | authorizeOrder | `id` | path | stored `paypal_order_id` |
 | authorizeOrder | `payPalRequestId`, `prefer` | headers | claim id, `"return=representation"` |
+| authorizeOrder | `body` | body | `{}`: without a body the SDK sends no Content-Type and PayPal answers **415** [VERIFIED Oct 20] |
 | capture | `authorizationId` | path `authorization_id` | stored `paypal_authorization_id` |
 | capture | `payPalRequestId`, `prefer` | headers | claim id, `"return=representation"` |
 | capture | `body: CaptureRequest` | body | `{ amount: { currencyCode: "USD", value: <authorized amount> }, finalCapture: true }` |
 | void | `authorizationId`, `payPalRequestId`, `prefer` | path, headers | as above |
-| reauthorize | `authorizationId`, `payPalRequestId`, `prefer` | path, headers | as above; no body (re-authorizes the full original amount) |
+| reauthorize | `authorizationId`, `payPalRequestId`, `prefer`, `body: {}` | path, headers, body | as above; `{}` for the Content-Type (same 415 risk as authorize); re-authorizes the full original amount |
 | any (tests/demo only) | `payPalMockResponse` | header `PayPal-Mock-Response` | only when the caller passes a mock code (forced-error demo) |
 
 `OrderRequest` (members from `src/models/order-request.ts`, `purchase-unit-request.ts`, `amount-with-breakdown.ts`, `order-application-context.ts`):
@@ -159,7 +160,7 @@ A re-read that itself fails leaves the claim `unknown`; the milestone shows "Pay
 | CaptureRequest | `amount` | money rule 3 (explicit, checked ≤ authorized) | ✅ |
 | CaptureRequest | `finalCapture` | single release per milestone (frees the remainder) | ✅ `true` |
 | CaptureRequest | `invoiceId`, `noteToPayer`, `softDescriptor`, `paymentInstruction` | nothing | ❌ |
-| ReauthorizeRequest | `amount` | nothing (full amount) | ❌ omit body |
+| ReauthorizeRequest | `amount` | nothing (full amount) | ❌ (send `body: {}` with no members) |
 
 Test: "createHold › sends the claim's PayPal-Request-Id, return=representation, and only headers we own" asserts the request carries no `PayPal-Auth-Assertion`, `PayPal-Partner-Attribution-Id`, `PayPal-Client-Metadata-Id`, and no `fields` query.
 

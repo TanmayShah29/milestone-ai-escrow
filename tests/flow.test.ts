@@ -80,6 +80,36 @@ describe("authorizeHold", () => {
     assert.deepEqual(stub.calls.map((c) => c.request.method), ["POST", "GET"]);
   });
 
+  it("sends an empty JSON body so PayPal gets a Content-Type (415 otherwise)", async () => {
+    const id = await seedMilestone({ paypal_order_id: "ORDER1" });
+    const stub = stubFetch(() => jsonResponse(201, authorizedOrder("ORDER1", "AUTH1")));
+    await authorizeHold(id, "ORDER1", depsWith(stub));
+    const { request, body } = stub.calls[0]!;
+    assert.equal(request.headers.get("content-type"), "application/json");
+    assert.equal(body, "{}");
+    assert.equal(request.headers.get("paypal-request-id"), `ms_${id}_authorize_1`);
+  });
+
+  it("an error from another copy of the SDK (no instanceof) is still classified, not left pending", async () => {
+    const id = await seedMilestone({ paypal_order_id: "ORDER1" });
+    const foreign = Object.assign(new Error("POST … failed with 415"), {
+      kind: "api", method: "POST", uri: "https://api-m.sandbox.paypal.com/v2/checkout/orders/ORDER1/authorize", status: 415, headers: new Headers(),
+      payload: { kind: "error7", body: { name: "UNSUPPORTED_MEDIA_TYPE", message: "The request payload is not supported", debugId: "d415" } },
+    });
+    const deps = depsWith(stubFetch(() => jsonResponse(500, {})));
+    deps.paypal = { orders: { authorizeOrder: () => Promise.reject(foreign) } } as unknown as typeof deps.paypal;
+    await assert.rejects(authorizeHold(id, "ORDER1", deps), (e: unknown) => e instanceof PaypalFailure && e.kind === "refused" && e.detail.status === 415);
+    assert.equal((await claimsFor(id))[0]!.status, "failed");
+  });
+
+  it("a non-PayPal error after the call marks the claim unknown, never pending", async () => {
+    const id = await seedMilestone({ paypal_order_id: "ORDER1" });
+    const deps = depsWith(stubFetch(() => jsonResponse(500, {})));
+    deps.paypal = { orders: { authorizeOrder: () => Promise.reject(new TypeError("boom")) } } as unknown as typeof deps.paypal;
+    await assert.rejects(authorizeHold(id, "ORDER1", deps), TypeError);
+    assert.equal((await claimsFor(id))[0]!.status, "unknown");
+  });
+
   it("a re-read that finds nothing leaves the outcome unknown, never failed", async () => {
     const id = await seedMilestone({ paypal_order_id: "ORDER1" });
     const stub = stubFetch(({ request }) => (request.method === "POST" ? connectionDrop() : jsonResponse(200, { id: "ORDER1", status: "APPROVED" })));

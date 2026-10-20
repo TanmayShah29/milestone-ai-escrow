@@ -168,6 +168,19 @@ After approval, PayPal redirects the buyer to `return_url?token=<ORDER_ID>&Payer
 
 ---
 
+### Authorize → capture → payout, end to end (Oct 20, 22:20 IST) [VERIFIED]
+Milestone app, $30 hold, client approved with the Visa on the sandbox client account:
+- Order `72M03063VF805480U` (intent AUTHORIZE) → authorization `1RE57454U10427202`, status CREATED, `expiration_time` 29 days out
+- Capture `3FR566719V476415N` ($30.00, `final_capture: true`) came back **COMPLETED immediately**
+- Payout batch `Q34XCPS6MF7GQ` ($28.50) → item `C5RNBFPAGJ8VL` **SUCCESS within ~15 s**
+
+Gotchas found on the way:
+- **`POST /v2/checkout/orders/{id}/authorize` with no `Content-Type` returns 415** `UNSUPPORTED_MEDIA_TYPE`. Send `Content-Type: application/json` and `{}`. With the TypeScript SDK, pass `body: {}` (it omits the header when there's no body). [VERIFIED]
+- `POST /v2/payments/authorizations/{id}/void` does **not** need a Content-Type (404 for a fake id with or without it, no 415). [VERIFIED]
+- Replaying `POST /v2/checkout/orders` with the **same `PayPal-Request-Id`** returns the **same order id**, not a new order. [VERIFIED]
+- The SDK's `prefer` header defaults to `return=minimal`, which omits `purchase_units[].payments` (the authorization id). Send `Prefer: return=representation`. [DOCS + SDK map]
+- After an approve, PayPal redirects to the return URL with `?token=<order id>&PayerID=...`.
+
 ## 4. Invoicing v2: bill someone, they pay through a link
 
 ```
