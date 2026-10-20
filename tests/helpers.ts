@@ -4,6 +4,7 @@ process.env.PAYPAL_ENVIRONMENT = "SANDBOX";
 process.env.PAYPAL_CLIENT_ID = "test-id";
 process.env.PAYPAL_CLIENT_SECRET = "test-secret";
 process.env.PLATFORM_FEE_BPS = "500";
+process.env.PAYPAL_WEBHOOK_ID = "WH-TEST";
 
 import { PaypalClient } from "paypal";
 import { db } from "@/lib/db";
@@ -47,7 +48,7 @@ export const connectionDrop = () => {
 };
 
 export async function resetDb() {
-  await db().query("truncate audit_log, money_actions, milestones cascade");
+  await db().query("truncate webhook_events, audit_log, money_actions, milestones cascade");
 }
 
 export async function seedMilestone(fields: Record<string, unknown> = {}): Promise<string> {
