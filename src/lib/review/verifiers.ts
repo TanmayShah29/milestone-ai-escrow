@@ -121,7 +121,7 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
       criteria: [...testVerdicts, ...mergeAi(reviewCriteria, reply)].sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1))),
       summary: reply?.summary || summarize(testVerdicts),
       feedbackForWorker: reply?.feedback_for_worker || failingFeedback(testVerdicts),
-      injection: { detected: quotes.length > 0 || !!reply?.injection_attempt, quotes: [...quotes, ...aiQuote].slice(0, 5) },
+      injection: { detected: quotes.length > 0 || !!reply?.injection_attempt, quotes: dedupe([...quotes, ...aiQuote]) },
       tampering,
       model,
       headSha: pr.headSha,
@@ -144,12 +144,18 @@ export async function verifyText(m: Milestone, terms: Terms, deps: VerifierDeps)
       criteria,
       summary: out.value.summary,
       feedbackForWorker: out.value.feedback_for_worker,
-      injection: { detected: quotes.length > 0 || out.value.injection_attempt, quotes: [...quotes, ...(out.value.injection_quote ? [out.value.injection_quote.slice(0, 200)] : [])].slice(0, 5) },
+      injection: { detected: quotes.length > 0 || out.value.injection_attempt, quotes: dedupe([...quotes, ...(out.value.injection_quote ? [out.value.injection_quote.slice(0, 200)] : [])]) },
       tampering: [],
       model: out.model,
       headSha: null,
     },
   };
+}
+
+/** The code scan and the model often quote the same line. */
+function dedupe(quotes: string[]): string[] {
+  const norm = (q: string) => q.replace(/^[\s/#*<!-]+/, "").trim().toLowerCase();
+  return quotes.filter((q, i) => quotes.findIndex((x) => norm(x) === norm(q)) === i).slice(0, 5);
 }
 
 function summarize(v: CriterionVerdict[]): string {

@@ -21,6 +21,12 @@
 
 Feature freeze **Nov 6**. Nov 7–8 README + hardening; Nov 9–10 video; Nov 11 submit + APIMatic usage form.
 
+### Progress
+- Oct 21: Phase 0 (audit fixes, auth, Neon), Phase 1 (contract compiled to tests) and Phase 2 (verifiers, policy,
+  objection window, auto-release, test-card funding) done. Verified live on Render + sandbox: good PR
+  (milestone-demo #1) went PASSED → auto-released → PAID_OUT with all four signed webhooks verified; bad PR (#2)
+  with a prompt-injection comment → CHANGES_REQUESTED, injection flagged, hold kept.
+
 ### Cut to the roadmap slide
 Negotiating agents, dispute evidence pack, partial-refund splits, AG Grid, Kernel / Elastic / Zapier,
 one hold spanning several milestones (partial captures unverified), Bryntum baselines and critical path.
