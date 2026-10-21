@@ -81,10 +81,10 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
   const due = t(m.due_at) ?? created + 7 * DAY;
   const s = m.state;
 
-  // What happened uses its real dates; what hasn't happened yet uses the plan. Every bar is at least an
-  // hour long so a phase that took seconds (a live demo run) is still visible after zoom-to-fit.
-  const HOUR = 3_600_000;
-  const span = (start: number, end: number) => [start, Math.max(end, start + HOUR)] as const;
+  // What happened uses its real dates; what hasn't happened yet uses the plan. Every bar is at least five
+  // minutes long so a phase that took seconds (a live demo run) is still visible after zoom-to-fit.
+  const MIN_BAR = 5 * 60_000;
+  const span = (start: number, end: number) => [start, Math.max(end, start + MIN_BAR)] as const;
   const [termsStart, termsEnd] = span(created, agreed ?? created + DAY);
   const holdStart = held ?? termsEnd;
   const [workStart, workEnd] = span(holdStart, submitted ?? Math.max(due, holdStart + DAY));
