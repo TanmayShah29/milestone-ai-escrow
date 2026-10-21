@@ -144,3 +144,14 @@ describe("repairing near-miss AI drafts", () => {
     assert.equal(fixed.testCommand, "node --test 'acceptance/*.test.ts'");
   });
 });
+
+describe("hand-written terms", () => {
+  it("can set the repository, which the fingerprint covers", async () => {
+    const { milestone } = await createMilestone({ title: "t", brief: "", amountCents: 100, freelancerEmail: "w@example.com" });
+    const a = await editTerms(milestone.id, sampleTerms, { repo: "acme/web" });
+    assert.equal(a.repo, "acme/web");
+    const b = await editTerms(milestone.id, sampleTerms, { repo: "acme/other" });
+    assert.notEqual(a.criteria_hash, b.criteria_hash);
+    await assert.rejects(editTerms(milestone.id, sampleTerms, { repo: "not a repo" }), InvariantViolation);
+  });
+});

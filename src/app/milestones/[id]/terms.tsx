@@ -131,8 +131,8 @@ export function TermsPanel(props: {
           <button onClick={add} className="rounded border border-black/15 dark:border-white/20 px-3 py-1 text-sm">
             Add criterion
           </button>
-          {dirty && (
-            <button disabled={!!busy} onClick={() => run("save", "edit-terms", { terms: draft })} className="rounded bg-blue-600 px-3 py-1 text-sm text-white disabled:opacity-50">
+          {(dirty || repo !== ((m.repo as string) ?? "")) && (
+            <button disabled={!!busy} onClick={() => run("save", "edit-terms", { terms: draft, repo })} className="rounded bg-blue-600 px-3 py-1 text-sm text-white disabled:opacity-50">
               {busy === "save" ? "Saving…" : "Save edits"}
             </button>
           )}

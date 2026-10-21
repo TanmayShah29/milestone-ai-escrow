@@ -143,6 +143,7 @@ export async function draftTerms(milestoneId: string, input: { repo?: string; st
     const m = await getMilestone(milestoneId);
     if (m.state !== "DRAFT") throw new InvariantViolation("terms can only be drafted before both sides agree");
     const repo = input.repo?.trim() || m.repo || null;
+    if (repo && !REPO.test(repo)) throw new InvariantViolation("repository must look like owner/name");
     const stack = input.stack?.trim() || m.stack || "TypeScript, node:test";
     const prompt = [
       `Milestone title: ${m.title}`,
@@ -157,14 +158,18 @@ export async function draftTerms(milestoneId: string, input: { repo?: string; st
   });
 }
 
-/** Client edits. Any change clears both signatures. */
-export async function editTerms(milestoneId: string, raw: unknown): Promise<Milestone> {
+const REPO = /^[\w.-]+\/[\w.-]+$/;
+
+/** Client edits (terms and, optionally, the repository). Any change clears both signatures. */
+export async function editTerms(milestoneId: string, raw: unknown, opts: { repo?: string } = {}): Promise<Milestone> {
   const parsed = termsSchema.safeParse(raw);
   if (!parsed.success) throw new InvariantViolation(`terms are not valid: ${parsed.error.issues[0]?.message ?? "invalid"}`);
+  const repo = opts.repo?.trim();
+  if (repo !== undefined && repo !== "" && !REPO.test(repo)) throw new InvariantViolation("repository must look like owner/name");
   return withMilestoneLock(milestoneId, async () => {
     const m = await getMilestone(milestoneId);
     if (m.state !== "DRAFT") throw new InvariantViolation("terms are locked once both sides agree");
-    return saveTerms(m, parsed.data, { repo: m.repo, stack: m.stack, model: m.criteria_model, actor: "client" });
+    return saveTerms(m, parsed.data, { repo: repo === undefined ? m.repo : repo || null, stack: m.stack, model: m.criteria_model, actor: "client" });
   });
 }
 

@@ -50,7 +50,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
       case "draft-terms":
         return done(await draftTerms(id, { repo: str(body.repo), stack: str(body.stack) }));
       case "edit-terms":
-        return done(await editTerms(id, body.terms));
+        return done(await editTerms(id, body.terms, { ...(str(body.repo) !== undefined ? { repo: str(body.repo) } : {}) }));
       case "sign-terms":
         return done(await signTerms(id, role, str(body.hash) ?? ""));
       case "fund": {
