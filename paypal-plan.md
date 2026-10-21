@@ -116,11 +116,11 @@ a released claim), sent as `PayPal-Request-Id` (money rule 2). Release on a prov
 
 State changes on `milestones` are conditional (`UPDATE … WHERE id=$1 AND state=$2`) so a second caller can't move the state twice.
 
-**UNKNOWN OUTCOMES** (`connection`, `timeout`, or a `decode` on a 2xx; the claim moves to `status='unknown'`)
+**UNKNOWN OUTCOMES** (`connection`, `timeout`, a `decode` on a 2xx, **or an `api` 5xx/408** (Oct 21 audit fix: a 5xx was counted as refused, which released the claim and let a retry get a new request id, a double-payout risk); the claim moves to `status='unknown'`)
 
 All writes share one path: `src/lib/money/flow.ts` `runWrite` catches, `classify()` (`src/lib/paypal/errors.ts`)
 returns `kind: "unknown"`, the claim is marked `unknown`, then `settle()` calls the spec's `reread` and, if found,
-`commit()` records it. Not found, or the re-read itself fails → `OutcomeUnknown` (HTTP 202), claim stays `unknown`.
+`commit()` records it. Not found, or the re-read itself fails → `OutcomeUnknown` (HTTP 202), claim stays `unknown`. A re-read that **proves** PayPal did not act returns `NOT_DONE` (authorize: order still APPROVED with no authorization; capture/void: authorization still CREATED) → claim released (`failed`), so a retry is safe. If storing the result fails after PayPal acted, `commit()` marks the claim `unknown` with the PayPal id in its own statement (never left `pending`). Pending claims older than 2 minutes (a crashed process) are settled like unknown ones. Every action runs under a per-milestone Postgres advisory lock (`withMilestoneLock`), so actions on one milestone never overlap.
 
 | Write | The operation you re-read with | The reference you search by | Where in the code | The test that fails the connection |
 | --- | --- | --- | --- | --- |

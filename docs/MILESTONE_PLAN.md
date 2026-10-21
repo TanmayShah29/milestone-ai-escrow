@@ -1,4 +1,50 @@
-# Milestone: build plan (text version of Milestone_Project_Plan.pdf)
+# Milestone: build plan
+
+> **Direction (decided Oct 21, after a five-agent audit).** Milestone is a **pay-on-proof layer on PayPal**:
+> any platform or AI agent can create a payment that is held on PayPal and released only when the outcome
+> is proven (tests, an AI judge, or a deterministic check). *The AI writes and checks the contract; only
+> code moves money.* The freelance GitHub-PR flow is the first use case and reference app. Workers can be
+> humans **or AI agents**. The sections below the "Pay-on-proof plan" are the original plan; where they
+> conflict, the new plan wins. `Milestone_Project_Plan.pdf` predates this change.
+
+## Pay-on-proof plan (Oct 21)
+
+### What we build (about 8–9 feature-days available)
+| # | Feature | Days |
+|---|---|---|
+| 0 | Fix audit bugs (stuck pending claim, 5xx counted as refused, raw-body webhook verify, auth, expired orders, payout failures), API keys per platform, move DB to Neon, test card-funded holds | 1.5 |
+| 1 | **Contract compiled into tests**: AI turns acceptance criteria into tests where possible; criteria hash locked into the PayPal order at funding | 2.5 |
+| 2 | **Verifier interface + reviewer + decision policy**: `code_pr` verifier (CI + AI review, prompt-injection resistant, posts a GitHub check run) and one cheap second verifier (text/document deliverable vs a rubric) | 3 |
+| 3 | **Escrow as an API + MCP server** (no money tools): create a conditional payment, attach a verifier, submit proof, check status. Demo: a coding agent takes a bounty, opens the PR, gets paid | 2 |
+| 4 | **Bryntum Gantt**: holds as dependencies, day-3 honor and day-29 expiry lines, agent rescheduling flags reauthorization | 2.5 |
+| 5 | Real UI (client / worker views, verdict card) + judge mode (`/demo` reset + seeded data, cached verdicts, keep-awake pinger) | 1.5 |
+
+Feature freeze **Nov 6**. Nov 7–8 README + hardening; Nov 9–10 video; Nov 11 submit + APIMatic usage form.
+
+### Cut to the roadmap slide
+Negotiating agents, dispute evidence pack, partial-refund splits, AG Grid, Kernel / Elastic / Zapier,
+one hold spanning several milestones (partial captures unverified), Bryntum baselines and critical path.
+
+### Prize targets
+Max one main prize + **one** sponsor prize per project. Targets: Best Use of PayPal + AI, Best Use of
+Agentic Commerce, main prizes; sponsor: **Bryntum** (primary), **APIMatic** (backup). Render prize is
+credits only: deploy there and credit it.
+
+### Free-tier constraints (the user will not add a card anywhere)
+- AI: free OpenRouter models only (50/day). Cache verdicts by commit SHA, pre-review demo PRs, rate-limit
+  live reviews per visitor, show which model answered, fall back to a labelled "replayed verdict".
+- Hosting: Render free web service (sleeps after 15 min; free pinger) + **Neon** free Postgres (Render's
+  free DB is deleted after 30 days, before judging ends Dec 15).
+- Render Workflows likely needs billing: use DB-backed jobs + a protected cron endpoint instead.
+
+### Video arc
+1. A freelancer is paid safely (relatable). 2. A bad PR tries to prompt-inject the reviewer; money stays
+held (trust). 3. An AI agent takes a bounty through the API and is paid (agentic). 4. "Same rails:
+bounties, agencies, agent-to-agent commerce" (scale).
+
+---
+
+# Original plan (Oct 20)
 
 ## Actors
 - **Client**: writes the brief, approves the PayPal hold, can object during the objection window

@@ -15,7 +15,15 @@ export type Claim = {
   request_id: string;
   status: ClaimStatus;
   paypal_id: string | null;
+  created_at: Date;
 };
+
+/** A pending claim older than this belongs to a call that crashed mid-flight: treat it as unknown. */
+export const STALE_PENDING_MS = 2 * 60_000;
+
+export function isStalePending(c: Claim): boolean {
+  return c.status === "pending" && Date.now() - new Date(c.created_at).getTime() > STALE_PENDING_MS;
+}
 
 /** Money rule 2: the PayPal-Request-Id is derived from the milestone id, the action and the attempt. */
 export function requestIdFor(milestoneId: string, action: MoneyAction, attempt: number): string {
@@ -24,7 +32,7 @@ export function requestIdFor(milestoneId: string, action: MoneyAction, attempt: 
 
 export type ClaimResult = { won: true; claim: Claim } | { won: false; claim: Claim };
 
-export async function claimAction(q: Queryable, milestoneId: string, action: MoneyAction): Promise<ClaimResult> {
+export async function claimAction(q: Queryable, milestoneId: string, action: MoneyAction, retried = false): Promise<ClaimResult> {
   const { rows: prior } = await q.query<{ n: string }>(
     "select count(*) as n from money_actions where milestone_id = $1 and action = $2 and status = 'failed'",
     [milestoneId, action],
@@ -40,7 +48,11 @@ export async function claimAction(q: Queryable, milestoneId: string, action: Mon
   } catch (err) {
     if (!isUniqueViolation(err)) throw err;
     const live = await liveClaim(q, milestoneId, action);
-    if (!live) throw err; // lost to a claim that was released in between; caller can retry
+    // Lost to a claim that was released in between: the next attempt number is free now.
+    if (!live) {
+      if (retried) throw err;
+      return claimAction(q, milestoneId, action, true);
+    }
     return { won: false, claim: live };
   }
 }
@@ -55,7 +67,9 @@ export async function liveClaim(q: Queryable, milestoneId: string, action: Money
 
 export async function unknownClaims(q: Queryable, milestoneId: string): Promise<Claim[]> {
   const { rows } = await q.query<Claim>(
-    "select * from money_actions where milestone_id = $1 and status = 'unknown' order by id",
+    `select * from money_actions where milestone_id = $1
+       and (status = 'unknown' or (status = 'pending' and created_at < now() - interval '2 minutes'))
+     order by id`,
     [milestoneId],
   );
   return rows;

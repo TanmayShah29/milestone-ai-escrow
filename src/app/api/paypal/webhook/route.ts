@@ -7,9 +7,10 @@ export const runtime = "nodejs";
 // PayPal webhook receiver. Verify first, act second (money rule 6). A non-2xx makes PayPal retry,
 // which is what we want when processing fails; a bad signature gets 400 and is never acted on.
 export async function POST(req: Request) {
+  const raw = await req.text();
   let event: WebhookEvent;
   try {
-    event = JSON.parse(await req.text()) as WebhookEvent;
+    event = JSON.parse(raw) as WebhookEvent;
     if (typeof event?.id !== "string" || typeof event?.event_type !== "string") throw new Error("not a webhook event");
   } catch {
     return json(400, { error: "invalid body" });
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
 
   let verified: boolean;
   try {
-    verified = await verifyWebhookSignature(req.headers, event);
+    verified = await verifyWebhookSignature(req.headers, raw);
   } catch (err) {
     console.error("webhook verification failed to run", err);
     return json(500, { error: "could not verify" });

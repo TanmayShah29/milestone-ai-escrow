@@ -28,19 +28,21 @@ describe("verifyWebhookSignature", () => {
   it("sends the transmission headers, our webhook id and the event, and trusts only SUCCESS", async () => {
     for (const [status, expected] of [["SUCCESS", true], ["FAILURE", false]] as const) {
       const stub = stubFetch(() => jsonResponse(200, { verification_status: status }));
-      const ok = await verifyWebhookSignature(signedHeaders, payoutSucceeded("x"), stub.fetch);
+      const raw = JSON.stringify(payoutSucceeded("x")).replace('"id"', ' "id"'); // odd spacing must survive verbatim
+      const ok = await verifyWebhookSignature(signedHeaders, raw, stub.fetch);
       assert.equal(ok, expected);
       const sent = JSON.parse(stub.calls[0]!.body!);
       assert.equal(stub.calls[0]!.url.pathname, "/v1/notifications/verify-webhook-signature");
       assert.equal(sent.webhook_id, "WH-TEST");
       assert.equal(sent.transmission_id, "tx-1");
       assert.equal(sent.webhook_event.id, "WH-EVT-1");
+      assert.ok(stub.calls[0]!.body!.endsWith(`"webhook_event":${raw}}`), "raw body spliced verbatim");
     }
   });
 
   it("rejects a request missing transmission headers without calling PayPal", async () => {
     const stub = stubFetch(() => jsonResponse(200, { verification_status: "SUCCESS" }));
-    assert.equal(await verifyWebhookSignature(new Headers(), payoutSucceeded("x"), stub.fetch), false);
+    assert.equal(await verifyWebhookSignature(new Headers(), JSON.stringify(payoutSucceeded("x")), stub.fetch), false);
     assert.equal(stub.calls.length, 0);
   });
 

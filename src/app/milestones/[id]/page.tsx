@@ -2,18 +2,23 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
+import { linkFor, rememberLink } from "@/lib/client/links";
 
 type Milestone = Record<string, unknown> & { id: string; title: string; state: string; amount_cents: number };
 type AuditRow = { id: number; actor: string; event: string; from_state: string | null; to_state: string | null; paypal_id: string | null; created_at: string };
 type ActionRow = { action: string; attempt: number; status: string; paypal_id: string | null };
 
-const ACTIONS: Record<string, { label: string; action: string }[]> = {
-  DRAFT: [{ label: "Freelancer accepts", action: "agree" }, { label: "Cancel", action: "cancel" }],
-  AGREED: [{ label: "Fund with PayPal hold", action: "fund" }, { label: "Cancel", action: "cancel" }],
-  FUNDED: [{ label: "Submit PR", action: "submit" }, { label: "Cancel (void hold)", action: "cancel" }, { label: "Reauthorize hold", action: "refresh-hold" }],
-  SUBMITTED: [{ label: "Dev: mark review passed", action: "dev-pass" }],
-  PASSED: [{ label: "Release (capture + payout)", action: "release" }],
-  RELEASED: [{ label: "Sync with PayPal", action: "sync" }],
+type Role = "client" | "worker";
+const C: Role[] = ["client"];
+const W: Role[] = ["worker"];
+const ANY: Role[] = ["client", "worker"];
+const ACTIONS: Record<string, { label: string; action: string; roles: Role[] }[]> = {
+  DRAFT: [{ label: "Accept the milestone", action: "agree", roles: W }, { label: "Cancel", action: "cancel", roles: C }],
+  AGREED: [{ label: "Fund with PayPal hold", action: "fund", roles: C }, { label: "Cancel", action: "cancel", roles: C }],
+  FUNDED: [{ label: "Submit PR", action: "submit", roles: W }, { label: "Cancel (void hold)", action: "cancel", roles: C }, { label: "Reauthorize hold", action: "refresh-hold", roles: C }],
+  SUBMITTED: [{ label: "Dev: mark review passed", action: "dev-pass", roles: C }],
+  PASSED: [{ label: "Release (capture + payout)", action: "release", roles: C }],
+  RELEASED: [{ label: "Sync with PayPal", action: "sync", roles: ANY }],
 };
 
 const cents = (v: unknown) => (typeof v === "number" ? `$${(v / 100).toFixed(2)}` : "—");
@@ -23,12 +28,42 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   const [data, setData] = useState<{ milestone: Milestone; audit: AuditRow[]; actions: ActionRow[] }>();
   const [msg, setMsg] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [as, setAs] = useState<Role>();
+  const [tokens, setTokens] = useState<{ client?: string; worker?: string }>({});
+  const token = as ? tokens[as] : undefined;
 
-  const load = useCallback(() => fetch(`/api/milestones/${id}`).then((r) => r.json()).then(setData), [id]);
+  // A shared link arrives as ?t=<token>: remember it, then drop it from the address bar.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const t = q.get("t");
+    if (t) {
+      rememberLink({ id, title: "", ...(t.startsWith("mwt_") ? { worker: t } : { client: t }) });
+      q.delete("t");
+      window.history.replaceState(null, "", `${window.location.pathname}${q.size ? `?${q}` : ""}`);
+    }
+    const held = linkFor(id);
+    setTokens({ client: held?.client, worker: held?.worker });
+    setAs(held?.client ? "client" : held?.worker ? "worker" : undefined);
+    const err = q.get("error");
+    if (err) setMsg(err);
+    else if (q.get("funded") === "pending") setMsg("PayPal is finishing the hold. Refresh in a moment.");
+  }, [id]);
+
+  const authed = useCallback((init: RequestInit = {}) => ({ ...init, headers: { ...(init.headers ?? {}), "x-milestone-token": token ?? "" } }), [token]);
+  const load = useCallback(() => {
+    if (!token) return;
+    fetch(`/api/milestones/${id}`, authed())
+      .then((r) => r.json())
+      .then((b) => {
+        if (b.error) setMsg(b.error);
+        else {
+          setData(b);
+          rememberLink({ id, title: b.milestone.title });
+        }
+      });
+  }, [id, token, authed]);
   useEffect(() => {
     load();
-    const err = new URLSearchParams(window.location.search).get("error");
-    if (err) setMsg(err);
   }, [load]);
 
   async function run(action: string) {
@@ -40,7 +75,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
       if (!prUrl) return setBusy(false);
       body.prUrl = prUrl;
     }
-    const r = await fetch(`/api/milestones/${id}/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const r = await fetch(`/api/milestones/${id}/${action}`, authed({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
     const b = await r.json();
     setBusy(false);
     if (action === "fund" && r.ok && b.approveUrl) {
@@ -51,7 +86,8 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
     load();
   }
 
-  if (!data?.milestone) return <main className="p-8">Loading…</main>;
+  if (!as) return <main className="p-8">You need this milestone&apos;s client or worker link to open it.</main>;
+  if (!data?.milestone) return <main className="p-8">{msg ?? "Loading…"}</main>;
   const m = data.milestone;
 
   return (
@@ -66,10 +102,25 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
         </p>
       </header>
 
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="opacity-60">Viewing as</span>
+        {(["client", "worker"] as const).map((r) => (
+          <button key={r} disabled={!tokens[r]} onClick={() => setAs(r)} className={`rounded px-2 py-0.5 border ${as === r ? "border-blue-600 bg-blue-600/10" : "border-black/15 dark:border-white/20"} disabled:opacity-30`}>
+            {r}
+          </button>
+        ))}
+      </div>
+      {as === "client" && tokens.worker && (
+        <p className="text-sm break-all">
+          <span className="opacity-60">Worker link (share with the freelancer or agent): </span>
+          <code>{`${typeof window !== "undefined" ? window.location.origin : ""}/milestones/${id}?t=${tokens.worker}`}</code>
+        </p>
+      )}
+
       {msg && <p className="rounded border border-amber-500/50 bg-amber-500/10 p-2 text-sm">{msg}</p>}
 
       <div className="flex flex-wrap gap-2">
-        {(ACTIONS[m.state] ?? []).map((a) => (
+        {(ACTIONS[m.state] ?? []).filter((a) => a.roles.includes(as)).map((a) => (
           <button key={a.action} disabled={busy} onClick={() => run(a.action)} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50">
             {a.label}
           </button>

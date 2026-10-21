@@ -39,6 +39,10 @@ function bodyFromRaw(raw: ArrayBuffer): unknown {
   }
 }
 
+export function isAmbiguousStatus(status: number): boolean {
+  return status >= 500 || status === 408;
+}
+
 const KINDS = new Set(["api", "decode", "encode", "connection", "timeout", "auth"]);
 
 function isPaypalError(err: unknown): err is PaypalError {
@@ -58,7 +62,11 @@ export function classify(err: unknown): PaypalFailure {
       // bytes (undeclared), so read it structurally instead of switching on arm tags.
       const p = err.payload as { body?: unknown; rawBody?: ArrayBuffer };
       const body = p.rawBody ? bodyFromRaw(p.rawBody) : p.body;
-      return new PaypalFailure("refused", `PayPal refused (${err.status})`, { status: err.status, ...reasonFrom(body) }, { cause: err });
+      // A 5xx or 408 is not a refusal: PayPal may have acted before failing. Treat it as unknown so
+      // the claim keeps its PayPal-Request-Id and a re-read settles it (a "refused" claim is released
+      // and the retry would get a new id, which could pay twice).
+      const kind = isAmbiguousStatus(err.status) ? "unknown" : "refused";
+      return new PaypalFailure(kind, `PayPal answered ${err.status}`, { status: err.status, ...reasonFrom(body) }, { cause: err });
     }
     case "decode":
       return err.status >= 200 && err.status < 300
@@ -82,7 +90,7 @@ export async function failureFromResponse(res: Response): Promise<PaypalFailure>
     body = undefined;
   }
   const b = body as { name?: string; message?: string; debug_id?: string; details?: { issue?: string; description?: string }[] } | undefined;
-  return new PaypalFailure("refused", `PayPal refused (${res.status})`, {
+  return new PaypalFailure(isAmbiguousStatus(res.status) ? "unknown" : "refused", `PayPal answered ${res.status}`, {
     status: res.status,
     reason: b?.details?.[0]?.description ?? b?.details?.[0]?.issue ?? b?.message,
     issue: b?.details?.[0]?.issue ?? b?.name,

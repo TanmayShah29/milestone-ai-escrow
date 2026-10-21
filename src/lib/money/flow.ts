@@ -1,13 +1,13 @@
 import { CheckoutPaymentIntent, OrderApplicationContextShippingPreference, type Order, type PaypalClient } from "paypal";
 import type { PoolClient } from "pg";
-import { db, tx } from "@/lib/db";
+import { db, tx, withMilestoneLock } from "@/lib/db";
 import { audit, getMilestone, transition, updateFields, type Actor, type Milestone } from "@/lib/milestones/repo";
 import { assertTransition, type MilestoneState } from "@/lib/milestones/states";
 import { PaypalFailure, classify } from "@/lib/paypal/errors";
 import { paypal } from "@/lib/paypal/client";
 import { createPayout, getPayout } from "@/lib/paypal/payouts";
 import { centsToValue, splitCapture, valueToCents } from "./amounts";
-import { claimAction, settleClaim, unknownClaims, type Claim, type MoneyAction } from "./claims";
+import { claimAction, isStalePending, settleClaim, unknownClaims, type Claim, type MoneyAction } from "./claims";
 
 // The only code that moves money (money rule 1). Every write follows paypal-plan.md 1b.1:
 // claim → PayPal call (with the claim's PayPal-Request-Id) → record the result, and on an unknown
@@ -25,14 +25,17 @@ export class InProgress extends Error {}
 export class OutcomeUnknown extends Error {}
 export class InvariantViolation extends Error {}
 
+/** Returned by a re-read that proves PayPal did not act: the claim is released and a retry is safe. */
+export const NOT_DONE = Symbol("not done");
+
 type WriteSpec<T> = {
   action: MoneyAction;
   actor: Actor;
   /** The PayPal call. Throw PaypalFailure("unknown") if a 2xx lacks the members we depend on. */
   call: (requestId: string) => Promise<T>;
-  /** Re-read PayPal after an unknown outcome. undefined = not found (still unknown). */
-  reread: (claim: Claim) => Promise<T | undefined>;
-  /** Store the result. Runs in a transaction with the claim being marked succeeded. */
+  /** Re-read PayPal after an unknown outcome. undefined = can't tell yet (still unknown); NOT_DONE = PayPal didn't act. */
+  reread: (claim: Claim) => Promise<T | undefined | typeof NOT_DONE>;
+  /** Store the result. Runs in one transaction with the claim being marked succeeded. */
   record: (c: PoolClient, result: T, claim: Claim) => Promise<Milestone>;
   paypalId: (result: T) => string;
 };
@@ -41,7 +44,7 @@ async function runWrite<T>(m: Milestone, spec: WriteSpec<T>): Promise<Milestone>
   const claimed = await claimAction(db(), m.id, spec.action);
   if (!claimed.won) {
     if (claimed.claim.status === "succeeded") return getMilestone(m.id);
-    if (claimed.claim.status === "unknown") return settle(m, spec, claimed.claim);
+    if (claimed.claim.status === "unknown" || isStalePending(claimed.claim)) return settle(m, spec, claimed.claim);
     throw new InProgress(`${spec.action} is already in progress for this milestone`);
   }
   const claim = claimed.claim;
@@ -64,21 +67,29 @@ async function runWrite<T>(m: Milestone, spec: WriteSpec<T>): Promise<Milestone>
       throw f;
     }
     await settleClaim(db(), claim.id, "unknown", { error: { message: f.message, ...f.detail } });
-    await audit(db(), { milestoneId: m.id, actor: "system", event: `${spec.action}:unknown`, detail: { message: f.message } });
+    await audit(db(), { milestoneId: m.id, actor: "system", event: `${spec.action}:unknown`, paypalDebugId: f.detail.debugId ?? null, detail: { message: f.message } });
     return settle(m, spec, claim);
   }
-  return commit(spec, result, claim);
+  return commit(m, spec, result, claim);
 }
 
-async function commit<T>(spec: WriteSpec<T>, result: T, claim: Claim): Promise<Milestone> {
-  return tx(async (c) => {
-    await settleClaim(c, claim.id, "succeeded", { paypalId: spec.paypalId(result) });
-    return spec.record(c, result, claim);
-  });
+async function commit<T>(m: Milestone, spec: WriteSpec<T>, result: T, claim: Claim): Promise<Milestone> {
+  try {
+    return await tx(async (c) => {
+      await settleClaim(c, claim.id, "succeeded", { paypalId: spec.paypalId(result) });
+      return spec.record(c, result, claim);
+    });
+  } catch (err) {
+    // PayPal acted but we couldn't store it. The transaction rolled the claim back to pending, so
+    // mark it unknown (with the PayPal id) in its own statement: a sync re-reads PayPal and records it.
+    await settleClaim(db(), claim.id, "unknown", { paypalId: spec.paypalId(result), error: { message: `record failed: ${String(err)}` } });
+    await audit(db(), { milestoneId: m.id, actor: "system", event: `${spec.action}:record_failed`, paypalId: spec.paypalId(result), detail: { error: String(err) } });
+    throw err;
+  }
 }
 
 async function settle<T>(m: Milestone, spec: WriteSpec<T>, claim: Claim): Promise<Milestone> {
-  let found: T | undefined;
+  let found: T | undefined | typeof NOT_DONE;
   try {
     found = await spec.reread(claim);
   } catch (err) {
@@ -86,8 +97,13 @@ async function settle<T>(m: Milestone, spec: WriteSpec<T>, claim: Claim): Promis
     throw new OutcomeUnknown(`PayPal outcome of ${spec.action} is unknown and the re-read failed (${f.message})`, { cause: f });
   }
   if (found === undefined) throw new OutcomeUnknown(`PayPal outcome of ${spec.action} is still unknown`);
+  if (found === NOT_DONE) {
+    await settleClaim(db(), claim.id, "failed", { error: { message: "re-read shows PayPal did not act" } });
+    await audit(db(), { milestoneId: m.id, actor: "system", event: `${spec.action}:not_done`, detail: { requestId: claim.request_id } });
+    throw new PaypalFailure("refused", `PayPal did not complete ${spec.action}; safe to retry`, { status: 502 });
+  }
   await audit(db(), { milestoneId: m.id, actor: "system", event: `${spec.action}:settled`, paypalId: spec.paypalId(found) });
-  return commit(spec, found, claim);
+  return commit(m, spec, found, claim);
 }
 
 function mockHeader(mock?: string) {
@@ -109,9 +125,15 @@ function readCreatedOrder(o: Order): CreatedOrder {
   return { orderId: o.id, approveUrl };
 }
 
-export async function createHold(milestoneId: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}): Promise<Milestone> {
-  const m = await getMilestone(milestoneId);
+async function createHoldLocked(milestoneId: string, deps: Deps, opts: { mock?: string }): Promise<Milestone> {
+  let m = await getMilestone(milestoneId);
   requireState(m, "AGREED");
+  if (m.paypal_order_id) {
+    // Reuse a live order; replace one that expired (unapproved orders lapse after a few hours) or was voided.
+    const status = await orderStatus(deps, m.paypal_order_id);
+    if (status !== "GONE" && status !== "VOIDED") return m;
+    m = await supersedeOrder(m, status);
+  }
   const send = (requestId: string) =>
     deps.paypal.orders
       .createOrder({
@@ -150,6 +172,28 @@ export async function createHold(milestoneId: string, deps: Deps = defaultDeps()
   });
 }
 
+async function orderStatus(deps: Deps, orderId: string): Promise<string> {
+  try {
+    return (await deps.paypal.orders.getOrder({ id: orderId })).status ?? "UNKNOWN";
+  } catch (err) {
+    const f = classify(err);
+    if (f.kind === "refused" && f.detail.status === 404) return "GONE";
+    throw f;
+  }
+}
+
+async function supersedeOrder(m: Milestone, status: string): Promise<Milestone> {
+  return tx(async (c) => {
+    await c.query(
+      `update money_actions set status = 'failed', error = $2, updated_at = now()
+       where milestone_id = $1 and action = 'create_order' and status = 'succeeded'`,
+      [m.id, JSON.stringify({ message: `superseded: order ${m.paypal_order_id} is ${status}` })],
+    );
+    await audit(c, { milestoneId: m.id, actor: "system", event: "order:superseded", paypalId: m.paypal_order_id, detail: { status } });
+    return updateFields(c, m.id, { paypal_order_id: null, approve_url: null });
+  });
+}
+
 // ---------------------------------------------------------------------------------------------
 // 8. Authorize after the client approved. The return URL carries ?token=<order id>.
 
@@ -161,7 +205,7 @@ function readAuthorization(units: Order["purchaseUnits"]): AuthInfo | undefined 
   return { authorizationId: a.id, status: a.status ?? "UNKNOWN", cents: valueToCents(a.amount.value), expiresAt: a.expirationTime ?? null };
 }
 
-export async function authorizeHold(milestoneId: string, returnedOrderId: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}): Promise<Milestone> {
+async function authorizeHoldLocked(milestoneId: string, returnedOrderId: string, deps: Deps, opts: { mock?: string }): Promise<Milestone> {
   const m = await getMilestone(milestoneId);
   // Only this milestone's own order may be authorized, whatever the return URL says.
   if (!m.paypal_order_id || returnedOrderId !== m.paypal_order_id) throw new InvariantViolation("that PayPal order does not belong to this milestone");
@@ -180,7 +224,12 @@ export async function authorizeHold(milestoneId: string, returnedOrderId: string
       if (a.status === "DENIED") throw new PaypalFailure("refused", "PayPal denied the authorization", { status: 422, reason: "Authorization denied", issue: "DENIED" });
       return a;
     },
-    reread: async () => readAuthorization((await deps.paypal.orders.getOrder({ id: orderId })).purchaseUnits),
+    reread: async () => {
+      const o = await deps.paypal.orders.getOrder({ id: orderId });
+      const a = readAuthorization(o.purchaseUnits);
+      if (a) return a;
+      return o.status === "APPROVED" ? NOT_DONE : undefined; // still approved, no authorization: PayPal didn't act
+    },
     paypalId: (a) => a.authorizationId,
     record: (c, a) =>
       transition(c, m, "FUNDED", "client", {
@@ -196,7 +245,7 @@ export async function authorizeHold(milestoneId: string, returnedOrderId: string
 
 type CaptureInfo = { captureId: string; status: string; cents: number };
 
-export async function releaseFunds(milestoneId: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}): Promise<Milestone> {
+async function releaseFundsLocked(milestoneId: string, deps: Deps, opts: { mock?: string }): Promise<Milestone> {
   let m = await getMilestone(milestoneId);
   if (m.state === "PASSED") {
     if (!m.paypal_authorization_id || !m.paypal_order_id || m.authorized_cents == null) throw new InvariantViolation("milestone has no hold to capture");
@@ -222,7 +271,9 @@ export async function releaseFunds(milestoneId: string, deps: Deps = defaultDeps
       },
       reread: async () => {
         const cap = (await deps.paypal.orders.getOrder({ id: orderId })).purchaseUnits?.[0]?.payments?.captures?.[0];
-        return cap?.id && cap.amount ? { captureId: cap.id, status: cap.status ?? "UNKNOWN", cents: valueToCents(cap.amount.value) } : undefined;
+        if (cap?.id && cap.amount) return { captureId: cap.id, status: cap.status ?? "UNKNOWN", cents: valueToCents(cap.amount.value) };
+        const auth = await deps.paypal.payments.getAuthorizedPayment({ authorizationId });
+        return auth.status === "CREATED" ? NOT_DONE : undefined; // hold untouched: PayPal didn't capture
       },
       paypalId: (c) => c.captureId,
       record: (c, cap) => {
@@ -272,7 +323,7 @@ async function payoutFreelancer(m: Milestone, deps: Deps): Promise<Milestone> {
 
 type VoidInfo = { authorizationId: string; status: string };
 
-export async function cancelHold(milestoneId: string, deps: Deps = defaultDeps()): Promise<Milestone> {
+async function cancelHoldLocked(milestoneId: string, deps: Deps): Promise<Milestone> {
   const m = await getMilestone(milestoneId);
   if (m.state === "DRAFT" || (m.state === "AGREED" && !m.paypal_authorization_id)) {
     // No hold exists yet; an unapproved order simply expires.
@@ -290,7 +341,8 @@ export async function cancelHold(milestoneId: string, deps: Deps = defaultDeps()
     },
     reread: async () => {
       const a = await deps.paypal.payments.getAuthorizedPayment({ authorizationId });
-      return a.status === "VOIDED" ? { authorizationId, status: a.status } : undefined;
+      if (a.status === "VOIDED") return { authorizationId, status: a.status };
+      return a.status === "CREATED" ? NOT_DONE : undefined;
     },
     paypalId: (v) => v.authorizationId,
     record: (c, v) => transition(c, m, "CANCELLED", "client", {}, { paypalId: v.authorizationId, event: "hold:voided", detail: { status: v.status } }),
@@ -304,7 +356,7 @@ const HOLD_STATES: MilestoneState[] = ["FUNDED", "SUBMITTED", "IN_REVIEW", "CHAN
 
 type ReauthInfo = { authorizationId: string; expiresAt: string | null };
 
-export async function refreshHold(milestoneId: string, deps: Deps = defaultDeps()): Promise<Milestone> {
+async function refreshHoldLocked(milestoneId: string, deps: Deps): Promise<Milestone> {
   const m = await getMilestone(milestoneId);
   requireState(m, ...HOLD_STATES);
   if (!m.paypal_authorization_id || !m.paypal_order_id) throw new InvariantViolation("milestone has no hold to refresh");
@@ -336,7 +388,7 @@ export async function refreshHold(milestoneId: string, deps: Deps = defaultDeps(
 // Sync: settle unknown outcomes, pay out once a pending capture completes, and mark PAID_OUT.
 // Webhooks (build step 3) will call the same paths.
 
-export async function syncMilestone(milestoneId: string, deps: Deps = defaultDeps()): Promise<Milestone> {
+async function syncMilestoneLocked(milestoneId: string, deps: Deps): Promise<Milestone> {
   let m = await getMilestone(milestoneId);
   for (const claim of await unknownClaims(db(), m.id)) {
     m = await resumeAction(m, claim, deps);
@@ -355,17 +407,29 @@ export async function syncMilestone(milestoneId: string, deps: Deps = defaultDep
   }
   if (m.state === "RELEASED" && m.paypal_payout_batch_id) {
     const p = await getPayout(m.paypal_payout_batch_id, deps.fetch);
-    if (p.itemStatus === "SUCCESS") {
-      m = await transition(db(), m, "PAID_OUT", "paypal", { payout_status: "SUCCESS", paypal_payout_item_id: p.itemId ?? null }, {
+    const status = p.itemStatus ?? p.batchStatus;
+    const itemId = p.itemId ? { paypal_payout_item_id: p.itemId } : {};
+    if (status === "SUCCESS") {
+      m = await transition(db(), m, "PAID_OUT", "paypal", { payout_status: "SUCCESS", ...itemId }, {
         paypalId: p.itemId ?? m.paypal_payout_batch_id,
         event: "payout:succeeded",
       });
-    } else if ((p.itemStatus ?? p.batchStatus) !== m.payout_status) {
-      m = await updateFields(db(), m.id, { payout_status: p.itemStatus ?? p.batchStatus, ...(p.itemId ? { paypal_payout_item_id: p.itemId } : {}) });
+    } else if (PAYOUT_FAILED_STATUSES.has(status)) {
+      // The money came back to the platform (bad email, blocked, returned): needs a person to act.
+      m = await transition(db(), m, "PAYOUT_FAILED", "paypal", { payout_status: status, ...itemId }, {
+        paypalId: p.itemId ?? m.paypal_payout_batch_id,
+        event: `payout:${status.toLowerCase()}`,
+      });
+    } else if (status !== m.payout_status) {
+      m = await updateFields(db(), m.id, { payout_status: status, ...itemId });
+      await audit(db(), { milestoneId: m.id, actor: "paypal", event: "payout:status", paypalId: p.itemId ?? m.paypal_payout_batch_id, detail: { status } });
     }
   }
   return m;
 }
+
+// UNCLAIMED is not here: PayPal holds it for 30 days while the receiver signs up.
+const PAYOUT_FAILED_STATUSES = new Set(["FAILED", "RETURNED", "BLOCKED", "DENIED", "REFUNDED", "REVERSED"]);
 
 /** Re-running the action finds its own unknown claim and settles it by re-read (see runWrite). */
 function resumeAction(m: Milestone, claim: Claim, deps: Deps): Promise<Milestone> {
@@ -375,3 +439,12 @@ function resumeAction(m: Milestone, claim: Claim, deps: Deps): Promise<Milestone
   if (claim.action === "void") return cancelHold(m.id, deps);
   return refreshHold(m.id, deps); // reauthorize_<n>: n is unchanged until the result is recorded
 }
+
+// Public entry points: every action on a milestone runs under its advisory lock (see withMilestoneLock).
+export const createHold = (id: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}) => withMilestoneLock(id, () => createHoldLocked(id, deps, opts));
+export const authorizeHold = (id: string, orderId: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}) =>
+  withMilestoneLock(id, () => authorizeHoldLocked(id, orderId, deps, opts));
+export const releaseFunds = (id: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}) => withMilestoneLock(id, () => releaseFundsLocked(id, deps, opts));
+export const cancelHold = (id: string, deps: Deps = defaultDeps()) => withMilestoneLock(id, () => cancelHoldLocked(id, deps));
+export const refreshHold = (id: string, deps: Deps = defaultDeps()) => withMilestoneLock(id, () => refreshHoldLocked(id, deps));
+export const syncMilestone = (id: string, deps: Deps = defaultDeps()) => withMilestoneLock(id, () => syncMilestoneLocked(id, deps));

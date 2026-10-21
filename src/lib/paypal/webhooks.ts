@@ -21,23 +21,26 @@ export function webhookId(): string {
   return id;
 }
 
-/** POST /v1/notifications/verify-webhook-signature. true only for verification_status SUCCESS. */
-export async function verifyWebhookSignature(headers: Headers, event: WebhookEvent, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+/**
+ * POST /v1/notifications/verify-webhook-signature. true only for verification_status SUCCESS.
+ * `rawBody` is the request body exactly as received: PayPal signed those bytes, so it is spliced into the
+ * request verbatim rather than re-serialized (re-encoding numbers or escapes can fail verification).
+ */
+export async function verifyWebhookSignature(headers: Headers, rawBody: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
   const h = Object.fromEntries(HEADERS.map((k) => [k, headers.get(k)]));
   if (HEADERS.some((k) => !h[k])) return false;
   const token = await accessToken(fetchImpl);
   const res = await send(fetchImpl, `${paypalBaseUrl()}/v1/notifications/verify-webhook-signature`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({
+    body: `${JSON.stringify({
       auth_algo: h["paypal-auth-algo"],
       cert_url: h["paypal-cert-url"],
       transmission_id: h["paypal-transmission-id"],
       transmission_sig: h["paypal-transmission-sig"],
       transmission_time: h["paypal-transmission-time"],
       webhook_id: webhookId(),
-      webhook_event: event,
-    }),
+    }).slice(0, -1)},"webhook_event":${rawBody}}`,
   });
   if (!res.ok) throw await failureFromResponse(res);
   const body = (await res.json().catch(() => undefined)) as { verification_status?: string } | undefined;

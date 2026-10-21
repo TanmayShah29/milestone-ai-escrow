@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Forbidden, Unauthorized } from "@/lib/auth";
 import { InProgress, InvariantViolation, OutcomeUnknown } from "@/lib/money/flow";
 import { NotFound, StaleState } from "@/lib/milestones/repo";
 import { InvalidTransition } from "@/lib/milestones/states";
@@ -7,6 +8,8 @@ import { PaypalFailure } from "@/lib/paypal/errors";
 // The one place errors become HTTP responses (paypal-plan.md 1b.4).
 export function toHttp(err: unknown): NextResponse {
   if (err instanceof NotFound) return json(404, { error: err.message });
+  if (err instanceof Unauthorized) return json(401, { error: err.message });
+  if (err instanceof Forbidden) return json(403, { error: err.message });
   if (err instanceof InvalidTransition || err instanceof StaleState || err instanceof InProgress) return json(409, { error: err.message });
   if (err instanceof InvariantViolation) return json(409, { error: err.message });
   if (err instanceof OutcomeUnknown) return json(202, { error: "Outcome unknown, checking with PayPal. Use sync to settle it.", unknown: true });

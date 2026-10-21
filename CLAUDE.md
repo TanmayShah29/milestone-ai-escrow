@@ -1,9 +1,9 @@
-# Milestone: AI escrow for freelance work
+# Milestone: pay-on-proof payments on PayPal
 
 PayPal AI Hackathon 2026 entry (Devpost). **Deadline: Nov 12, 2026 12:00 PM PST (Nov 13, 1:30 AM IST).**
 The user is in IST.
 
-A client funds a milestone with a PayPal **authorization hold**. The freelancer delivers (a GitHub PR, for now). An **AI reviewer** checks the work against acceptance criteria both sides agreed up front. Fixed rules then **capture** the hold and **pay out** the freelancer, or send it back for changes, a partial refund or a dispute.
+**Direction (Oct 21):** a pay-on-proof layer on PayPal. Any platform or AI agent creates a payment that is held on PayPal (authorization hold) and released only when the outcome is proven by a pluggable verifier (tests, an AI judge, a deterministic check). The AI writes and checks the contract; only code moves money. The first use case and reference app is freelance code work: a client funds a milestone, the worker (human **or AI agent**) delivers a GitHub PR, the `code_pr` verifier checks it against criteria both sides agreed up front, and fixed rules then **capture** the hold and **pay out**, or send it back for changes. The current plan, cuts and prize targets are at the top of `docs/MILESTONE_PLAN.md`.
 
 ## Key docs (read these before big decisions)
 - `docs/MILESTONE_PLAN.md`: states, transitions, API map, build order, demo script (text version of the PDF)
@@ -41,7 +41,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - **Repo layout**: the local folder isn't a git repo, and GitHub `milestone-ai-escrow` is empty. Proposed: make `/Users/tanmay/Paypal` the repo root (Next.js app at the root; docs/, scripts/, CLAUDE.md committed; agent-toolkit/ and .env gitignored). Confirm with the user before `git init`
 - **Local DB**: Homebrew PostgreSQL 14 is installed but not running. Start it with `brew services start postgresql@14` (ask first), create a `milestone` DB, and have the user add `DATABASE_URL=postgres://localhost:5432/milestone` to `.env`
 - **GITHUB_TOKEN** (needed at the reviewer step): ask the user for a fine-grained, read-only token for public repos, added to `.env`. Don't reuse the gh CLI token (it has full `repo` scope)
-- **Render ↔ GitHub** (needed at the first deploy, about Oct 27): the user must connect GitHub in the Render dashboard so Render can see `milestone-ai-escrow`
+- **Render**: done Oct 20. Free web service `milestone-ai-escrow` (`srv-dbbpughjfumc73d08ia0`, https://milestone-ai-escrow.onrender.com). The user will not add a card: free tiers only. Render's free Postgres (`dpg-dbbpubbrjlhs73eqglbg-a`) is deleted Nov 19, so the DB moves to Neon (free). Secrets (`DATABASE_URL`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`) are pasted by the user in the Render dashboard; non-secret env vars can be set through the Render MCP
 - **Bryntum trial**: start around Nov 1 (the 45-day trial must outlast judging, which ends Dec 15)
 
 ## Money rules (do not break these)

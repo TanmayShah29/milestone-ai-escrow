@@ -174,6 +174,8 @@ Milestone app, $30 hold, client approved with the Visa on the sandbox client acc
 - Capture `3FR566719V476415N` ($30.00, `final_capture: true`) came back **COMPLETED immediately**
 - Payout batch `Q34XCPS6MF7GQ` ($28.50) → item `C5RNBFPAGJ8VL` **SUCCESS within ~15 s**
 
+**Card-funded hold with no buyer login (Oct 21)** [VERIFIED]: `POST /v2/checkout/orders` with `intent: AUTHORIZE` and `payment_source.card` (test Visa `4005519200000004`, expiry `2030-12`, CVV `123`, US billing address) returned **COMPLETED in one call** with authorization `44524611HK036190R` (CREATED, expires in 29 days). No approve link, no browser. Voided it afterwards (204). This is the judge-friendly "Fund with test card" path.
+
 Gotchas found on the way:
 - **`POST /v2/checkout/orders/{id}/authorize` with no `Content-Type` returns 415** `UNSUPPORTED_MEDIA_TYPE`. Send `Content-Type: application/json` and `{}`. With the TypeScript SDK, pass `body: {}` (it omits the header when there's no body). [VERIFIED]
 - `POST /v2/payments/authorizations/{id}/void` does **not** need a Content-Type (404 for a fake id with or without it, no 415). [VERIFIED]

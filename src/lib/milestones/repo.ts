@@ -1,4 +1,5 @@
-import { db, type Queryable } from "@/lib/db";
+import { hashToken, newToken } from "@/lib/auth";
+import { db, tx, type Queryable } from "@/lib/db";
 import { assertTransition, type MilestoneState } from "./states";
 
 export type Milestone = {
@@ -27,6 +28,9 @@ export type Milestone = {
   payout_status: string | null;
   paypal_refund_id: string | null;
   paypal_dispute_id: string | null;
+  platform_id: string | null;
+  client_token_hash: string | null;
+  worker_token_hash: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -36,27 +40,34 @@ export type Actor = "client" | "freelancer" | "system" | "paypal" | "ai" | "dev"
 export class NotFound extends Error {}
 
 export async function getMilestone(id: string, q: Queryable = db()): Promise<Milestone> {
-  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new NotFound(`milestone ${id} not found`);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new NotFound(`milestone ${id} not found`);
   const { rows } = await q.query<Milestone>("select * from milestones where id = $1", [id]);
   if (!rows[0]) throw new NotFound(`milestone ${id} not found`);
   return rows[0];
 }
 
+/** Creates a milestone and returns its client and worker links' tokens. They are shown once; only hashes are kept. */
 export async function createMilestone(input: {
   title: string;
   brief: string;
   amountCents: number;
   freelancerEmail: string;
   clientEmail?: string;
-}): Promise<Milestone> {
-  const { rows } = await db().query<Milestone>(
-    `insert into milestones (title, brief, amount_cents, freelancer_email, client_email)
-     values ($1, $2, $3, $4, $5) returning *`,
-    [input.title, input.brief, input.amountCents, input.freelancerEmail, input.clientEmail ?? null],
-  );
-  const m = rows[0]!;
-  await audit(db(), { milestoneId: m.id, actor: "client", event: "created", toState: m.state });
-  return m;
+  platformId?: string;
+}): Promise<{ milestone: Milestone; clientToken: string; workerToken: string }> {
+  const clientToken = newToken("mct");
+  const workerToken = newToken("mwt");
+  const milestone = await tx(async (c) => {
+    const { rows } = await c.query<Milestone>(
+      `insert into milestones (title, brief, amount_cents, freelancer_email, client_email, platform_id, client_token_hash, worker_token_hash)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning *`,
+      [input.title, input.brief, input.amountCents, input.freelancerEmail, input.clientEmail ?? null, input.platformId ?? null, hashToken(clientToken), hashToken(workerToken)],
+    );
+    const m = rows[0]!;
+    await audit(c, { milestoneId: m.id, actor: "client", event: "created", toState: m.state, detail: input.platformId ? { platformId: input.platformId } : undefined });
+    return m;
+  });
+  return { milestone, clientToken, workerToken };
 }
 
 type AuditEntry = {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
 import { authorizedOrder, claimsFor, connectionDrop, depsWith, jsonResponse, resetDb, seedMilestone, stubFetch } from "./helpers";
 import { db } from "@/lib/db";
-import { authorizeHold, cancelHold, createHold, InvariantViolation, OutcomeUnknown, releaseFunds } from "@/lib/money/flow";
+import { authorizeHold, cancelHold, createHold, InvariantViolation, releaseFunds } from "@/lib/money/flow";
 import { claimAction } from "@/lib/money/claims";
 import { getMilestone } from "@/lib/milestones/repo";
 import { PaypalFailure } from "@/lib/paypal/errors";
@@ -110,11 +110,11 @@ describe("authorizeHold", () => {
     assert.equal((await claimsFor(id))[0]!.status, "unknown");
   });
 
-  it("a re-read that finds nothing leaves the outcome unknown, never failed", async () => {
+  it("a connection drop whose re-read shows the order still APPROVED (no authorization) releases the claim", async () => {
     const id = await seedMilestone({ paypal_order_id: "ORDER1" });
     const stub = stubFetch(({ request }) => (request.method === "POST" ? connectionDrop() : jsonResponse(200, { id: "ORDER1", status: "APPROVED" })));
-    await assert.rejects(authorizeHold(id, "ORDER1", depsWith(stub)), OutcomeUnknown);
-    assert.equal((await claimsFor(id))[0]!.status, "unknown");
+    await assert.rejects(authorizeHold(id, "ORDER1", depsWith(stub)), (e: unknown) => e instanceof PaypalFailure && e.kind === "refused");
+    assert.equal((await claimsFor(id))[0]!.status, "failed");
     assert.equal((await getMilestone(id)).state, "AGREED");
   });
 
