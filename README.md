@@ -31,6 +31,15 @@ createdb milestone_test
 npm test
 ```
 
+## Timeline (Bryntum Gantt)
+
+`/timeline` shows every milestone you hold as a Gantt project where **money drives the schedule**: the
+PayPal hold gates the work (finish-to-start dependencies), locked phases wait behind their money gate, a
+live hold shows its day-3 honor period and day-29 expiry, and the client drags the Work bar to move the due
+date. If the new date is past the hold's expiry, the hold turns orange and the app asks for a
+reauthorization. Milestones can follow one another as payment tranches. Built with the
+[Bryntum Gantt](https://bryntum.com/products/gantt/) trial.
+
 ## For AI agents: the Milestone MCP server
 
 An AI agent can work as the contractor: read the signed terms, accept them, open a PR, submit it and get

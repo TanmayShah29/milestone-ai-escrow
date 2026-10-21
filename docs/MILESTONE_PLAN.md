@@ -27,6 +27,13 @@ Feature freeze **Nov 6**. Nov 7–8 README + hardening; Nov 9–10 video; Nov 11
   (milestone-demo #1) went PASSED → auto-released → PAID_OUT with all four signed webhooks verified; bad PR (#2)
   with a prompt-injection comment → CHANGES_REQUESTED, injection flagged, hold kept.
 
+- Oct 21: Phase 3 (MCP server; an agent was paid for milestone-demo#3) and Phase 4 (Bryntum Gantt at /timeline:
+  phases + money-gate dependencies, honor/expiry/due indicators, drag-to-reschedule with hold-expiry warning,
+  payment tranches) done. `scripts/seed-demo.ts` seeds a three-milestone project for screenshots/judge mode.
+  Bryntum notes: the trial is the public npm alias (no account, no card, watermark); the React wrapper takes
+  `<name>Feature` props (a `features` object is silently ignored); `fields` on a TaskModel subclass must be a
+  static getter.
+
 ### Cut to the roadmap slide
 Negotiating agents, dispute evidence pack, partial-refund splits, AG Grid, Kernel / Elastic / Zapier,
 one hold spanning several milestones (partial captures unverified), Bryntum baselines and critical path.
