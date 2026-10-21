@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import type { NextResponse } from "next/server";
 import { tx } from "@/lib/db";
 import { json } from "@/lib/http";
@@ -21,9 +21,16 @@ export function clientIp(req: Request): string {
   return xff || "unknown";
 }
 
-/** A limit key for this caller's IP, hashed so the table never holds an address. */
+/**
+ * A limit key for this caller's IP, hashed so the table never holds an address. With RATE_LIMIT_SALT set,
+ * the hash is keyed by a secret, so the stored hashes can't be reversed by hashing every IPv4 address.
+ * Unset (local dev, tests), it falls back to a fixed prefix: still no raw IPs, but guessable.
+ */
 export function ipKey(req: Request, scope: string): string {
-  const h = createHash("sha256").update(`milestone-rl:${clientIp(req)}`).digest("hex");
+  const salt = process.env.RATE_LIMIT_SALT;
+  const h = salt
+    ? createHmac("sha256", salt).update(clientIp(req)).digest("hex")
+    : createHash("sha256").update(`milestone-rl:${clientIp(req)}`).digest("hex");
   return `${scope}:ip:${h}`;
 }
 

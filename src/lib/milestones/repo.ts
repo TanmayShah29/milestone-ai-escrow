@@ -42,6 +42,7 @@ export type Milestone = {
   deliverable_text: string | null;
   release_after: Date | null;
   contested_at: Date | null;
+  human_check_at: Date | null;
   due_at: Date;
   after_milestone_id: string | null;
   client_token_hash: string | null;
@@ -132,6 +133,8 @@ export async function transition(
   auditExtra: Partial<Pick<AuditEntry, "paypalId" | "paypalDebugId" | "detail" | "event">> = {},
 ): Promise<Milestone> {
   assertTransition(m.state, to);
+  // Every entry into HUMAN_CHECK restarts its clock (the post-objection decision deadline runs from here).
+  if (to === "HUMAN_CHECK" && !("human_check_at" in set)) set = { ...set, human_check_at: new Date() };
   const cols = Object.keys(set);
   const assignments = cols.map((c, i) => `${c} = $${i + 3}`);
   const { rows } = await q.query<Milestone>(

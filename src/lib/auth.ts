@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { db } from "@/lib/db";
 import type { Milestone } from "@/lib/milestones/repo";
+import { humanCheckDeadline } from "@/lib/review/deadlines";
 
 // Who may do what. A milestone has a client link and a worker link (capability tokens); a platform
 // (marketplace or AI agent) uses an API key and acts as the paying side of the milestones it created.
@@ -59,10 +60,10 @@ export function requireRole(role: Role, ...allowed: Role[]): void {
   if (!allowed.includes(role)) throw new Forbidden(`Only the ${allowed.join(" or ")} can do that.`);
 }
 
-/** Never send token hashes to a browser. */
+/** Never send token hashes to a browser. Adds decide_by: the post-objection HUMAN_CHECK deadline, or null. */
 export function publicMilestone(m: Milestone) {
   const { client_token_hash: _c, worker_token_hash: _w, ...rest } = m;
   void _c;
   void _w;
-  return rest;
+  return { ...rest, decide_by: humanCheckDeadline(m) };
 }

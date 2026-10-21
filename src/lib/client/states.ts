@@ -21,6 +21,9 @@ export type MilestoneView = Record<string, unknown> & {
   payout_status?: string | null;
   release_after?: string | null;
   contested_at?: string | null;
+  /** Set only for a HUMAN_CHECK after an objection: undecided by then, the money releases to the worker. */
+  decide_by?: string | null;
+  human_check_at?: string | null;
   due_at?: string | null;
   paypal_authorization_id?: string | null;
 };
@@ -104,6 +107,20 @@ export function holdExpiryWarning(m: MilestoneView): string | undefined {
   return `Work is due ${shortDate(due)}, after the PayPal hold expires ${shortDate(expiry)}. Move the date earlier; holds can't be extended past 29 days.`;
 }
 
+/**
+ * The post-objection decision deadline as words for each side, or undefined when there is none (a
+ * HUMAN_CHECK reached without an objection waits for the client with no deadline).
+ */
+export function decideByCopy(m: MilestoneView, role: Role): string | undefined {
+  if (m.state !== "HUMAN_CHECK" || !m.decide_by) return undefined;
+  const d = new Date(m.decide_by);
+  if (Number.isNaN(d.getTime())) return undefined;
+  const date = d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return role === "client"
+    ? `Decide by ${date}; after that the payment releases to the worker, because the work passed its first review.`
+    : `If the client doesn't decide by ${date}, you're paid.`;
+}
+
 /** Where the money is right now, in one line. */
 export function moneyLine(m: MilestoneView): { headline: string; detail: string; tone: Tone } {
   const held = m.authorized_cents ?? m.amount_cents;
@@ -154,6 +171,7 @@ const EVENT_COPY: Record<string, string> = {
   "review:human_check": "Sent to the client to decide",
   "review:approved_by_client": "Client approved the work",
   "review:changes_by_client": "Client asked for changes",
+  "review:human_timeout": "Client didn't decide in 72 hours; releasing to the worker",
   "review:comment_failed": "Could not comment on the PR",
   "review:dev-pass": "Review marked passed (dev)",
   "release:objected": "Client objected; money stays held for a second review",

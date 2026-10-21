@@ -37,8 +37,21 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - Holds: 3-day honor period, valid 29 days. Reauthorize after day 3. Refunds need the **capture id**
 - Force errors with the `PayPal-Mock-Response: {"mock_application_codes":"INSTRUMENT_DECLINED"}` header
 
-## Current status (updated Oct 21, end of session)
-**Phases 0–5 of `docs/MILESTONE_PLAN.md` are done and live.** Next: README + submission polish, then the demo video. Feature freeze Nov 6.
+## Current status (updated Oct 22)
+**Phases 0–5 of `docs/MILESTONE_PLAN.md` are done and live, plus two audit rounds (Oct 21–22).** Next: the demo video, the Bryntum license, then submission. Feature freeze Nov 6.
+- **Audit rounds shipped:**
+  - Verifier hardening, together with the milestone-demo `run-tests.mjs` harness and check names `acceptance (Cn) terms <hash>`. The app and demo repo must stay in step.
+  - Stale and weak tests block signing (AI tests must fail against an empty stub; `src/lib/contract/testcheck.ts`).
+  - Objection: one second review on the same commit. If it passes, release at the objection + 72h. A post-objection HUMAN_CHECK auto-releases after 72h.
+  - Due dates are capped at the hold's life. Reauthorize: once, days 4–29, no extension [VERIFIED].
+  - Dispute webhooks move a milestone to DISPUTE.
+  - Per-IP rate limits. `/api/status` no longer shows raw errors. `ALLOW_DEV_ACTIONS=0` in production.
+  - Multiparty is NO-GO in the sandbox (`docs/MULTIPARTY.md`).
+- **Docs:** the README has the threat model and limits; `docs/DEVPOST.md` has the submission text and video outline (YouTube link still a placeholder).
+- **Open user actions (Oct 22):**
+  - Set `RATE_LIMIT_SALT` on Render (`openssl rand -hex 32`).
+  - Drag a Work bar once in a real browser to confirm it saves.
+  - Optionally ask in Discord about `platform_fees` for hackathon apps.
 - **Live app:** https://milestone-ai-escrow.onrender.com (Render free web service `srv-dbbpughjfumc73d08ia0`, auto-deploys from `main`; `/api/health` reports the live commit). Workspace `tea-dbbntvgn74is73daou00`. The user will not add a card anywhere: free tiers only.
 - **DB:** Neon free (project `milestone` / `ancient-bonus-35699012`, branch `production`, never expires). Local dev: Postgres 14 DBs `milestone` and `milestone_test`. Migrations run at startup (`npm run db:migrate`).
 - **Render env:** `DATABASE_URL`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `OPENROUTER_API_KEY`, `GITHUB_TOKEN` (fine-grained, PR read/write on milestone-demo only; fine-grained tokens have no Checks permission and public check runs need none) were pasted by the user. Non-secret vars (`APP_URL`, `PAYPAL_ENVIRONMENT`, `PAYPAL_WEBHOOK_ID=2JC020923H9067634`, `AI_MODEL*`, `AI_DAILY_CAP=40`, `PLATFORM_FEE_BPS`, `NODE_VERSION`, `ALLOW_DEV_ACTIONS=1`) were set through the Render MCP. Turn `ALLOW_DEV_ACTIONS` off before submission.

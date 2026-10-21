@@ -75,6 +75,26 @@ describe("rate limit helpers", () => {
     assert.match(rows[0]!.key, /^create:ip:[0-9a-f]{64}$/);
   });
 
+  it("keys the IP hash with RATE_LIMIT_SALT when set", () => {
+    const req = new Request("http://localhost/", { headers: { "cf-connecting-ip": "203.0.113.9" } });
+    const prev = process.env.RATE_LIMIT_SALT;
+    try {
+      delete process.env.RATE_LIMIT_SALT;
+      const unsalted = ipKey(req, "create");
+      process.env.RATE_LIMIT_SALT = "salt-a";
+      const a = ipKey(req, "create");
+      process.env.RATE_LIMIT_SALT = "salt-b";
+      const b = ipKey(req, "create");
+      assert.match(a, /^create:ip:[0-9a-f]{64}$/);
+      assert.notEqual(a, unsalted);
+      assert.notEqual(a, b);
+      assert.equal(ipKey(req, "create"), b, "stable for the same salt and IP");
+    } finally {
+      if (prev === undefined) delete process.env.RATE_LIMIT_SALT;
+      else process.env.RATE_LIMIT_SALT = prev;
+    }
+  });
+
   it("records nothing when any rule is over its limit", async () => {
     await hit([{ key: "a", limit: 1, windowMs: HOUR }]);
     const v = await hit([{ key: "b", limit: 5, windowMs: HOUR }, { key: "a", limit: 1, windowMs: HOUR }]);

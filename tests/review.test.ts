@@ -10,7 +10,7 @@ import type { CheckRun, GitHub, PrFile, PullRequest } from "@/lib/review/github"
 import { decide, type Verdict } from "@/lib/review/policy";
 import { scanForInjection } from "@/lib/review/injection";
 import { acceptanceCheckName } from "@/lib/review/verifiers";
-import { humanDecision, objectionReleaseMs, objectToRelease, reviewMilestone, submitDeliverable, tick, type ReviewDeps } from "@/lib/review/run";
+import { humanCheckDeadline, humanDecision, objectionReleaseMs, objectToRelease, reviewMilestone, submitDeliverable, tick, tickAll, type ReviewDeps } from "@/lib/review/run";
 
 beforeEach(resetDb);
 after(() => db().end());
@@ -314,6 +314,54 @@ describe("objection: one second review on the same commit", () => {
     await db().query("update milestones set contested_at = now() - interval '73 hours' where id = $1", [id]);
     const m = await tick(id, deps(gh, busy.call));
     assert.equal(m.state, "HUMAN_CHECK");
+  });
+
+  it("a post-objection HUMAN_CHECK the client leaves undecided for 72 h releases to the worker", async () => {
+    const { id, body, c1 } = await objected();
+    const busy = recorder(async () => {
+      throw new APICallError({ message: "rate limited", url: "https://openrouter.ai", requestBodyValues: {}, statusCode: 429, isRetryable: true });
+    });
+    const { gh } = fakeGitHub({ body, runs: [run("contract", "success"), run(c1, "success")] });
+    await db().query("update milestones set contested_at = now() - interval '73 hours' where id = $1", [id]);
+    const m = await tick(id, deps(gh, busy.call));
+    assert.equal(m.state, "HUMAN_CHECK");
+    assert.ok(m.human_check_at, "entering HUMAN_CHECK starts its clock");
+    assert.equal(humanCheckDeadline(m)!.getTime(), m.human_check_at!.getTime() + objectionReleaseMs());
+
+    // Within the 72 h: nothing happens, no PayPal call.
+    const early = releaseStub();
+    assert.equal((await tick(id, { github: gh, aiCall: busy.call, money: depsWith(early) })).state, "HUMAN_CHECK");
+    assert.equal(early.calls.length, 0);
+    assert.deepEqual(await tickAll({ github: gh, aiCall: busy.call, money: depsWith(early) }), [], "tickAll skips it until the deadline");
+
+    // 72 h later, tickAll picks it up: PASSED (release_after = now), then the usual release path.
+    await db().query("update milestones set human_check_at = now() - interval '72 hours 1 second' where id = $1", [id]);
+    const late = releaseStub();
+    assert.deepEqual(await tickAll({ github: gh, aiCall: busy.call, money: depsWith(late) }), [{ id, state: "RELEASED" }]);
+    const done = await getMilestone(id);
+    assert.equal(done.paypal_payout_batch_id, "B1");
+    const { rows } = await db().query("select actor, from_state, to_state from audit_log where milestone_id = $1 and event = 'review:human_timeout'", [id]);
+    assert.deepEqual(rows, [{ actor: "system", from_state: "HUMAN_CHECK", to_state: "PASSED" }]);
+  });
+
+  it("a HUMAN_CHECK without an objection never auto-releases", async () => {
+    const { id, body, c1 } = await submitted();
+    const { gh } = fakeGitHub({ body, files: [{ filename: ".github/workflows/milestone.yml", status: "modified", additions: 1, deletions: 0, patch: "+x" }], runs: [run("contract", "success"), run(c1, "success")] });
+    const m = await reviewMilestone(id, deps(gh));
+    assert.equal(m.state, "HUMAN_CHECK");
+    assert.equal(humanCheckDeadline(m), null);
+    await db().query("update milestones set human_check_at = now() - interval '30 days', updated_at = now() - interval '30 days' where id = $1", [id]);
+    const stub = releaseStub();
+    assert.deepEqual(await tickAll({ github: gh, money: depsWith(stub) }), []);
+    assert.equal((await tick(id, { github: gh, money: depsWith(stub) })).state, "HUMAN_CHECK");
+    assert.equal(stub.calls.length, 0);
+  });
+
+  it("asking for changes on a post-objection HUMAN_CHECK clears the objection", async () => {
+    const id = await seedMilestone({ state: "HUMAN_CHECK", contested_at: new Date(), human_check_at: new Date() });
+    const m = await humanDecision(id, false);
+    assert.equal(m.state, "CHANGES_REQUESTED");
+    assert.equal(m.contested_at, null);
   });
 
   it("can't object after the window closes", async () => {

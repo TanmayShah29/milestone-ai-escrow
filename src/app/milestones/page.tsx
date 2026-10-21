@@ -41,18 +41,23 @@ export default function Milestones() {
 
       {!rows && <p className="mt-10 text-ink-2" aria-busy="true">Loading…</p>}
       {rows && rows.length === 0 && (
-        <div className="mt-10 rounded-lg border border-dashed border-rule-strong p-8">
-          <p className="font-medium">No milestones here yet.</p>
-          <p className="mt-1 text-sm text-ink-2">Create one, open a link someone sent you, or try the guided demo.</p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Link href="/new" className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink no-underline">
-              New milestone
+        <section className="mt-10 max-w-2xl border-t border-rule pt-8" aria-labelledby="empty-title">
+          <h2 id="empty-title" className="text-lg font-semibold text-ink">
+            This browser holds no milestones yet
+          </h2>
+          <p className="mt-2 text-ink-2">
+            There are no accounts: each milestone opens from a private link, and the ones you create or open here are listed on this page. The demo walks through a
+            full run, from signed terms to a PayPal hold to payment on proof, in the sandbox.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Link href="/demo" className="inline-flex items-center justify-center rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-accent-ink no-underline hover:opacity-90">
+              Try the demo, no login
             </Link>
-            <Link href="/demo" className="rounded-md border border-rule-strong px-4 py-2 text-sm no-underline">
-              Try the demo
+            <Link href="/new" className="inline-flex items-center justify-center rounded-md border border-rule-strong bg-panel px-4 py-2.5 text-sm font-medium text-ink no-underline hover:bg-paper">
+              Create a milestone
             </Link>
           </div>
-        </div>
+        </section>
       )}
       {rows && rows.length > 0 && (
         <ul className="mt-8 divide-y divide-rule border-y border-rule">

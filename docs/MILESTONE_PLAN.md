@@ -34,6 +34,19 @@ Feature freeze **Nov 6**. Nov 7–8 README + hardening; Nov 9–10 video; Nov 11
   `<name>Feature` props (a `features` object is silently ignored); `fields` on a TaskModel subclass must be a
   static getter.
 
+- Oct 22: Round 1 + 2 audit fixes. Verifier hardening (exactly one `Milestone-Terms` line; only `github-actions`
+  runs named with the full hash count; harness escapes flagged), "tests that bite" (AI tests must fail on an
+  empty stub in a sandboxed child process before signing), objection = one second review on the same commit
+  with a different model, post-objection HUMAN_CHECK deadline (72 h, then release), honest 29-day holds
+  (due date capped; no scheduled reauthorize), dispute webhooks, Postgres-backed per-IP rate limits.
+  Multiparty spike: NO-GO in sandbox (`docs/MULTIPARTY.md`). PARTIAL_REFUND was removed.
+
+### Current status (Oct 22)
+Phases 0–5 are done and live at https://milestone-ai-escrow.onrender.com. Submission docs: `README.md`
+(including the threat model) and `docs/DEVPOST.md` (Devpost text + video outline). Next: video, then
+submission. The live states, transitions and policy are in `src/lib/milestones/states.ts` and
+`src/lib/review/policy.ts`; the "Original plan" tables below are corrected to match them.
+
 ### Cut to the roadmap slide
 Negotiating agents, dispute evidence pack, partial-refund splits, AG Grid, Kernel / Elastic / Zapier,
 one hold spanning several milestones (partial captures unverified), Bryntum baselines and critical path.
@@ -63,7 +76,7 @@ bounties, agencies, agent-to-agent commerce" (scale).
 - **Client**: writes the brief, approves the PayPal hold, can object during the objection window
 - **Freelancer**: accepts the criteria, submits a GitHub PR, receives the payout
 - **Milestone app**: orchestrates everything and is the only thing that calls money APIs
-- **AI reviewer** (free OpenRouter model, set by `AI_MODEL`): writes criteria, reviews deliverables, proposes splits, drafts dispute evidence
+- **AI reviewer** (free OpenRouter model, set by `AI_MODEL`): drafts criteria and acceptance tests, reviews only the criteria tests can't check, and runs one second review (different model) after an objection. *(Splits and dispute evidence were cut.)*
 - **PayPal**: orders, authorizations, captures, payouts, refunds, disputes, webhooks
 
 ## Happy path (15 steps)
@@ -80,35 +93,45 @@ bounties, agencies, agent-to-agent commerce" (scale).
 | 9 | Freelancer → App | submit deliverable (PR URL) | Deliver + review |
 | 10 | App → AI | review against criteria | Deliver + review |
 | 11 | AI → App | per-criterion verdict + evidence + confidence (JSON) | Deliver + review |
-| 12 | App → Client | review report; objection window (48 h, 2 min in demo) | Deliver + review |
+| 12 | App → Client | review report; objection window (`OBJECTION_WINDOW_SECONDS`: 2 min on the live demo, ~48 h intended for real use) | Deliver + review |
 | 13 | App → PayPal | `POST /v2/payments/authorizations/{id}/capture` | Release |
 | 14 | App → PayPal | `POST /v1/payments/payouts` (amount minus fee) | Release |
 | 15 | PayPal → Freelancer | money arrives; `PAYMENT.PAYOUTS-ITEM.SUCCEEDED` webhook to the app | Release |
 
 ## Milestone states
 `DRAFT → AGREED → FUNDED → SUBMITTED → IN_REVIEW → PASSED → RELEASED → PAID_OUT`
+(side states: CHANGES_REQUESTED, HUMAN_CHECK, CONTESTED, PAYOUT_FAILED, DISPUTE, CANCELLED)
 
 | Transition | Trigger | PayPal call |
 |---|---|---|
 | AGREED → FUNDED | client approves the hold | create order (AUTHORIZE) + authorize |
 | FUNDED → CANCELLED | both cancel before submission | void authorization |
 | IN_REVIEW → CHANGES_REQUESTED | a must-have criterion fails | none (back to SUBMITTED on resubmit) |
-| IN_REVIEW → HUMAN_CHECK | confidence < 0.8 | none (client decides) |
+| IN_REVIEW → HUMAN_CHECK | a must is unclear or confidence < 0.8, injection detected, protected files edited or a harness escape | none (client decides; no deadline unless after an objection) |
+| HUMAN_CHECK → PASSED / CHANGES_REQUESTED | client approves / asks for changes (asking clears the objection) | none |
+| HUMAN_CHECK → PASSED (timeout) | post-objection human check undecided 72 h after it started (`human_check_at`) | none; then the normal capture + payout |
 | IN_REVIEW → PASSED | all musts pass and confidence ≥ 0.8 | none |
 | PASSED → RELEASED | objection window ends with no objection | capture authorization |
 | RELEASED → PAID_OUT | capture completed (webhook) | payout |
-| PASSED → CONTESTED | client objects | none |
-| CONTESTED → PARTIAL_REFUND | both accept the AI-proposed split | capture partial, void the rest |
-| CONTESTED → DISPUTE | no agreement | AI drafts the evidence pack |
-| FUNDED (day 3+) | daily `refreshHolds` job | reauthorize |
+| PASSED → CONTESTED | client objects inside the window (once per approval) | none; money stays held |
+| CONTESTED → PASSED | the one second review (same commit, different model, CI re-read) passes | none; release 72 h after the objection |
+| CONTESTED → CHANGES_REQUESTED | the second review fails a must | none; objection cleared |
+| CONTESTED → HUMAN_CHECK | the second review says human check, or no usable second review within 72 h | none; 72 h decision deadline |
+| RELEASED → PAYOUT_FAILED | payout item FAILED / RETURNED / BLOCKED / … | none (a person follows up) |
+| RELEASED or PAID_OUT → DISPUTE | verified `CUSTOMER.DISPUTE.CREATED` webhook | none; answered on PayPal |
+| any hold state | client's `refresh-hold` action only (no scheduled job) | reauthorize: once, days 4–29, does **not** extend the 29 days [VERIFIED Oct 22: `REAUTHORIZATION_TOO_SOON` before day 4] |
+
+*PARTIAL_REFUND and the AI-drafted dispute evidence pack were removed. Due dates are capped at the hold's
+expiry minus 3 days; longer work is split into milestones.*
 
 ## Decision policy (deterministic code, not the model)
 - Any `must` criterion = fail → CHANGES_REQUESTED, with the AI's feedback
-- Any `must` = unclear, or overall confidence < 0.8 → HUMAN_CHECK
+- Protected files edited, a harness escape, or prompt injection detected → HUMAN_CHECK
+- Any `must` = unclear, or its confidence < 0.8, or no must criteria → HUMAN_CHECK
 - All `must` = pass and confidence ≥ 0.8 → PASSED (starts the objection window)
 
 ## Reviewer agent
-- Tools (read-only): fetch PR metadata and diff, list changed files, read a file, get CI check status. Later: screenshots and docs
+- *As built:* no tool loop. Code fetches the PR, diff and check runs; tested criteria come from CI; the model gets one structured call for the untested criteria only. *(Original idea: read-only tools to fetch PR metadata, files and CI status.)*
 - Output JSON: `{ criteria: [{ id, verdict: pass|fail|unclear, evidence: [quotes/links], confidence }], summary, feedback_for_freelancer }`
 - It has no access to money APIs
 
@@ -118,12 +141,12 @@ bounties, agencies, agent-to-agent commerce" (scale).
 | Create hold order | `POST /v2/checkout/orders` (intent AUTHORIZE) | ✅ returns CREATED with an approve link |
 | Authorize | `POST /v2/checkout/orders/{id}/authorize` | ✅ Oct 20 (needs Content-Type: application/json, else 415) |
 | Capture hold | `POST /v2/payments/authorizations/{id}/capture` | ✅ Oct 20, COMPLETED immediately |
-| Void | `POST /v2/payments/authorizations/{id}/void` | not yet |
-| Reauthorize | `POST /v2/payments/authorizations/{id}/reauthorize` | not yet |
+| Void | `POST /v2/payments/authorizations/{id}/void` | ✅ Oct 22 (204, VOIDED) |
+| Reauthorize | `POST /v2/payments/authorizations/{id}/reauthorize` | ✅ Oct 22: 422 `REAUTHORIZATION_TOO_SOON` on a fresh hold (allowed once, days 4–29; doesn't extend 29 days) |
 | Payout | `POST /v1/payments/payouts` | ✅ SUCCESS in ~15 s (Oct 20, from a real capture) |
-| Refund | `POST /v2/payments/captures/{id}/refund` | not yet |
-| Disputes | `/v1/customer/disputes/...` | not yet |
-| Webhooks | `/v1/notifications/webhooks`, `verify-webhook-signature` | not yet |
+| Refund | `POST /v2/payments/captures/{id}/refund` | not implemented (cut) |
+| Disputes | `CUSTOMER.DISPUTE.*` webhooks | handled (state DISPUTE + dispute id); no dispute API calls |
+| Webhooks | `/v1/notifications/webhooks`, `verify-webhook-signature` | ✅ Oct 21 (four signed webhooks verified on PR #1's run) |
 | Card hold (alternative to wallet) | order with `payment_source.card` | ✅ card capture works |
 
 Webhooks to handle: `CHECKOUT.ORDER.APPROVED`, `PAYMENT.AUTHORIZATION.CREATED/VOIDED`, `PAYMENT.CAPTURE.COMPLETED/REFUNDED`, `PAYMENT.PAYOUTS-ITEM.SUCCEEDED/FAILED/UNCLAIMED`, `CUSTOMER.DISPUTE.CREATED/RESOLVED`.
@@ -134,14 +157,14 @@ Webhooks to handle: `CHECKOUT.ORDER.APPROVED`, `PAYMENT.AUTHORIZATION.CREATED/VO
 3. Oct 27–30: webhooks with signature verification + first Render deploy (needs a public URL)
 4. Oct 28–Nov 4: criteria writer + reviewer agent + decision policy
 5. Nov 1–6: Bryntum Gantt timeline (holds as dependencies, blocked and unlocked states)
-6. Nov 4–8: objections, partial refunds, dispute evidence
+6. Nov 4–8: objections (done Oct 22 as a second review); partial refunds and dispute evidence cut
 7. Nov 7–10: polish, README, tests
 8. Nov 9–12: demo video + Devpost submission
 
 ## Sponsors
 - **Bryntum** (prize target): Gantt of milestones with payment holds as dependencies; the agent moves dates when work is late
 - **APIMatic**: Context Plugin in Claude Code while building the PayPal integration; mention it in the README and video
-- **Render**: hosting (live URL for judges, HTTPS for webhooks) + Workflows for `reviewDeliverable`, `releaseFunds`, `refreshHolds`, `syncPayouts`
+- **Render**: hosting (live URL for judges, HTTPS for webhooks). *Workflows were not used (billing); jobs run on the idempotent `/api/tick` endpoint and page polling. There is no `refreshHolds` job.*
 - Skipped: AG Grid (stretch goal only), Channel3, Kernel, Elastic, Astropods, Zapier, Postman
 
 ## Demo (under 3 min)

@@ -2,7 +2,7 @@
 
 import { Check, Copy, CreditCard, Hourglass, Loader2, Wallet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { holdExpiryWarning, usd, type MilestoneView, type Role } from "@/lib/client/states";
+import { decideByCopy, holdExpiryWarning, usd, type MilestoneView, type Role } from "@/lib/client/states";
 import { HoldWarning } from "./MoneyPanel";
 import type { Call } from "./TermsCard";
 import type { Review } from "./VerdictTable";
@@ -116,7 +116,12 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
   const signedTheirs = !!hash && (role === "client" ? m.worker_signed_hash : m.client_signed_hash) === hash;
   const due = m.due_at ? new Date(m.due_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
   const releaseDate = m.release_after ? new Date(m.release_after).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "a date set by the rules";
-  const secondReviewPassed = m.state === "PASSED" && !!m.contested_at;
+  // After an objection, PASSED comes from the second review, or from the client's decision (or its
+  // 72 h deadline) on a HUMAN_CHECK that came after the objection. Either way, no second objection.
+  const contestedAt = m.contested_at ? new Date(m.contested_at).getTime() : 0;
+  const decidedAfterObjection = m.state === "PASSED" && !!contestedAt && !!m.human_check_at && new Date(m.human_check_at).getTime() >= contestedAt;
+  const secondReviewPassed = m.state === "PASSED" && !!contestedAt && !decidedAfterObjection;
+  const decideBy = decideByCopy(m, role);
 
   const act = async (label: string, action: string, body: Record<string, unknown> = {}) => {
     setBusy(label);
@@ -270,6 +275,7 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
         body = (
           <div className="space-y-3">
             <p className="text-sm text-ink-2">The rules couldn&apos;t decide on their own ({review?.reasons?.join("; ") ?? "see the verdict"}). Read the verdict below, then:</p>
+            {decideBy && <p className="text-sm font-medium text-ink">{decideBy}</p>}
             <div className="flex flex-wrap gap-2">
               <button className={primary} disabled={!!busy} onClick={() => act("approve", "approve")}>
                 {spin("approve")}Approve the work
@@ -282,10 +288,26 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
         );
       } else {
         title = "Waiting for the client's decision";
-        body = <Waiting>The rules sent this to the client to decide. The money stays held meanwhile.</Waiting>;
+        body = <Waiting>The rules sent this to the client to decide. The money stays held meanwhile.{decideBy && ` ${decideBy}`}</Waiting>;
       }
       break;
     case "PASSED": {
+      if (decidedAfterObjection) {
+        const paidWhen = releaseAt > now ? `on ${releaseDate}` : "now";
+        title = "Approved after the objection";
+        body =
+          role === "client" ? (
+            <div className="space-y-3">
+              <p className="text-sm text-ink-2">The decision after your objection is settled, so no further objection is possible. The money is captured and the worker is paid {paidWhen}.</p>
+              <button className={secondary} disabled={!!busy} onClick={() => act("release", "release")}>
+                {spin("release")}Release now
+              </button>
+            </div>
+          ) : (
+            <Waiting>Your work is approved. You&apos;re paid {paidWhen}.</Waiting>
+          );
+        break;
+      }
       if (secondReviewPassed) {
         title = "Second review passed";
         body =

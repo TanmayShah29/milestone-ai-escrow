@@ -6,6 +6,7 @@ import { InvariantViolation } from "@/lib/errors";
 import { audit, getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
 import { defaultDeps, releaseFunds, syncMilestone, type Deps } from "@/lib/money/flow";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
+import { humanCheckDeadline, objectionReleaseMs, objectionWindowMs } from "./deadlines";
 import { decide, type Verdict } from "./policy";
 import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifiers";
 
@@ -18,16 +19,7 @@ export function defaultReviewDeps(): ReviewDeps {
   return { github: githubClient(), money: defaultDeps() };
 }
 
-export function objectionWindowMs(): number {
-  const s = Number(process.env.OBJECTION_WINDOW_SECONDS ?? "120"); // 48 h in production; 2 min for the demo
-  return (Number.isFinite(s) && s >= 0 ? s : 120) * 1000;
-}
-
-/** After an objection, a passing second review releases this long after the objection (72 h). */
-export function objectionReleaseMs(): number {
-  const s = Number(process.env.OBJECTION_RELEASE_SECONDS ?? "259200");
-  return (Number.isFinite(s) && s >= 0 ? s : 259_200) * 1000;
-}
+export { humanCheckDeadline, objectionReleaseMs, objectionWindowMs };
 
 /** A second review the AI couldn't finish (busy, unreadable) is retried at most this often. */
 const SECOND_REVIEW_RETRY_MS = 5 * 60_000;
@@ -144,9 +136,11 @@ export async function humanDecision(milestoneId: string, approve: boolean): Prom
   return withMilestoneLock(milestoneId, async () => {
     const m = await getMilestone(milestoneId);
     if (m.state !== "HUMAN_CHECK") throw new InvariantViolation("There's nothing waiting for your decision right now.");
+    // Asking for changes clears contested_at (as a failed second review does), so a fixed resubmission
+    // gets a normal objection window and no decision deadline.
     return approve
       ? transition(db(), m, "PASSED", "client", { release_after: new Date(Date.now() + objectionWindowMs()) }, { event: "review:approved_by_client" })
-      : transition(db(), m, "CHANGES_REQUESTED", "client", {}, { event: "review:changes_by_client" });
+      : transition(db(), m, "CHANGES_REQUESTED", "client", { contested_at: null }, { event: "review:changes_by_client" });
   });
 }
 
@@ -163,6 +157,22 @@ export async function objectToRelease(milestoneId: string): Promise<Milestone> {
     // release_after now carries the date the money releases if the second review passes.
     const now = Date.now();
     return transition(db(), m, "CONTESTED", "client", { contested_at: new Date(now), release_after: new Date(now + objectionReleaseMs()) }, { event: "release:objected" });
+  });
+}
+
+/**
+ * The client didn't decide a post-objection HUMAN_CHECK in time: release to the worker. Fixed rule, no
+ * model involved; PASSED with release_after = now, so tick's usual release path captures and pays out.
+ */
+export async function expireHumanCheck(milestoneId: string): Promise<Milestone> {
+  return withMilestoneLock(milestoneId, async () => {
+    const m = await getMilestone(milestoneId);
+    const deadline = humanCheckDeadline(m);
+    if (!deadline || deadline.getTime() > Date.now()) return m;
+    return transition(db(), m, "PASSED", "system", { release_after: new Date() }, {
+      event: "review:human_timeout",
+      detail: { reasons: [`the client didn't decide within 72 hours of the objection's second review; the work passed its first review`], deadline: deadline.toISOString() },
+    });
   });
 }
 
@@ -274,12 +284,15 @@ async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, 
 
 /**
  * Move a milestone forward without a human: review once CI is done, run the second review after an
- * objection, release once the objection window (or the 72 h after an objection) has passed, and sync payouts. Safe to call often (page polling, a cron ping): every step is idempotent.
+ * objection, release a post-objection HUMAN_CHECK the client left undecided for 72 h, release once the
+ * objection window (or the 72 h after an objection) has passed, and sync payouts. Safe to call often
+ * (page polling, a cron ping): every step is idempotent.
  */
 export async function tick(milestoneId: string, deps: ReviewDeps = defaultReviewDeps()): Promise<Milestone> {
   let m = await getMilestone(milestoneId);
   if (m.state === "SUBMITTED" || m.state === "IN_REVIEW") m = await reviewMilestone(m.id, deps);
   if (m.state === "CONTESTED") m = await resolveObjection(m.id, deps);
+  if (m.state === "HUMAN_CHECK" && m.contested_at) m = await expireHumanCheck(m.id);
   if (m.state === "PASSED" && m.release_after && m.release_after.getTime() <= Date.now()) m = await releaseFunds(m.id, deps.money);
   if (m.state === "RELEASED") m = await syncMilestone(m.id, deps.money);
   return m;
@@ -287,7 +300,12 @@ export async function tick(milestoneId: string, deps: ReviewDeps = defaultReview
 
 export async function tickAll(deps: ReviewDeps = defaultReviewDeps()): Promise<{ id: string; state?: string; error?: string }[]> {
   const { rows } = await db().query<{ id: string }>(
-    "select id from milestones where state in ('SUBMITTED','IN_REVIEW','PASSED','CONTESTED','RELEASED') and updated_at > now() - interval '7 days' order by updated_at limit 10",
+    `select id from milestones
+     where (state in ('SUBMITTED','IN_REVIEW','PASSED','CONTESTED','RELEASED') and updated_at > now() - interval '7 days')
+        -- A post-objection HUMAN_CHECK whose decision deadline has passed, however long ago.
+        or (state = 'HUMAN_CHECK' and contested_at is not null and human_check_at <= now() - make_interval(secs => $1))
+     order by updated_at limit 10`,
+    [objectionReleaseMs() / 1000],
   );
   const out = [];
   for (const { id } of rows) {
