@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
+import { DemoTour } from "@/components/DemoTour";
 import { MoneyTracker, StatusPill } from "@/components/MoneyTracker";
 import { linkFor, rememberLink } from "@/lib/client/links";
 import { STATUS, usd, type MilestoneView, type Role } from "@/lib/client/states";
@@ -105,7 +106,8 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   const workerLink = tokens.worker ? `${typeof window !== "undefined" ? window.location.origin : ""}/milestones/${id}?t=${tokens.worker}` : undefined;
 
   return (
-    <main className="mx-auto max-w-6xl px-4 pb-16 pt-6">
+    <main className="mx-auto max-w-6xl px-4 pb-40 pt-6 sm:pb-16">
+      <DemoTour currentId={id} state={data.milestone.state} />
       <header className="flex flex-col gap-4 border-b border-rule pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{m.title}</h1>

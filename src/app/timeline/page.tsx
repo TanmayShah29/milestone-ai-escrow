@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { DemoTour } from "@/components/DemoTour";
 import { heldLinks, rememberLink } from "@/lib/client/links";
 
 // Bryntum renders in the browser only.
@@ -58,15 +59,16 @@ export default function TimelinePage() {
   );
 
   return (
-    <main className="flex h-screen flex-col">
-      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 border-b border-black/10 dark:border-white/15">
+    <main className="flex h-[calc(100vh-3.25rem)] flex-col">
+      <DemoTour onTimeline />
+      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 border-b border-rule bg-panel">
         <Link href="/" className="text-sm underline">
           ← Milestones
         </Link>
         <h1 className="font-semibold">Timeline</h1>
         <p className="text-sm opacity-70">Money gates the schedule: work starts when the PayPal hold is placed, and pays out after review and the objection window.</p>
       </header>
-      {msgs.length > 0 && <div className="mx-4 mt-2 rounded border border-amber-500/50 bg-amber-500/10 p-2 text-sm">{msgs.join(" ")}</div>}
+      {msgs.length > 0 && <div className="mx-4 mt-2 rounded-md border border-held/40 bg-held-field p-2 text-sm">{msgs.join(" ")}</div>}
       <div className="min-h-0 flex-1">
         {data && data.tasks.length > 0 ? (
           <GanttView data={data} canReschedule={canReschedule} onReschedule={onReschedule} />

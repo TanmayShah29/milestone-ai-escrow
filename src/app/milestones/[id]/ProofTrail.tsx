@@ -20,11 +20,16 @@ export function ProofTrail({ audit }: { audit: AuditRow[] }) {
               {fmt.format(new Date(a.created_at))}
             </time>
             <span className="text-ink">{eventLabel(a.event)}</span>
-            {a.paypal_id && (
-              <span className="col-start-2 truncate font-mono text-xs text-ink-2 sm:col-start-auto" title={a.paypal_id}>
-                {a.paypal_id}
-              </span>
-            )}
+            {a.paypal_id &&
+              (/^https:\/\/github\.com\/.+\/pull\/(\d+)/.test(a.paypal_id) ? (
+                <a href={a.paypal_id} target="_blank" rel="noreferrer" className="col-start-2 text-xs text-ink underline sm:col-start-auto">
+                  PR #{/\/pull\/(\d+)/.exec(a.paypal_id)![1]}
+                </a>
+              ) : (
+                <span className="col-start-2 truncate font-mono text-xs text-ink-2 sm:col-start-auto" title={a.paypal_id}>
+                  {a.paypal_id}
+                </span>
+              ))}
           </li>
         ))}
       </ol>
