@@ -6,6 +6,8 @@ import { hashTerms, type Terms } from "../src/lib/contract/terms";
 import { createMilestone, type Milestone } from "../src/lib/milestones/repo";
 
 const DAY = 86_400_000;
+// Illustrative PayPal-style ids, unique per run (the real ids must be unique in the DB).
+const demoId = (prefix: string) => `${prefix}${Math.random().toString(36).slice(2, 12).toUpperCase()}`;
 const base = process.argv[2] ?? "http://localhost:3000";
 
 const terms = (what: string): Terms => ({
@@ -19,7 +21,7 @@ const terms = (what: string): Terms => ({
 
 async function seed(opts: { title: string; cents: number; created: number; due: number; after?: string; history: [string, string | null, number, Record<string, unknown>?][]; set: Record<string, unknown> }) {
   const { milestone, clientToken } = await createMilestone({ title: opts.title, brief: opts.title, amountCents: opts.cents, freelancerEmail: "sb-puo47p53461265@personal.example.com", dueAt: new Date(opts.due), ...(opts.after ? { afterMilestoneId: opts.after } : {}) });
-  const t = terms(opts.title.split(" ").slice(1, 3).join(" "));
+  const t = terms(opts.title.split(": ")[1]?.split(" (")[0] ?? opts.title);
   const m = { ...milestone, repo: "TanmayShah29/milestone-demo" } as Milestone;
   const hash = hashTerms(m, t);
   const cols = { repo: m.repo, criteria: JSON.stringify(t), criteria_hash: hash, client_signed_hash: hash, worker_signed_hash: hash, created_at: new Date(opts.created), ...opts.set };
@@ -48,7 +50,7 @@ async function main() {
       ["hold:captured", "RELEASED", a0 + 6.3 * DAY],
       ["payout:succeeded", "PAID_OUT", a0 + 6.4 * DAY],
     ],
-    set: { state: "PAID_OUT", paypal_order_id: "6KT46740HF272241V", paypal_authorization_id: "21K55705SN297842N", authorized_cents: 2500, authorization_expires_at: new Date(a0 + 30 * DAY), paypal_capture_id: "5B824331RB0677324", capture_status: "COMPLETED", captured_cents: 2500, fee_cents: 125, payout_cents: 2375, payout_status: "SUCCESS", paypal_payout_item_id: "GJKNAZHUVZ4E4", pr_url: "https://github.com/TanmayShah29/milestone-demo/pull/1" },
+    set: { state: "PAID_OUT", paypal_order_id: demoId("DEMO-O-"), paypal_authorization_id: demoId("DEMO-A-"), authorized_cents: 2500, authorization_expires_at: new Date(a0 + 30 * DAY), paypal_capture_id: demoId("DEMO-C-"), capture_status: "COMPLETED", captured_cents: 2500, fee_cents: 125, payout_cents: 2375, payout_status: "SUCCESS", paypal_payout_item_id: demoId("DEMO-I-"), pr_url: "https://github.com/TanmayShah29/milestone-demo/pull/1" },
   });
   const b0 = now - 5 * DAY;
   const b = await seed({
@@ -61,7 +63,7 @@ async function main() {
       ["terms:agreed", "AGREED", b0 + 0.3 * DAY],
       ["hold:authorized", "FUNDED", b0 + 1 * DAY],
     ],
-    set: { state: "FUNDED", paypal_order_id: "DEMO-ORDER-B", paypal_authorization_id: "DEMO-AUTH-B", authorized_cents: 1500, authorization_expires_at: new Date(b0 + 30 * DAY) },
+    set: { state: "FUNDED", paypal_order_id: demoId("DEMO-O-"), paypal_authorization_id: demoId("DEMO-A-"), authorized_cents: 1500, authorization_expires_at: new Date(b0 + 30 * DAY) },
   });
   const c0 = now - 2 * DAY;
   const c = await seed({
@@ -74,7 +76,7 @@ async function main() {
       ["terms:agreed", "AGREED", c0 + 0.2 * DAY],
       ["hold:authorized", "FUNDED", c0 + 0.5 * DAY],
     ],
-    set: { state: "FUNDED", paypal_order_id: "DEMO-ORDER-C", paypal_authorization_id: "DEMO-AUTH-C", authorized_cents: 6000, authorization_expires_at: new Date(c0 + 0.5 * DAY + 29 * DAY) },
+    set: { state: "FUNDED", paypal_order_id: demoId("DEMO-O-"), paypal_authorization_id: demoId("DEMO-A-"), authorized_cents: 6000, authorization_expires_at: new Date(c0 + 0.5 * DAY + 29 * DAY) },
   });
   console.log(`${base}/timeline?m=${[a, b, c].map((x) => `${x.id}.${x.token}`).join(",")}`);
   await db().end();

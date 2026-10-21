@@ -2,40 +2,25 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
+import { MoneyTracker, StatusPill } from "@/components/MoneyTracker";
 import { linkFor, rememberLink } from "@/lib/client/links";
-import { DeliveryPanel } from "./delivery";
-import { TermsPanel } from "./terms";
+import { STATUS, usd, type MilestoneView, type Role } from "@/lib/client/states";
+import { ContractSeal } from "./ContractSeal";
+import { MoneyPanel } from "./MoneyPanel";
+import { NextStep } from "./NextStep";
+import { ProofTrail, type AuditRow } from "./ProofTrail";
+import { TermsCard } from "./TermsCard";
+import { VerdictTable, type Review } from "./VerdictTable";
 
-type Milestone = Record<string, unknown> & { id: string; title: string; state: string; amount_cents: number };
-type AuditRow = { id: number; actor: string; event: string; from_state: string | null; to_state: string | null; paypal_id: string | null; created_at: string };
-type ActionRow = { action: string; attempt: number; status: string; paypal_id: string | null };
-
-type Role = "client" | "worker";
-const C: Role[] = ["client"];
-const ANY: Role[] = ["client", "worker"];
-const ACTIONS: Record<string, { label: string; action: string; roles: Role[] }[]> = {
-  DRAFT: [{ label: "Cancel", action: "cancel", roles: C }],
-  AGREED: [
-    { label: "Fund with PayPal (log in)", action: "fund", roles: C },
-    { label: "Fund with sandbox test card", action: "fund-card", roles: C },
-    { label: "Cancel", action: "cancel", roles: C },
-  ],
-  FUNDED: [{ label: "Cancel (void hold)", action: "cancel", roles: C }, { label: "Reauthorize hold", action: "refresh-hold", roles: C }],
-  SUBMITTED: [{ label: "Check now", action: "check", roles: ANY }],
-  IN_REVIEW: [{ label: "Check now", action: "check", roles: ANY }],
-  PASSED: [{ label: "Release now", action: "release", roles: C }],
-  RELEASED: [{ label: "Sync with PayPal", action: "sync", roles: ANY }],
-};
-
-const cents = (v: unknown) => (typeof v === "number" ? `$${(v / 100).toFixed(2)}` : "—");
+type Data = { role: Role; milestone: MilestoneView; audit: AuditRow[]; review: Review | null };
 
 export default function MilestonePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [data, setData] = useState<{ milestone: Milestone; audit: AuditRow[]; actions: ActionRow[]; review: Parameters<typeof DeliveryPanel>[0]["review"] }>();
+  const [data, setData] = useState<Data>();
   const [msg, setMsg] = useState<string>();
-  const [busy, setBusy] = useState(false);
   const [as, setAs] = useState<Role>();
   const [tokens, setTokens] = useState<{ client?: string; worker?: string }>({});
+  const [ready, setReady] = useState(false);
   const token = as ? tokens[as] : undefined;
 
   // A shared link arrives as ?t=<token>: remember it, then drop it from the address bar.
@@ -52,21 +37,18 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
     setAs(held?.client ? "client" : held?.worker ? "worker" : undefined);
     const err = q.get("error");
     if (err) setMsg(err);
-    else if (q.get("funded") === "pending") setMsg("PayPal is finishing the hold. Refresh in a moment.");
+    else if (q.get("funded") === "pending") setMsg("PayPal is finishing the hold. This page will update in a moment.");
+    setReady(true);
   }, [id]);
 
   const authed = useCallback((init: RequestInit = {}) => ({ ...init, headers: { ...(init.headers ?? {}), "x-milestone-token": token ?? "" } }), [token]);
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     if (!token) return;
-    fetch(`/api/milestones/${id}`, authed())
-      .then((r) => r.json())
-      .then((b) => {
-        if (b.error) setMsg(b.error);
-        else {
-          setData(b);
-          rememberLink({ id, title: b.milestone.title });
-        }
-      });
+    const r = await fetch(`/api/milestones/${id}`, authed());
+    const b = await r.json();
+    if (!r.ok) return setMsg(b.error);
+    setData(b);
+    rememberLink({ id, title: b.milestone.title });
   }, [id, token, authed]);
   useEffect(() => {
     load();
@@ -76,133 +58,111 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   const state = data?.milestone.state;
   useEffect(() => {
     if (!token || !state || !["SUBMITTED", "IN_REVIEW", "PASSED", "RELEASED"].includes(state)) return;
-    const t = setInterval(() => {
-      fetch(`/api/milestones/${id}/check`, authed({ method: "POST" })).then(() => load());
-    }, 15_000);
+    const t = setInterval(() => fetch(`/api/milestones/${id}/check`, authed({ method: "POST" })).then(() => load()), 15_000);
     return () => clearInterval(t);
   }, [id, token, state, authed, load]);
 
-  async function run(action: string) {
-    setBusy(true);
-    setMsg(undefined);
-    const body: Record<string, string> = {};
-    if (action === "submit") {
-      const prUrl = window.prompt("GitHub PR URL", "https://github.com/TanmayShah29/milestone-ai-escrow/pull/1");
-      if (!prUrl) return setBusy(false);
-      body.prUrl = prUrl;
-    }
-    const r = await fetch(`/api/milestones/${id}/${action}`, authed({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
-    const b = await r.json();
-    setBusy(false);
-    if (action === "fund" && r.ok && b.approveUrl) {
-      window.location.href = b.approveUrl;
-      return;
-    }
-    if (!r.ok || r.status === 202) setMsg(b.error);
-    load();
+  const call = useCallback(
+    async (action: string, body: Record<string, unknown> = {}) => {
+      setMsg(undefined);
+      const r = await fetch(`/api/milestones/${id}/${action}`, authed({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+      const b = await r.json().catch(() => ({}));
+      if (action === "fund" && r.ok && b.approveUrl) {
+        window.location.href = b.approveUrl;
+        return { ok: true };
+      }
+      if (!r.ok || r.status === 202) setMsg(b.error);
+      await load();
+      return { ok: r.ok, error: b.error as string | undefined };
+    },
+    [id, authed, load],
+  );
+
+  if (ready && !as) {
+    return (
+      <main className="mx-auto max-w-xl px-4 py-16">
+        <h1 className="text-xl font-semibold">This milestone needs its link</h1>
+        <p className="mt-2 text-ink-2">
+          Open it from the client or worker link you were given (it ends with <span className="font-mono">?t=…</span>). Links are the keys: there are no accounts.
+        </p>
+        <Link href="/" className="mt-4 inline-block underline">
+          Back to Milestone
+        </Link>
+      </main>
+    );
+  }
+  if (!data) {
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-16 text-ink-2" aria-busy="true">
+        {msg ?? "Loading the milestone… The demo server can take up to a minute to wake up."}
+      </main>
+    );
   }
 
-  // Terms actions (draft / edit / sign) send JSON bodies and report errors in the banner.
-  async function termsCall(action: string, body: Record<string, unknown>) {
-    setMsg(undefined);
-    const r = await fetch(`/api/milestones/${id}/${action}`, authed({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
-    const b = await r.json();
-    if (!r.ok) setMsg(b.error);
-    load();
-    return { ok: r.ok, error: b.error as string | undefined };
-  }
-
-  if (!as) return <main className="p-8">You need this milestone&apos;s client or worker link to open it.</main>;
-  if (!data?.milestone) return <main className="p-8">{msg ?? "Loading…"}</main>;
   const m = data.milestone;
+  const status = STATUS[m.state] ?? { label: m.state, tone: "neutral" as const };
+  const criteriaText = Object.fromEntries(((m.criteria?.criteria ?? []) as { id: string; text: string }[]).map((c) => [c.id, c.text]));
+  const workerLink = tokens.worker ? `${typeof window !== "undefined" ? window.location.origin : ""}/milestones/${id}?t=${tokens.worker}` : undefined;
 
   return (
-    <main className="mx-auto max-w-2xl p-4 sm:p-8 space-y-6">
-      <div className="flex gap-4 text-sm">
-        <Link href="/" className="underline">
-          ← All milestones
-        </Link>
-        <Link href="/timeline" className="underline">
-          Timeline
-        </Link>
-      </div>
-      <header>
-        <h1 className="text-xl font-semibold">{m.title}</h1>
-        <p className="text-sm opacity-70">
-          {cents(m.amount_cents)} · <strong>{m.state}</strong>
-        </p>
+    <main className="mx-auto max-w-6xl px-4 pb-16 pt-6">
+      <header className="flex flex-col gap-4 border-b border-rule pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{m.title}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <StatusPill label={status.label} tone={status.tone} />
+            {m.pr_url ? (
+              <a href={String(m.pr_url)} target="_blank" rel="noreferrer" className="text-sm text-ink-2 underline">
+                Pull request
+              </a>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex items-end justify-between gap-6 sm:justify-end">
+          <p className="sm:text-right">
+            <span className="block text-xs text-ink-2">Milestone value</span>
+            <span className="text-3xl font-semibold tracking-tight">{usd(m.amount_cents)}</span>
+          </p>
+          <div role="group" aria-label="View as" className="flex rounded-md border border-rule-strong p-0.5 text-sm">
+            {(["client", "worker"] as const).map((r) => (
+              <button key={r} disabled={!tokens[r]} onClick={() => setAs(r)} aria-pressed={as === r} className={`rounded px-2.5 py-1 capitalize disabled:opacity-30 ${as === r ? "bg-accent text-accent-ink" : "text-ink-2 hover:text-ink"}`}>
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="opacity-60">Viewing as</span>
-        {(["client", "worker"] as const).map((r) => (
-          <button key={r} disabled={!tokens[r]} onClick={() => setAs(r)} className={`rounded px-2 py-0.5 border ${as === r ? "border-blue-600 bg-blue-600/10" : "border-black/15 dark:border-white/20"} disabled:opacity-30`}>
-            {r}
-          </button>
-        ))}
+      <div className="py-5">
+        <MoneyTracker state={m.state} />
       </div>
-      {as === "client" && tokens.worker && (
-        <p className="text-sm break-all">
-          <span className="opacity-60">Worker link (share with the freelancer or agent): </span>
-          <code>{`${typeof window !== "undefined" ? window.location.origin : ""}/milestones/${id}?t=${tokens.worker}`}</code>
+
+      {msg && (
+        <p role="status" className="mb-4 rounded-md border border-held/40 bg-held-field p-3 text-sm text-ink">
+          {msg}
         </p>
       )}
 
-      {msg && <p className="rounded border border-amber-500/50 bg-amber-500/10 p-2 text-sm">{msg}</p>}
-
-      <div className="flex flex-wrap gap-2">
-        {(ACTIONS[m.state] ?? []).filter((a) => a.roles.includes(as)).map((a) => (
-          <button key={a.action} disabled={busy} onClick={() => run(a.action)} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50">
-            {a.label}
-          </button>
-        ))}
-      </div>
-
-      <TermsPanel m={m} role={as} call={termsCall} />
-
-      {!["DRAFT", "AGREED", "CANCELLED"].includes(m.state) && <DeliveryPanel m={m} role={as} review={data.review} call={termsCall} />}
-
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm break-all">
-        {[
-          ["Order", m.paypal_order_id],
-          ["Authorization", m.paypal_authorization_id],
-          ["Authorized", cents(m.authorized_cents)],
-          ["Hold expires", m.authorization_expires_at],
-          ["Capture", m.paypal_capture_id ? `${m.paypal_capture_id} (${m.capture_status})` : null],
-          ["Captured", cents(m.captured_cents)],
-          ["Fee / payout", m.fee_cents != null ? `${cents(m.fee_cents)} / ${cents(m.payout_cents)}` : null],
-          ["Payout batch", m.paypal_payout_batch_id ? `${m.paypal_payout_batch_id} (${m.payout_status})` : null],
-          ["PR", m.pr_url],
-        ].map(([k, v]) => (
-          <div key={String(k)} className="contents">
-            <dt className="opacity-60">{String(k)}</dt>
-            <dd>{v ? String(v) : "—"}</dd>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 space-y-5">
+          <NextStep m={m} role={as!} review={data.review} call={call} workerLink={workerLink} />
+          <div className="lg:hidden">
+            <MoneyPanel m={m} />
           </div>
-        ))}
-      </dl>
-
-      <section>
-        <h2 className="font-medium mb-1">Money actions</h2>
-        <ul className="text-sm space-y-0.5">
-          {data.actions.map((a, i) => (
-            <li key={i}>
-              {a.action} #{a.attempt}: {a.status} {a.paypal_id && <span className="opacity-60">({a.paypal_id})</span>}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section>
-        <h2 className="font-medium mb-1">Audit log</h2>
-        <ol className="text-sm space-y-0.5">
-          {data.audit.map((a) => (
-            <li key={a.id}>
-              <span className="opacity-60">{new Date(a.created_at).toLocaleTimeString()}</span> {a.actor}: {a.event}
-              {a.to_state && ` → ${a.to_state}`} {a.paypal_id && <span className="opacity-60">({a.paypal_id})</span>}
-            </li>
-          ))}
-        </ol>
-      </section>
+          {data.review?.status === "done" && <VerdictTable review={data.review} criteriaText={criteriaText} />}
+          <TermsCard m={m} role={as!} call={call} />
+          <ProofTrail audit={data.audit} />
+        </div>
+        <aside className="min-w-0 space-y-5 lg:sticky lg:top-5 lg:self-start">
+          <div className="hidden space-y-5 lg:block">
+            <MoneyPanel m={m} />
+            <ContractSeal m={m} />
+          </div>
+          <p className="text-xs leading-relaxed text-ink-3">
+            The AI never moves money. It drafts terms and reviews what tests can&apos;t check; fixed rules decide, and only those rules capture or release the PayPal hold. PayPal sandbox; no real money.
+          </p>
+        </aside>
+      </div>
     </main>
   );
 }

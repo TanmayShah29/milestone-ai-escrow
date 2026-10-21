@@ -1,26 +1,119 @@
 @import "tailwindcss";
 
+/* Security print: security-paper ground, intaglio ink, money states. See docs/design/deal-room.brief.md. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --paper: #eef3f1;
+  --panel: #f8fbfa;
+  --ink: #13233a;
+  --ink-2: #4a5b6e;
+  --ink-3: #6b7a88;
+  --rule: #c9d6d2;
+  --rule-strong: #a9bbb6;
+  --accent: #13233a;
+  --accent-ink: #f8fbfa;
+  --held: #8a5a12;
+  --held-field: #f3e3c3;
+  --paid: #1e6b4e;
+  --paid-field: #d6eadf;
+  --failed: #b4232c;
+  --failed-field: #f6dcdd;
+  --blocked: #6b7a88;
+  --blocked-field: #e2e9ec;
+  --focus: #2e6db4;
+  --seal: #1e6b4e;
+  --seal-2: #13233a;
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme="light"]) {
+    --paper: #0f1a24;
+    --panel: #15222e;
+    --ink: #e4ecea;
+    --ink-2: #a7b6c0;
+    --ink-3: #8597a3;
+    --rule: #2a3a46;
+    --rule-strong: #3a4d5a;
+    --accent: #e4ecea;
+    --accent-ink: #0f1a24;
+    --held: #e7b766;
+    --held-field: #3b2e17;
+    --paid: #7fcfa6;
+    --paid-field: #183a2c;
+    --failed: #f19197;
+    --failed-field: #3d1c20;
+    --blocked: #8597a3;
+    --blocked-field: #213039;
+    --focus: #8ab8ef;
+    --seal: #7fcfa6;
+    --seal-2: #c7d4dc;
+    color-scheme: dark;
   }
 }
 
+@theme inline {
+  --color-paper: var(--paper);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-held: var(--held);
+  --color-held-field: var(--held-field);
+  --color-paid: var(--paid);
+  --color-paid-field: var(--paid-field);
+  --color-failed: var(--failed);
+  --color-failed-field: var(--failed-field);
+  --color-blocked: var(--blocked);
+  --color-blocked-field: var(--blocked-field);
+  --color-focus: var(--focus);
+  --font-sans: var(--font-public-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  background: var(--paper);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-public-sans), system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Browser surfaces carry the design too. */
+::selection {
+  background: var(--held-field);
+  color: var(--ink);
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+a {
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+* {
+  scrollbar-color: var(--rule-strong) transparent;
+}
+input,
+textarea,
+select {
+  caret-color: var(--focus);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
