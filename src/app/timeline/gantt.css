@@ -1,0 +1,21 @@
+/* Milestone Gantt: phase states and hold indicators. */
+.b-gantt-task-wrap.ms-blocked .b-gantt-task {
+  background-image: repeating-linear-gradient(45deg, transparent 0 6px, rgb(255 255 255 / 0.35) 6px 12px);
+}
+.b-gantt-task-wrap.ms-failed .b-gantt-task {
+  outline: 2px solid rgb(220 38 38 / 0.7);
+}
+.b-indicator.ms-ind-honor {
+  color: #b45309;
+}
+.b-indicator.ms-ind-expiry {
+  color: #475569;
+}
+.b-indicator.ms-ind-danger,
+.b-indicator.ms-ind-danger::before {
+  color: #dc2626 !important;
+  font-size: 1.2em;
+}
+.b-indicator.ms-ind-honor::before {
+  color: #b45309 !important;
+}

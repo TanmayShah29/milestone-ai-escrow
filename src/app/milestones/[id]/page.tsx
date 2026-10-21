@@ -118,9 +118,14 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
 
   return (
     <main className="mx-auto max-w-2xl p-4 sm:p-8 space-y-6">
-      <Link href="/" className="text-sm underline">
-        ← All milestones
-      </Link>
+      <div className="flex gap-4 text-sm">
+        <Link href="/" className="underline">
+          ← All milestones
+        </Link>
+        <Link href="/timeline" className="underline">
+          Timeline
+        </Link>
+      </div>
       <header>
         <h1 className="text-xl font-semibold">{m.title}</h1>
         <p className="text-sm opacity-70">

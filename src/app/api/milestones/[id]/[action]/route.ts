@@ -3,6 +3,7 @@ import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
 import { cancelHold, createHold, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
 import { draftTerms, editTerms, signTerms } from "@/lib/contract/terms";
+import { setDueDate } from "@/lib/schedule";
 import { humanDecision, objectToRelease, submitDeliverable, tick } from "@/lib/review/run";
 import { getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
 
@@ -25,6 +26,7 @@ const ALLOWED: Record<string, Role[]> = {
   cancel: ["client"],
   release: ["client"],
   "refresh-hold": ["client"],
+  schedule: ["client"],
   "dev-pass": ["client"],
   sync: ["client", "worker"],
 };
@@ -74,6 +76,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
         return done(await locked((m) => transition(db(), m, "PASSED", "dev", {}, { event: "review:dev-pass" })));
       case "fund-card":
         return done(await fundWithTestCard(id, undefined, opts));
+      case "schedule": {
+        const { milestone, warnings } = await setDueDate(id, str(body.dueAt) ?? "");
+        return done(milestone, { warnings });
+      }
       case "release":
         return done(await releaseFunds(id, undefined, opts));
       case "cancel":

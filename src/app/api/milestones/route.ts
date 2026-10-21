@@ -37,6 +37,9 @@ export async function POST(req: Request) {
     if (!title || title.length > 200) return json(400, { error: "title is required (max 200 characters)" });
     if (!EMAIL.test(freelancerEmail)) return json(400, { error: "freelancerEmail must be the worker's PayPal email" });
     if (amountCents <= 0 || amountCents > 1_000_000) return json(400, { error: "amount must be between 0.01 and 10000.00" });
+    const dueAt = typeof b.dueDate === "string" && b.dueDate ? new Date(b.dueDate) : undefined;
+    if (dueAt && (Number.isNaN(dueAt.getTime()) || dueAt.getTime() < Date.now())) return json(400, { error: "dueDate must be a future date" });
+    const afterId = typeof b.afterMilestoneId === "string" && /^[0-9a-f-]{36}$/i.test(b.afterMilestoneId) ? b.afterMilestoneId : undefined;
     const clientEmail = typeof b.clientEmail === "string" && EMAIL.test(b.clientEmail.trim()) ? b.clientEmail.trim() : undefined;
     const { milestone, clientToken, workerToken } = await createMilestone({
       title,
@@ -46,6 +49,8 @@ export async function POST(req: Request) {
       ...(clientEmail ? { clientEmail } : {}),
       ...(platform ? { platformId: platform.id } : {}),
       verifier: b.verifier === "rubric_text" ? "rubric_text" : "code_pr",
+      ...(dueAt ? { dueAt } : {}),
+      ...(afterId ? { afterMilestoneId: afterId } : {}),
     });
     return json(201, { milestone: publicMilestone(milestone), clientToken, workerToken });
   } catch (err) {
