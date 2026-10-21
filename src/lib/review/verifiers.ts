@@ -53,7 +53,7 @@ async function aiReview(criteria: Criterion[], kindOfWork: string, material: str
     material,
     `DELIVERABLE>>>`,
   ].join("\n");
-  return generateJson({ purpose: "review", system: REVIEW_SYSTEM, prompt, schema: aiReplySchema, maxOutputTokens: 2500, ...(call ? { call } : {}) });
+  return generateJson({ purpose: "review", system: REVIEW_SYSTEM, prompt, schema: aiReplySchema, maxOutputTokens: 6000, ...(call ? { call } : {}) });
 }
 
 function mergeAi(criteria: Criterion[], reply: z.infer<typeof aiReplySchema> | undefined): CriterionVerdict[] {

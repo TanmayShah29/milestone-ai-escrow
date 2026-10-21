@@ -27,11 +27,13 @@ const openRouterCall: ModelCall = async (model, system, prompt, maxOutputTokens)
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
   const openrouter = createOpenRouter({ apiKey });
   const { text } = await generateText({
-    model: openrouter.chat(model),
+    // Reasoning models spend the output budget "thinking" and cut the JSON off: keep reasoning short
+    // and out of the reply. Non-reasoning models ignore this.
+    model: openrouter.chat(model, { reasoning: { effort: "low", exclude: true } }),
     system,
     prompt,
     temperature: 0.2,
-    maxOutputTokens, // reasoning models return empty content below ~1500
+    maxOutputTokens, // reasoning models return empty content below ~1500; drafts ask for more
     maxRetries: 0, // we fall through to the next model instead
     abortSignal: AbortSignal.timeout(90_000),
   });
