@@ -15,7 +15,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       [id],
     );
     const { rows: actions } = await db().query("select action, attempt, status, paypal_id, created_at from money_actions where milestone_id = $1 order by id", [id]);
-    return json(200, { role, milestone: publicMilestone(milestone), audit, actions });
+    const { rows: reviews } = await db().query(
+      "select head_sha, status, verdict, decision, reasons, model, updated_at from reviews where milestone_id = $1 order by updated_at desc limit 1",
+      [id],
+    );
+    return json(200, { role, milestone: publicMilestone(milestone), audit, actions, review: reviews[0] ?? null });
   } catch (err) {
     return toHttp(err);
   }

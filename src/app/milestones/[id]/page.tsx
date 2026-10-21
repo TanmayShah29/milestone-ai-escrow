@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { linkFor, rememberLink } from "@/lib/client/links";
+import { DeliveryPanel } from "./delivery";
 import { TermsPanel } from "./terms";
 
 type Milestone = Record<string, unknown> & { id: string; title: string; state: string; amount_cents: number };
@@ -11,14 +12,18 @@ type ActionRow = { action: string; attempt: number; status: string; paypal_id: s
 
 type Role = "client" | "worker";
 const C: Role[] = ["client"];
-const W: Role[] = ["worker"];
 const ANY: Role[] = ["client", "worker"];
 const ACTIONS: Record<string, { label: string; action: string; roles: Role[] }[]> = {
   DRAFT: [{ label: "Cancel", action: "cancel", roles: C }],
-  AGREED: [{ label: "Fund with PayPal hold", action: "fund", roles: C }, { label: "Cancel", action: "cancel", roles: C }],
-  FUNDED: [{ label: "Submit PR", action: "submit", roles: W }, { label: "Cancel (void hold)", action: "cancel", roles: C }, { label: "Reauthorize hold", action: "refresh-hold", roles: C }],
-  SUBMITTED: [{ label: "Dev: mark review passed", action: "dev-pass", roles: C }],
-  PASSED: [{ label: "Release (capture + payout)", action: "release", roles: C }],
+  AGREED: [
+    { label: "Fund with PayPal (log in)", action: "fund", roles: C },
+    { label: "Fund with sandbox test card", action: "fund-card", roles: C },
+    { label: "Cancel", action: "cancel", roles: C },
+  ],
+  FUNDED: [{ label: "Cancel (void hold)", action: "cancel", roles: C }, { label: "Reauthorize hold", action: "refresh-hold", roles: C }],
+  SUBMITTED: [{ label: "Check now", action: "check", roles: ANY }],
+  IN_REVIEW: [{ label: "Check now", action: "check", roles: ANY }],
+  PASSED: [{ label: "Release now", action: "release", roles: C }],
   RELEASED: [{ label: "Sync with PayPal", action: "sync", roles: ANY }],
 };
 
@@ -26,7 +31,7 @@ const cents = (v: unknown) => (typeof v === "number" ? `$${(v / 100).toFixed(2)}
 
 export default function MilestonePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [data, setData] = useState<{ milestone: Milestone; audit: AuditRow[]; actions: ActionRow[] }>();
+  const [data, setData] = useState<{ milestone: Milestone; audit: AuditRow[]; actions: ActionRow[]; review: Parameters<typeof DeliveryPanel>[0]["review"] }>();
   const [msg, setMsg] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [as, setAs] = useState<Role>();
@@ -66,6 +71,16 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   useEffect(() => {
     load();
   }, [load]);
+
+  // While CI runs, the objection window ticks or a payout settles, nudge the milestone forward.
+  const state = data?.milestone.state;
+  useEffect(() => {
+    if (!token || !state || !["SUBMITTED", "IN_REVIEW", "PASSED", "RELEASED"].includes(state)) return;
+    const t = setInterval(() => {
+      fetch(`/api/milestones/${id}/check`, authed({ method: "POST" })).then(() => load());
+    }, 15_000);
+    return () => clearInterval(t);
+  }, [id, token, state, authed, load]);
 
   async function run(action: string) {
     setBusy(true);
@@ -139,6 +154,8 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
       </div>
 
       <TermsPanel m={m} role={as} call={termsCall} />
+
+      {!["DRAFT", "AGREED", "CANCELLED"].includes(m.state) && <DeliveryPanel m={m} role={as} review={data.review} call={termsCall} />}
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm break-all">
         {[

@@ -45,6 +45,7 @@ export async function POST(req: Request) {
       freelancerEmail,
       ...(clientEmail ? { clientEmail } : {}),
       ...(platform ? { platformId: platform.id } : {}),
+      verifier: b.verifier === "rubric_text" ? "rubric_text" : "code_pr",
     });
     return json(201, { milestone: publicMilestone(milestone), clientToken, workerToken });
   } catch (err) {

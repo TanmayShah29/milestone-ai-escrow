@@ -174,6 +174,58 @@ async function createHoldLocked(milestoneId: string, deps: Deps, opts: { mock?: 
   });
 }
 
+// ---------------------------------------------------------------------------------------------
+// 6b. Fund with PayPal's sandbox test card: one createOrder with payment_source.card returns an
+// authorized hold directly, with no buyer login (verified Oct 21). The judge-friendly path. It shares the
+// create_order claim with the wallet path, so a milestone can never be funded twice.
+
+const SANDBOX_TEST_CARD = {
+  name: "Milestone Demo Client",
+  number: "4005519200000004", // PayPal's published sandbox test Visa; sandbox-only (client.ts refuses live)
+  expiry: "2030-12",
+  securityCode: "123",
+  billingAddress: { addressLine1: "1 Main St", adminArea2: "San Jose", adminArea1: "CA", postalCode: "95131", countryCode: "US" },
+};
+
+type CardHold = { orderId: string; auth: AuthInfo };
+
+async function fundWithTestCardLocked(milestoneId: string, deps: Deps, opts: { mock?: string }): Promise<Milestone> {
+  const m = await getMilestone(milestoneId);
+  requireState(m, "AGREED");
+  assertTermsAgreed(m);
+  if (m.paypal_order_id) throw new InvariantViolation("a PayPal checkout is already open for this milestone; finish it or cancel");
+  const send = async (requestId: string): Promise<CardHold> => {
+    const o = await deps.paypal.orders.createOrder({
+      payPalRequestId: requestId,
+      prefer: PREFER,
+      ...mockHeader(opts.mock),
+      body: {
+        intent: CheckoutPaymentIntent.Authorize,
+        purchaseUnits: [{ amount: { currencyCode: "USD", value: centsToValue(m.amount_cents) }, customId: m.id, description: `${m.title.slice(0, 100)} · terms ${m.criteria_hash!.slice(0, 12)}` }],
+        paymentSource: { card: SANDBOX_TEST_CARD },
+      },
+    });
+    const auth = readAuthorization(o.purchaseUnits);
+    if (!o.id || !auth) throw new PaypalFailure("unknown", "card order returned no authorization");
+    if (auth.status === "DENIED") throw new PaypalFailure("refused", "the card was declined", { status: 422, reason: "Card declined", issue: "DENIED" });
+    return { orderId: o.id, auth };
+  };
+  return runWrite<CardHold>(m, {
+    action: "create_order",
+    actor: "client",
+    call: send,
+    reread: (claim) => send(claim.request_id), // same PayPal-Request-Id → the same order, not a second hold
+    paypalId: (r) => r.auth.authorizationId,
+    record: (c, r) =>
+      transition(c, m, "FUNDED", "client", {
+        paypal_order_id: r.orderId,
+        paypal_authorization_id: r.auth.authorizationId,
+        authorized_cents: r.auth.cents,
+        authorization_expires_at: r.auth.expiresAt,
+      }, { paypalId: r.auth.authorizationId, event: "hold:authorized", detail: { method: "sandbox_test_card", status: r.auth.status, cents: r.auth.cents } }),
+  });
+}
+
 async function orderStatus(deps: Deps, orderId: string): Promise<string> {
   try {
     return (await deps.paypal.orders.getOrder({ id: orderId })).status ?? "UNKNOWN";
@@ -444,6 +496,7 @@ function resumeAction(m: Milestone, claim: Claim, deps: Deps): Promise<Milestone
 
 // Public entry points: every action on a milestone runs under its advisory lock (see withMilestoneLock).
 export const createHold = (id: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}) => withMilestoneLock(id, () => createHoldLocked(id, deps, opts));
+export const fundWithTestCard = (id: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}) => withMilestoneLock(id, () => fundWithTestCardLocked(id, deps, opts));
 export const authorizeHold = (id: string, orderId: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}) =>
   withMilestoneLock(id, () => authorizeHoldLocked(id, orderId, deps, opts));
 export const releaseFunds = (id: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}) => withMilestoneLock(id, () => releaseFundsLocked(id, deps, opts));

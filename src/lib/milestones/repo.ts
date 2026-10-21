@@ -38,6 +38,9 @@ export type Milestone = {
   client_signed_at: Date | null;
   worker_signed_hash: string | null;
   worker_signed_at: Date | null;
+  verifier: "code_pr" | "rubric_text";
+  deliverable_text: string | null;
+  release_after: Date | null;
   client_token_hash: string | null;
   worker_token_hash: string | null;
   created_at: Date;
@@ -63,14 +66,15 @@ export async function createMilestone(input: {
   freelancerEmail: string;
   clientEmail?: string;
   platformId?: string;
+  verifier?: "code_pr" | "rubric_text";
 }): Promise<{ milestone: Milestone; clientToken: string; workerToken: string }> {
   const clientToken = newToken("mct");
   const workerToken = newToken("mwt");
   const milestone = await tx(async (c) => {
     const { rows } = await c.query<Milestone>(
-      `insert into milestones (title, brief, amount_cents, freelancer_email, client_email, platform_id, client_token_hash, worker_token_hash)
-       values ($1, $2, $3, $4, $5, $6, $7, $8) returning *`,
-      [input.title, input.brief, input.amountCents, input.freelancerEmail, input.clientEmail ?? null, input.platformId ?? null, hashToken(clientToken), hashToken(workerToken)],
+      `insert into milestones (title, brief, amount_cents, freelancer_email, client_email, platform_id, client_token_hash, worker_token_hash, verifier)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning *`,
+      [input.title, input.brief, input.amountCents, input.freelancerEmail, input.clientEmail ?? null, input.platformId ?? null, hashToken(clientToken), hashToken(workerToken), input.verifier ?? "code_pr"],
     );
     const m = rows[0]!;
     await audit(c, { milestoneId: m.id, actor: "client", event: "created", toState: m.state, detail: input.platformId ? { platformId: input.platformId } : undefined });

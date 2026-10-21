@@ -62,6 +62,7 @@ Response mode: throw-based (`await`) everywhere; none of these resolve to `undef
 | capture | `body: CaptureRequest` | body | `{ amount: { currencyCode: "USD", value: <authorized amount> }, finalCapture: true }` |
 | void | `authorizationId`, `payPalRequestId`, `prefer` | path, headers | as above |
 | reauthorize | `authorizationId`, `payPalRequestId`, `prefer`, `body: {}` | path, headers, body | as above; `{}` for the Content-Type (same 415 risk as authorize); re-authorizes the full original amount |
+| createOrder (card hold) | `body.paymentSource.card` (`CardRequest`: `name`, `number`, `expiry`, `securityCode`, `billingAddress: Address{addressLine1, adminArea2, adminArea1, postalCode, countryCode}`) | body | PayPal's sandbox test Visa; returns an authorized order in one call [VERIFIED Oct 21]. Same `create_order` claim as the wallet path |
 | any (tests/demo only) | `payPalMockResponse` | header `PayPal-Mock-Response` | only when the caller passes a mock code (forced-error demo) |
 
 `OrderRequest` (members from `src/models/order-request.ts`, `purchase-unit-request.ts`, `amount-with-breakdown.ts`, `order-application-context.ts`):

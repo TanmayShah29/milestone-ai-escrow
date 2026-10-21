@@ -160,3 +160,21 @@ describe("access control", () => {
     assert.equal(JSON.stringify(body).includes(workerToken), false);
   });
 });
+
+describe("sandbox test-card funding", () => {
+  it("one createOrder with payment_source.card funds the milestone, sharing the create_order claim", async () => {
+    const { fundWithTestCard } = await import("@/lib/money/flow");
+    const id = await seedMilestone();
+    const stub = stubFetch(() => jsonResponse(201, authorizedOrder("ORDER9", "AUTH9")));
+    const m = await fundWithTestCard(id, depsWith(stub));
+    assert.equal(m.state, "FUNDED");
+    assert.equal(m.paypal_authorization_id, "AUTH9");
+    const sent = JSON.parse(stub.calls[0]!.body!);
+    assert.equal(sent.payment_source.card.number, "4005519200000004");
+    assert.equal(sent.intent, "AUTHORIZE");
+    assert.equal(stub.calls[0]!.request.headers.get("paypal-request-id"), `ms_${id}_create_order_1`);
+    const again = await fundWithTestCard(id, depsWith(stub)).catch((e: Error) => e);
+    assert.ok(again instanceof Error); // already FUNDED: no second hold
+    assert.equal(stub.calls.length, 1);
+  });
+});

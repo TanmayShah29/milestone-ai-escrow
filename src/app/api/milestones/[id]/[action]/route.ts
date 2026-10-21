@@ -1,8 +1,9 @@
 import { publicMilestone, requireRole, roleOn, type Role } from "@/lib/auth";
 import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
-import { cancelHold, createHold, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
+import { cancelHold, createHold, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
 import { draftTerms, editTerms, signTerms } from "@/lib/contract/terms";
+import { humanDecision, objectToRelease, submitDeliverable, tick } from "@/lib/review/run";
 import { getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
 
 export const runtime = "nodejs";
@@ -15,7 +16,12 @@ const ALLOWED: Record<string, Role[]> = {
   "edit-terms": ["client"],
   "sign-terms": ["client", "worker"],
   submit: ["worker"],
+  check: ["client", "worker"],
+  approve: ["client"],
+  "request-changes": ["client"],
+  object: ["client"],
   fund: ["client"],
+  "fund-card": ["client"],
   cancel: ["client"],
   release: ["client"],
   "refresh-hold": ["client"],
@@ -51,15 +57,23 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
         const m = await createHold(id, undefined, opts);
         return done(m, { approveUrl: m.approve_url });
       }
-      case "submit": {
-        const prUrl = typeof body.prUrl === "string" ? body.prUrl.trim() : "";
-        if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(prUrl)) return json(400, { error: "prUrl must be a GitHub pull request URL" });
-        return done(await locked((m) => transition(db(), m, "SUBMITTED", "freelancer", { pr_url: prUrl })));
-      }
+      case "submit":
+        return done(await submitDeliverable(id, { prUrl: str(body.prUrl), text: str(body.text) }));
+      case "check":
+        // Moves the milestone forward: review once CI is done, release after the objection window.
+        return done(await tick(id));
+      case "approve":
+        return done(await humanDecision(id, true));
+      case "request-changes":
+        return done(await humanDecision(id, false));
+      case "object":
+        return done(await objectToRelease(id));
       case "dev-pass":
         // Stand-in for the verifier + decision policy (build step 2).
         if (!devActionsAllowed()) return json(404, { error: "not found" });
         return done(await locked((m) => transition(db(), m, "PASSED", "dev", {}, { event: "review:dev-pass" })));
+      case "fund-card":
+        return done(await fundWithTestCard(id, undefined, opts));
       case "release":
         return done(await releaseFunds(id, undefined, opts));
       case "cancel":
