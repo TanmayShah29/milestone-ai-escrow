@@ -138,6 +138,8 @@ Basic auth: CLIENT_ID:SECRET    body: grant_type=client_credentials
 - **[VERIFIED]** A create with `payment_source.paypal.experience_context` returned `PAYER_ACTION_REQUIRED` with a `payer-action` link: `https://www.sandbox.paypal.com/checkoutnow?token=<ORDER_ID>`.
 - **[VERIFIED]** Capturing before approval fails with HTTP 422: *"Payer has not yet approved the Order for payment."*
 - **[KNOWLEDGE]** An authorization's honor period is 3 days and it stays valid up to 29 days. An unapproved order expires after about 3 hours (sandbox may differ).
+- **[DOCS]** Reauthorizing (`POST /v2/payments/authorizations/{id}/reauthorize`) returns a **new** authorization id with a fresh 3-day honor period, but it does **not** extend the 29 days: the expiry stays 29 days from the original authorization. So a hold can never cover work due later than ~day 29. Milestone caps the due date at the hold's expiry minus 3 days (26 days out before funding) and tells the client to split longer work.
+- **[VERIFIED] Oct 22, 2026:** reauthorizing a fresh card authorization right away fails. Order `4UH18586L5664294W` ($2, intent AUTHORIZE, test Visa) → authorization `6LH98566NS231083V` (CREATED, `expiration_time` 2026-11-19T18:59:55Z, 29 days out). `POST .../6LH98566NS231083V/reauthorize` with `{}` and again with `{"amount":{"currency_code":"USD","value":"2.00"}}` both returned **HTTP 422 `UNPROCESSABLE_ENTITY`**, issue **`REAUTHORIZATION_TOO_SOON`**: *"A reauthorization is only allowed once from Day 4 to Day 29 since the date of the original authorization."* (debug ids `ca4e280979bbf`, `ca4e2809b1f88`). So: at most **one** reauthorization, only on days 4–29. Voided afterwards (204, status VOIDED; the expiry was unchanged). A successful reauthorize can't be tested without a 4-day-old hold.
 - **[DOCS]** `PATCH /orders/{id}` works while the order is CREATED or APPROVED, for example to change the amount after the buyer picks shipping.
 - **[DOCS]** `POST /orders/{id}/track` adds shipment tracking to an order.
 
@@ -233,6 +235,7 @@ Catalog product (PROD-...)  ──▶  Plan (P-..., ACTIVE)  ──▶  Subscrip
 
 ## 7. Disputes
 - Disputes only exist on **completed** transactions. **[DOCS]**
+- **[DOCS]** A `CUSTOMER.DISPUTE.*` webhook resource is the dispute: `dispute_id`, `status`, `reason`, and `disputed_transactions[]` with `seller_transaction_id` (the capture id) and `custom` (the purchase unit's `custom_id`). Milestone matches on those, moves RELEASED/PAID_OUT to DISPUTE on CREATED, and audits UPDATED/RESOLVED. Not yet seen live.
 - To create one, log in to sandbox.paypal.com as the buyer, open Activity, choose the payment, then Report a problem. Handle it as the seller in another browser session. **[DOCS]**
 - States: `OPEN_INQUIRIES` → `REQUIRED_ACTION` / `REQUIRED_OTHER_PARTY_ACTION` → `UNDER_PAYPAL_REVIEW` → `RESOLVED` (`APPEALABLE`).
 - API: list, get and accept-claim are in the MCP. Provide-evidence, make-offer, escalate and send-message are REST only (`/v1/customer/disputes/{id}/...`). **[DOCS]**
@@ -375,3 +378,16 @@ All of these are on the current (restricted) account. They'll be irrelevant once
 - [ ] Subscriptions bill on real time, so use DAY intervals for demos.
 - [ ] Tokens expire after about 9 hours. Refresh in code; don't hard-code tokens.
 - [ ] The README must include sandbox setup steps and test buyer credentials so judges can run it.
+
+---
+
+## Multiparty (payee + platform_fees)
+Spike on 2026-10-22 with app hackathon2. Re-run it with `./scripts/multiparty-check.sh`. The full write-up and the go/no-go call are in `docs/MULTIPARTY.md`.
+- [VERIFIED 2026-10-22] Card order with `payee.email_address` = a **personal** account (the freelancer or the client) → 422 `PAYEE_NOT_ENABLED_FOR_CARD_PROCESSING`. A card payee must be a business account with card processing. The same order with our own business account as payee works (control auth voided).
+- [VERIFIED 2026-10-22] A PayPal-wallet order (no payment_source) with a personal payee → 201 CREATED. We did not approve or capture it, because that needs a browser.
+- [VERIFIED 2026-10-22] `payment_instruction` at order create with `intent: AUTHORIZE` → 422 `UNSUPPORTED_PAYMENT_INSTRUCTION`. With AUTHORIZE, you send it on `/v2/payments/authorizations/{id}/capture`.
+- [VERIFIED 2026-10-22] `platform_fees` (at order create with CAPTURE intent, or on the authorization capture call, even with ourselves as payee) → 422 `PLATFORM_FEES_NOT_SUPPORTED` ("work with your PayPal Account Manager"). It is a permission on the API caller.
+- [VERIFIED 2026-10-22] `disbursement_mode: DELAYED` → 422 `DELAYED_DISBURSEMENT_NOT_SUPPORTED`, so `/v1/payments/referenced-payouts-items` can't be used.
+- [VERIFIED 2026-10-22] `POST /v2/customer/partner-referrals` → 403 `NOT_AUTHORIZED`. The token has no partner or referenced-payouts scopes.
+- [DOCS] To unlock: PayPal Commerce Platform partner approval (through an account manager), sellers onboarded with the Partner Referrals API (consent + `payee.merchant_id`), and the `PayPal-Partner-Attribution-Id` header. Once that's in place, the seller owns disputes and chargebacks.
+- Result: **no-go before the Nov 6 freeze**. Keep the hold → capture → payout-minus-fee flow.

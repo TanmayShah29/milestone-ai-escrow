@@ -88,6 +88,9 @@ html:root[data-theme="dark"]:not(.b-nothing) {
 .b-indicator.ms-ind-expiry > i {
   color: var(--ink-2);
 }
+.b-indicator.ms-ind-limit > i {
+  color: var(--ink-2);
+}
 .b-indicator.ms-ind-danger > i {
   color: var(--failed);
   font-size: 1.2em;

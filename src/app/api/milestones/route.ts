@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { json, toHttp } from "@/lib/http";
 import { valueToCents } from "@/lib/money/amounts";
 import { createMilestone, type Milestone } from "@/lib/milestones/repo";
+import { HOUR, hit, ipKey, tooMany, waitText } from "@/lib/ratelimit";
+import { dueCapMessage, latestDueAt } from "@/lib/timeline";
 
 export const runtime = "nodejs";
 
@@ -21,10 +23,17 @@ export async function GET(req: Request) {
 }
 
 // POST: anyone can open a milestone (the web app's client), or a platform with its API key.
-// The response carries the client and worker links' tokens, once.
+// The response carries the client and worker links' tokens, once. Anonymous callers get 10 per hour
+// per IP (the public demo); platforms with an API key aren't limited per IP.
+const CREATE_PER_IP_HOUR = 10;
+
 export async function POST(req: Request) {
   try {
     const platform = await platformFrom(req);
+    if (!platform) {
+      const v = await hit([{ key: ipKey(req, "create"), limit: CREATE_PER_IP_HOUR, windowMs: HOUR }]);
+      if (!v.ok) return tooMany(`You've opened ${CREATE_PER_IP_HOUR} milestones this hour. Try again in ${waitText(v.retryAfterMs)}.`, v.retryAfterMs);
+    }
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const title = typeof b.title === "string" ? b.title.trim() : "";
     const freelancerEmail = typeof b.freelancerEmail === "string" ? b.freelancerEmail.trim() : "";
@@ -39,6 +48,8 @@ export async function POST(req: Request) {
     if (amountCents <= 0 || amountCents > 1_000_000) return json(400, { error: "The amount must be between $0.01 and $10,000.00." });
     const dueAt = typeof b.dueDate === "string" && b.dueDate ? new Date(b.dueDate) : undefined;
     if (dueAt && (Number.isNaN(dueAt.getTime()) || dueAt.getTime() < Date.now())) return json(400, { error: "Pick a due date in the future." });
+    const dueLimit = latestDueAt({ created_at: new Date(), authorization_expires_at: null });
+    if (dueAt && dueAt.getTime() > dueLimit.getTime()) return json(400, { error: dueCapMessage(dueLimit) });
     const afterId = typeof b.afterMilestoneId === "string" && /^[0-9a-f-]{36}$/i.test(b.afterMilestoneId) ? b.afterMilestoneId : undefined;
     const clientEmail = typeof b.clientEmail === "string" && EMAIL.test(b.clientEmail.trim()) ? b.clientEmail.trim() : undefined;
     const { milestone, clientToken, workerToken } = await createMilestone({

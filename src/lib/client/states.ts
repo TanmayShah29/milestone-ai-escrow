@@ -20,6 +20,7 @@ export type MilestoneView = Record<string, unknown> & {
   payout_cents?: number | null;
   payout_status?: string | null;
   release_after?: string | null;
+  contested_at?: string | null;
   due_at?: string | null;
   paypal_authorization_id?: string | null;
 };
@@ -35,10 +36,11 @@ export const STATUS: Record<string, { label: string; tone: Tone }> = {
   CHANGES_REQUESTED: { label: "Changes needed", tone: "failed" },
   HUMAN_CHECK: { label: "Needs the client's decision", tone: "held" },
   PASSED: { label: "Approved, releasing soon", tone: "paid" },
-  CONTESTED: { label: "Client objected", tone: "failed" },
+  CONTESTED: { label: "Objected, second review", tone: "held" },
   RELEASED: { label: "Paying out", tone: "paid" },
   PAID_OUT: { label: "Paid", tone: "paid" },
   PAYOUT_FAILED: { label: "Payout returned", tone: "failed" },
+  DISPUTE: { label: "PayPal dispute open", tone: "failed" },
   CANCELLED: { label: "Cancelled", tone: "blocked" },
 };
 
@@ -62,6 +64,7 @@ export function stepIndex(state: string): number {
     case "CONTESTED":
     case "RELEASED":
     case "PAYOUT_FAILED":
+    case "DISPUTE":
       return 4;
     case "PAID_OUT":
       return 5;
@@ -98,7 +101,7 @@ export function holdExpiryWarning(m: MilestoneView): string | undefined {
   const due = new Date(m.due_at);
   const expiry = new Date(m.authorization_expires_at);
   if (!(due.getTime() > expiry.getTime())) return undefined;
-  return `Work is due ${shortDate(due)}, after the PayPal hold expires ${shortDate(expiry)}. Move the date or reauthorize the hold.`;
+  return `Work is due ${shortDate(due)}, after the PayPal hold expires ${shortDate(expiry)}. Move the date earlier; holds can't be extended past 29 days.`;
 }
 
 /** Where the money is right now, in one line. */
@@ -113,10 +116,14 @@ export function moneyLine(m: MilestoneView): { headline: string; detail: string;
       return cancelledAt(m) >= 2
         ? { headline: "Hold released", detail: "Nothing was charged. The PayPal hold was voided.", tone: "blocked" }
         : { headline: "Cancelled before funding", detail: "Nothing was held or charged.", tone: "blocked" };
+    case "CONTESTED":
+      return { headline: `${usd(held)} held on PayPal`, detail: "Not charged. The client objected, so the money stays held while the same commit is reviewed a second time.", tone: "held" };
     case "RELEASED":
       return { headline: "Captured, paying the worker", detail: `${usd(m.captured_cents)} captured; ${usd(m.payout_cents)} is on its way to the worker.`, tone: "paid" };
     case "PAID_OUT":
       return { headline: `Paid ${usd(m.payout_cents)} to the worker`, detail: `${usd(m.captured_cents)} captured, ${usd(m.fee_cents)} platform fee.`, tone: "paid" };
+    case "DISPUTE":
+      return { headline: "In a PayPal dispute", detail: `The client opened a dispute on the ${usd(m.captured_cents)} captured. PayPal decides it; nothing moves from here.`, tone: "failed" };
     case "PAYOUT_FAILED":
       return { headline: "Payout came back", detail: `PayPal returned the payout (${m.payout_status ?? "failed"}). The money is with the platform; check the worker's PayPal email.`, tone: "failed" };
     default:
@@ -135,7 +142,7 @@ const EVENT_COPY: Record<string, string> = {
   "order:superseded": "Expired PayPal checkout replaced",
   "hold:authorized": "Money held on PayPal",
   "hold:voided": "Hold voided, nothing charged",
-  "hold:reauthorized": "Hold renewed",
+  "hold:reauthorized": "Honor period renewed",
   "hold:captured": "Money captured",
   "payout:created": "Payout sent to the worker",
   "payout:succeeded": "Worker received the payout",
@@ -149,7 +156,12 @@ const EVENT_COPY: Record<string, string> = {
   "review:changes_by_client": "Client asked for changes",
   "review:comment_failed": "Could not comment on the PR",
   "review:dev-pass": "Review marked passed (dev)",
-  "release:objected": "Client objected; money stays held",
+  "release:objected": "Client objected; money stays held for a second review",
+  "review:second": "Second review after the objection",
+  "dispute:opened": "Client opened a PayPal dispute",
+  "dispute:updated": "PayPal dispute updated",
+  "dispute:resolved": "PayPal dispute resolved",
+  "dispute:not_applied": "PayPal dispute recorded",
   "schedule:due_changed": "Due date moved",
 };
 

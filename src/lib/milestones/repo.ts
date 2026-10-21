@@ -41,6 +41,7 @@ export type Milestone = {
   verifier: "code_pr" | "rubric_text";
   deliverable_text: string | null;
   release_after: Date | null;
+  contested_at: Date | null;
   due_at: Date;
   after_milestone_id: string | null;
   client_token_hash: string | null;

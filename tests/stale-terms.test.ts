@@ -72,7 +72,8 @@ describe("stale tests (contract)", () => {
     await editTerms(milestone.id, edited(sampleTerms, newText));
     let calls = 0;
     let prompt = "";
-    const code = "import test from 'node:test';\ntest('trims', () => {});";
+    // A test that bites (fails against an empty implementation), so the test check asks for no second call.
+    const code = "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { saveTheme } from '../src/theme.ts';\ntest('trims', () => { assert.equal(saveTheme(' dark '), 'dark'); });";
     const m = await draftTerms(milestone.id, {}, async (_model, _sys, p) => {
       calls++;
       prompt = p;

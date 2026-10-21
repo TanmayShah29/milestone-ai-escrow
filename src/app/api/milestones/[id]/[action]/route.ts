@@ -1,4 +1,4 @@
-import { publicMilestone, requireRole, roleOn, type Role } from "@/lib/auth";
+import { platformFrom, publicMilestone, requireRole, roleOn, type Role } from "@/lib/auth";
 import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
 import { cancelHold, createHold, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
@@ -6,6 +6,7 @@ import { draftTerms, editTerms, signTerms } from "@/lib/contract/terms";
 import { setDueDate } from "@/lib/schedule";
 import { humanDecision, objectToRelease, submitDeliverable, tick } from "@/lib/review/run";
 import { getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
+import { DAY, HOUR, hit, ipKey, tooMany, waitText, type Rule } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 
@@ -31,6 +32,22 @@ const ALLOWED: Record<string, Role[]> = {
   sync: ["client", "worker"],
 };
 
+// AI drafting spends the shared free-model budget: 5 per hour per IP (platform keys are exempt) and
+// 3 per day per milestone (for everyone).
+const DRAFTS_PER_IP_HOUR = 5;
+const DRAFTS_PER_MILESTONE_DAY = 3;
+
+async function draftLimit(req: Request, id: string) {
+  const rules: Rule[] = [{ key: `draft-terms:milestone:${id}`, limit: DRAFTS_PER_MILESTONE_DAY, windowMs: DAY }];
+  if (!(await platformFrom(req))) rules.push({ key: ipKey(req, "draft-terms"), limit: DRAFTS_PER_IP_HOUR, windowMs: HOUR });
+  const v = await hit(rules);
+  if (v.ok) return undefined;
+  const wait = waitText(v.retryAfterMs);
+  return v.rule.windowMs === DAY
+    ? tooMany(`These terms have been drafted ${DRAFTS_PER_MILESTONE_DAY} times today. Edit them by hand, or try again in ${wait}.`, v.retryAfterMs)
+    : tooMany(`You've drafted terms ${DRAFTS_PER_IP_HOUR} times this hour. Try again in ${wait}.`, v.retryAfterMs);
+}
+
 // POST /api/milestones/:id/:action  (auth: the milestone's client/worker link token, or the owning platform's API key)
 export async function POST(req: Request, ctx: { params: Promise<{ id: string; action: string }> }) {
   try {
@@ -49,8 +66,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
     const locked = (fn: (m: Milestone) => Promise<Milestone>) => withMilestoneLock(id, async () => fn(await getMilestone(id)));
 
     switch (action) {
-      case "draft-terms":
+      case "draft-terms": {
+        const limited = await draftLimit(req, id);
+        if (limited) return limited;
         return done(await draftTerms(id, { repo: str(body.repo), stack: str(body.stack) }));
+      }
       case "edit-terms":
         return done(await editTerms(id, body.terms, { ...(str(body.repo) !== undefined ? { repo: str(body.repo) } : {}) }));
       case "sign-terms":

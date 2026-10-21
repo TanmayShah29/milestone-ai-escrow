@@ -405,7 +405,13 @@ async function cancelHoldLocked(milestoneId: string, deps: Deps): Promise<Milest
 }
 
 // ---------------------------------------------------------------------------------------------
-// Keep a hold alive past the 3-day honor period (the daily refreshHolds job calls this).
+// Renew a hold's 3-day honor period. PayPal holds are valid 29 days from the original authorization and
+// reauthorizing does NOT extend that: it returns a new authorization id with a fresh honor period inside
+// the same 29 days. PayPal allows it once, from day 4 to day 29; earlier it answers 422
+// REAUTHORIZATION_TOO_SOON (verified in the sandbox, PayPal_Sandbox_Guide.md). Nothing schedules this:
+// it runs only on the client's refresh-hold action (and from resumeAction to settle an unknown outcome).
+// Capture works without it inside the 29 days; the due-date cap (lib/timeline.ts latestDueAt) keeps the
+// work inside them.
 
 const HOLD_STATES: MilestoneState[] = ["FUNDED", "SUBMITTED", "IN_REVIEW", "CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CONTESTED"];
 

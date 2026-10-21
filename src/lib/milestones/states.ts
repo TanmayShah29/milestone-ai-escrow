@@ -13,7 +13,6 @@ export const STATES = [
   "RELEASED",
   "PAID_OUT",
   "PAYOUT_FAILED",
-  "PARTIAL_REFUND",
   "DISPUTE",
   "CANCELLED",
 ] as const;
@@ -29,11 +28,12 @@ const TRANSITIONS: Record<MilestoneState, readonly MilestoneState[]> = {
   CHANGES_REQUESTED: ["SUBMITTED"],
   HUMAN_CHECK: ["PASSED", "CHANGES_REQUESTED"],
   PASSED: ["RELEASED", "CONTESTED"],
-  CONTESTED: ["PARTIAL_REFUND", "DISPUTE", "RELEASED"],
-  RELEASED: ["PAID_OUT", "PAYOUT_FAILED"],
-  PAID_OUT: [],
+  // One second review on the same commit: pass → back to PASSED with release_after = objection + 72 h
+  // (releaseFunds only runs from PASSED); fail → CHANGES_REQUESTED; no usable verdict in 72 h → HUMAN_CHECK.
+  CONTESTED: ["PASSED", "CHANGES_REQUESTED", "HUMAN_CHECK"],
+  RELEASED: ["PAID_OUT", "PAYOUT_FAILED", "DISPUTE"], // a PayPal dispute can only open on captured money
+  PAID_OUT: ["DISPUTE"],
   PAYOUT_FAILED: [],
-  PARTIAL_REFUND: [],
   DISPUTE: [],
   CANCELLED: [],
 };

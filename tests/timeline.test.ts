@@ -63,7 +63,7 @@ describe("timeline builder", () => {
 
   it("work due after the hold expires is flagged and the hold turns orange", async () => {
     const m = await getMilestone(await seedMilestone({ state: "FUNDED", authorization_expires_at: new Date(Date.now() + 10 * DAY), due_at: new Date(Date.now() + 20 * DAY) }));
-    assert.match(holdWarning(m) ?? "", /Test milestone/);
+    assert.match(holdWarning(m) ?? "", /Test milestone.+Move the date earlier; holds can't be extended past 29 days/);
     const tl = buildTimeline(m, [{ event: "hold:authorized", to_state: "FUNDED", created_at: new Date() }]);
     assert.equal(tl.warnings.length, 1);
     assert.equal(phases(tl).hold!.eventColor, "orange");
@@ -72,14 +72,26 @@ describe("timeline builder", () => {
 });
 
 describe("rescheduling", () => {
-  it("the client moves the due date; past the hold's expiry it is kept and flagged", async () => {
+  it("funded: the client moves the due date up to the hold's expiry minus 3 days; later is refused", async () => {
     const id = await seedMilestone({ state: "FUNDED", authorization_expires_at: new Date(Date.now() + 10 * DAY) });
     const ok = await setDueDate(id, new Date(Date.now() + 5 * DAY).toISOString());
     assert.deepEqual(ok.warnings, []);
-    const late = await setDueDate(id, new Date(Date.now() + 15 * DAY).toISOString());
-    assert.equal(late.warnings.length, 1);
+    await assert.rejects(setDueDate(id, new Date(Date.now() + 8 * DAY).toISOString()), (e: Error) => e instanceof InvariantViolation && /PayPal holds last 29 days, so the work must be due by .+\. Split longer work into milestones\./.test(e.message));
     const { rowCount } = await db().query("select 1 from audit_log where milestone_id = $1 and event = 'schedule:due_changed'", [id]);
-    assert.equal(rowCount, 2);
+    assert.equal(rowCount, 1);
+    assert.equal(new Date((await getMilestone(id)).due_at).getTime() < Date.now() + 6 * DAY, true);
+  });
+
+  it("not funded: the due date can be at most 26 days after creation", async () => {
+    const id = await seedMilestone({ state: "AGREED" });
+    await setDueDate(id, new Date(Date.now() + 25 * DAY).toISOString());
+    await assert.rejects(setDueDate(id, new Date(Date.now() + 27 * DAY).toISOString()), /PayPal holds last 29 days/);
+  });
+
+  it("the Work bar carries the cap so the Gantt can refuse a drag past it", async () => {
+    const expiry = new Date(Date.now() + 20 * DAY);
+    const m = await getMilestone(await seedMilestone({ state: "FUNDED", authorization_expires_at: expiry }));
+    assert.equal(phases(buildTimeline(m, [])).work!.dueLimit, new Date(expiry.getTime() - 3 * DAY).toISOString());
   });
 
   it("can't move the date into the past or after the work is submitted", async () => {

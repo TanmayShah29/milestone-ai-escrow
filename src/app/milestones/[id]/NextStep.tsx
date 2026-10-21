@@ -115,6 +115,8 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
   const signedMine = !!hash && (role === "client" ? m.client_signed_hash : m.worker_signed_hash) === hash;
   const signedTheirs = !!hash && (role === "client" ? m.worker_signed_hash : m.client_signed_hash) === hash;
   const due = m.due_at ? new Date(m.due_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+  const releaseDate = m.release_after ? new Date(m.release_after).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "a date set by the rules";
+  const secondReviewPassed = m.state === "PASSED" && !!m.contested_at;
 
   const act = async (label: string, action: string, body: Record<string, unknown> = {}) => {
     setBusy(label);
@@ -284,6 +286,21 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
       }
       break;
     case "PASSED": {
+      if (secondReviewPassed) {
+        title = "Second review passed";
+        body =
+          role === "client" ? (
+            <div className="space-y-3">
+              <p className="text-sm text-ink-2">The same commit passed a second review after your objection. The money is captured and the worker is paid on {releaseDate}.</p>
+              <button className={secondary} disabled={!!busy} onClick={() => act("release", "release")}>
+                {spin("release")}Release now
+              </button>
+            </div>
+          ) : (
+            <Waiting>Your work passed the second review. You&apos;re paid on {releaseDate}.</Waiting>
+          );
+        break;
+      }
       const left = Math.max(0, Math.ceil((releaseAt - now) / 1000));
       const mmss = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
       title = left > 0 ? `Approved. Releasing in ${mmss}` : "Releasing now";
@@ -320,8 +337,13 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
       body = <p className="text-sm text-ink-2">PayPal returned it ({String(m.payout_status ?? "")}). Check the worker&apos;s PayPal email; the money is with the platform, not lost.</p>;
       break;
     case "CONTESTED":
-      title = "The client objected";
-      body = <p className="text-sm text-ink-2">The money stays held. Resolving objections is on the roadmap.</p>;
+      if (role === "client") {
+        title = "Objection recorded";
+        body = <p className="text-sm text-ink-2">A second review runs on the same commit; if it passes, payment releases on {releaseDate}. The money stays held meanwhile.</p>;
+      } else {
+        title = "The client objected";
+        body = <Waiting>A second review runs; if it passes, you&apos;re paid on {releaseDate}.</Waiting>;
+      }
       break;
     case "CANCELLED":
       title = "Cancelled";

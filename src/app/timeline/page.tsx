@@ -80,6 +80,9 @@ export default function TimelinePage() {
     [tokens, load],
   );
 
+  // A drag past the hold's limit is refused in the Gantt before any request is made.
+  const onRefuse = useCallback((message: string) => setNotice({ kind: "error", text: `The due date was not moved: ${message}` }), []);
+
   return (
     <main className="flex h-[calc(100vh-3.25rem)] flex-col">
       <DemoTour onTimeline />
@@ -106,7 +109,7 @@ export default function TimelinePage() {
         {!data ? (
           <TimelineSkeleton />
         ) : data.tasks.length > 0 ? (
-          <GanttView data={data} onReschedule={onReschedule} />
+          <GanttView data={data} onReschedule={onReschedule} onRefuse={onRefuse} />
         ) : (
           <p className="p-4 text-sm text-ink-2">
             No milestones yet: <Link href="/new" className="underline">create one first</Link>.

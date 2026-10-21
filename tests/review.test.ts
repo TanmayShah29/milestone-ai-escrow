@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { APICallError } from "ai";
 import { after, beforeEach, describe, it } from "node:test";
 import { depsWith, jsonResponse, resetDb, sampleTerms, seedMilestone, stubFetch } from "./helpers";
 import { db } from "@/lib/db";
@@ -9,7 +10,7 @@ import type { CheckRun, GitHub, PrFile, PullRequest } from "@/lib/review/github"
 import { decide, type Verdict } from "@/lib/review/policy";
 import { scanForInjection } from "@/lib/review/injection";
 import { acceptanceCheckName } from "@/lib/review/verifiers";
-import { humanDecision, objectToRelease, reviewMilestone, submitDeliverable, tick, type ReviewDeps } from "@/lib/review/run";
+import { humanDecision, objectionReleaseMs, objectToRelease, reviewMilestone, submitDeliverable, tick, type ReviewDeps } from "@/lib/review/run";
 
 beforeEach(resetDb);
 after(() => db().end());
@@ -217,6 +218,108 @@ describe("after the verdict", () => {
     const stub = stubFetch(() => jsonResponse(500, {}));
     assert.equal((await tick(id, { github: fakeGitHub().gh, money: depsWith(stub) })).state, "PASSED");
     assert.equal(stub.calls.length, 0);
+  });
+});
+
+describe("objection: one second review on the same commit", () => {
+  const releaseStub = () =>
+    stubFetch(({ url }) =>
+      url.pathname.endsWith("/capture")
+        ? jsonResponse(201, { id: "CAP1", status: "COMPLETED", amount: { currency_code: "USD", value: "300.00" } })
+        : url.pathname === "/v1/payments/payouts"
+          ? jsonResponse(201, { batch_header: { payout_batch_id: "B1", batch_status: "PENDING" } })
+          : jsonResponse(200, { batch_header: { batch_status: "PENDING" }, items: [{ payout_item_id: "I1", transaction_status: "PENDING" }] }),
+    );
+  const recorder = (inner: ModelCall = passingAi) => {
+    const models: string[] = [];
+    const call: ModelCall = async (model, ...rest) => (models.push(model), inner(model, ...rest));
+    return { models, call };
+  };
+
+  /** Submitted → first review passes (primary model) → the client objects inside the window. */
+  async function objected() {
+    const { id, body, c1 } = await submitted();
+    const first = recorder();
+    const { gh } = fakeGitHub({ body, runs: [run("contract", "success"), run(c1, "success")] });
+    assert.equal((await reviewMilestone(id, deps(gh, first.call))).state, "PASSED");
+    assert.deepEqual(first.models, ["test/primary:free"]);
+    const m = await objectToRelease(id);
+    assert.equal(m.state, "CONTESTED");
+    assert.ok(m.contested_at);
+    return { id, body, c1, contestedAt: m.contested_at! };
+  }
+
+  it("a passing second review uses another model, releases 72 h after the objection, and allows no second objection", async () => {
+    const { id, body, c1, contestedAt } = await objected();
+    const second = recorder();
+    const { gh, comments } = fakeGitHub({ body, runs: [run("contract", "success"), run(c1, "success")] });
+    const m = await tick(id, deps(gh, second.call));
+    assert.equal(m.state, "PASSED");
+    assert.deepEqual(second.models, ["test/fallback:free"], "the second review runs on a different model");
+    assert.equal(m.release_after!.getTime(), contestedAt.getTime() + objectionReleaseMs());
+    assert.match(comments[0]!, /Second review after the client's objection/);
+
+    // Recorded apart from the first review (the per-commit cache was bypassed exactly once).
+    const { rows } = await db().query<{ head_sha: string; decision: string; model: string }>("select head_sha, decision, model from reviews where milestone_id = $1 and status = 'done' order by id", [id]);
+    assert.equal(rows.length, 2);
+    assert.match(rows[1]!.head_sha, /^abc1234:second:/);
+    assert.equal(rows[1]!.model, "test/fallback:free");
+    const { rows: audits } = await db().query("select from_state, to_state from audit_log where milestone_id = $1 and event = 'review:second'", [id]);
+    assert.deepEqual(audits, [{ from_state: "CONTESTED", to_state: "PASSED" }]);
+
+    await assert.rejects(objectToRelease(id), /already objected/);
+
+    // Not before the 72 h: no PayPal call and no new AI call.
+    const early = releaseStub();
+    assert.equal((await tick(id, { github: gh, aiCall: second.call, money: depsWith(early) })).state, "PASSED");
+    assert.equal(early.calls.length, 0);
+    assert.equal(second.models.length, 1);
+
+    // 72 h later (fake time: move release_after into the past), tick captures and pays out.
+    await db().query("update milestones set release_after = now() - interval '1 second' where id = $1", [id]);
+    const late = await tick(id, { github: gh, money: depsWith(releaseStub()) });
+    assert.equal(late.state, "RELEASED");
+    assert.equal(late.paypal_payout_batch_id, "B1");
+  });
+
+  it("a failing second review requests changes, and a fixed resubmission can be objected to again", async () => {
+    const { id, body, c1 } = await objected();
+    const { gh } = fakeGitHub({ body, runs: [run("contract", "success"), run(c1, "failure")] }); // CI re-read on the same commit
+    const m = await tick(id, deps(gh));
+    assert.equal(m.state, "CHANGES_REQUESTED");
+    assert.equal(m.contested_at, null);
+    const { rows } = await db().query("select decision from reviews where milestone_id = $1 and head_sha like '%:second:%'", [id]);
+    assert.deepEqual(rows, [{ decision: "CHANGES_REQUESTED" }]);
+  });
+
+  it("new commits pushed after approval fail the second review", async () => {
+    const { id, body, c1 } = await objected();
+    const { gh, calls } = fakeGitHub({ body, sha: "def5678", runs: [run("contract", "success"), run(c1, "success")] });
+    assert.equal((await tick(id, deps(gh))).state, "CHANGES_REQUESTED");
+    assert.ok(!calls.includes("checks"));
+  });
+
+  it("AI busy keeps the money held and retries later; no usable verdict within 72 h goes to the client", async () => {
+    const { id, body, c1 } = await objected();
+    const busy = recorder(async () => {
+      throw new APICallError({ message: "rate limited", url: "https://openrouter.ai", requestBodyValues: {}, statusCode: 429, isRetryable: true });
+    });
+    const { gh } = fakeGitHub({ body, runs: [run("contract", "success"), run(c1, "success")] });
+    assert.equal((await tick(id, deps(gh, busy.call))).state, "CONTESTED");
+    const { rows } = await db().query<{ status: string }>("select status from reviews where milestone_id = $1 and head_sha like '%:second:%'", [id]);
+    assert.deepEqual(rows, [{ status: "pending" }]);
+    assert.equal((await tick(id, deps(gh, busy.call))).state, "CONTESTED");
+    assert.equal(busy.models.length, 1, "retries are spaced out, not on every tick");
+
+    await db().query("update milestones set contested_at = now() - interval '73 hours' where id = $1", [id]);
+    const m = await tick(id, deps(gh, busy.call));
+    assert.equal(m.state, "HUMAN_CHECK");
+  });
+
+  it("can't object after the window closes", async () => {
+    const id = await seedMilestone({ state: "PASSED", release_after: new Date(Date.now() - 1_000) });
+    await assert.rejects(objectToRelease(id), /window has closed/);
+    assert.equal((await getMilestone(id)).state, "PASSED");
   });
 });
 

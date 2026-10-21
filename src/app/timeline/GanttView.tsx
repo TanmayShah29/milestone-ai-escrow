@@ -8,10 +8,12 @@ import "@bryntum/gantt/svalbard-light.css";
 import "@bryntum/gantt/fontawesome/css/fontawesome.css";
 import "@bryntum/gantt/fontawesome/css/solid.css";
 import "./gantt.css";
+import { dueCapMessage } from "@/lib/timeline";
 
 // The money-aware Gantt: each milestone is a row with its phases; the PayPal hold gates the work
 // (finish-to-start), the hold's day-3 honor period and day-29 expiry are indicators on its bar, and the
-// client can drag the Work bar to move the due date (flagged when it passes the hold's expiry). Whether a
+// client can drag the Work bar to move the due date, up to the latest date the hold allows (`dueLimit`: the
+// hold's day-29 expiry minus 3 days; holds can't be extended, so a drag past it is refused). Whether a
 // Work bar can be dragged comes from the data (`canReschedule`, set by lib/timeline.ts and the viewer's role).
 // Theme: gantt.css maps Bryntum's palette onto our tokens, so the chart follows light and dark.
 // Note: the React wrapper takes features as `<name>Feature` props; a `features` object is ignored.
@@ -27,6 +29,7 @@ class MilestoneTask extends TaskModel {
       { name: "holdExpiry", type: "date" },
       { name: "holdWarn", type: "boolean" },
       { name: "canReschedule", type: "boolean" },
+      { name: "dueLimit", type: "date" },
     ];
   }
 }
@@ -53,10 +56,16 @@ const STATUS_LABEL: Record<string, string> = { unfunded: "not funded" };
 
 const canDrag = (t: TaskModel) => t.get("phase") === "work" && !!t.get("canReschedule");
 
-export default function GanttView(props: { data: Data; onReschedule: (milestoneId: string, dueAt: Date) => void }) {
-  const { data, onReschedule } = props;
+const pastLimit = (t: TaskModel, end: Date | null | undefined) => {
+  const limit = t.get("dueLimit") as Date | null;
+  return limit && end && end.getTime() > limit.getTime() ? limit : null;
+};
+
+export default function GanttView(props: { data: Data; onReschedule: (milestoneId: string, dueAt: Date) => void; onRefuse?: (message: string) => void }) {
+  const { data, onReschedule, onRefuse } = props;
 
   const ref = useRef<BryntumGantt>(null);
+  const refused = useRef<TaskModel | null>(null); // the Work bar whose drag ended past the hold's limit
   const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
   const initialNarrow = useRef(narrow);
   const project = useMemo(() => new ProjectModel({ taskModelClass: MilestoneTask, tasks: data.tasks as never[], dependencies: data.dependencies as never[] }), [data]);
@@ -91,7 +100,19 @@ export default function GanttView(props: { data: Data; onReschedule: (milestoneI
       dependencyEditFeature: false,
       taskDragFeature: false,
       taskDragCreateFeature: false,
-      taskResizeFeature: { leftHandle: false, reservedSpace: 0 },
+      taskResizeFeature: {
+        leftHandle: false,
+        reservedSpace: 0,
+        // The hold's limit is a hard stop: a drop past it is refused here and by the schedule API.
+        validatorFn: ({ record, endDate }: { record: TaskModel; endDate: Date }) => {
+          refused.current = pastLimit(record, endDate) ? record : null;
+          return !refused.current;
+        },
+        tooltipTemplate: ({ record, endDate, valid }: { record: TaskModel; endDate: Date; valid: boolean }) => {
+          const limit = pastLimit(record, endDate);
+          return valid || !limit ? `Due ${StringHelper.encodeHtml(endDate.toDateString())}` : `<b>Too late</b><br>${StringHelper.encodeHtml(dueCapMessage(limit))}`;
+        },
+      },
       percentBarFeature: { allowResize: false }, // progress comes from the milestone's state, not a drag
       dependenciesFeature: { allowCreate: false },
       timeRangesFeature: { showCurrentTimeLine: true },
@@ -109,21 +130,30 @@ export default function GanttView(props: { data: Data; onReschedule: (milestoneI
             const d = t.get("holdExpiry") as Date | null;
             if (!d) return null;
             const warn = !!t.get("holdWarn");
-            return { startDate: d, name: warn ? "Hold expires (day 29) before the work is due: reauthorize" : "Hold expires (day 29)", iconCls: warn ? "fa fa-triangle-exclamation" : "fa fa-hourglass-end", cls: warn ? "ms-ind-danger" : "ms-ind-expiry" };
+            return { startDate: d, name: warn ? "Hold expires (day 29) before the work is due: move the date earlier" : "Hold expires (day 29), can't be extended", iconCls: warn ? "fa fa-triangle-exclamation" : "fa fa-hourglass-end", cls: warn ? "ms-ind-danger" : "ms-ind-expiry" };
+          },
+          dueLimit: (t: TaskModel) => {
+            const d = t.get("dueLimit") as Date | null;
+            return d && canDrag(t) ? { startDate: d, name: "Latest due date the PayPal hold allows", iconCls: "fa fa-ban", cls: "ms-ind-limit" } : null;
           },
         },
       },
       taskTooltipFeature: {
         template: ({ taskRecord }: { taskRecord: TaskModel }) =>
           `<b>${StringHelper.encodeHtml(taskRecord.name)}</b><br>${StringHelper.encodeHtml(String(taskRecord.get("note") ?? ""))}` +
-          (taskRecord.get("phase") !== "work" ? "" : canDrag(taskRecord) ? "<br><i>Drag the end of this bar to move the due date.</i>" : "<br><i>The due date is fixed: work was submitted, or only the client can move it.</i>"),
+          (taskRecord.get("phase") !== "work" ? "" : canDrag(taskRecord) ? `<br><i>Drag the end of this bar to move the due date${taskRecord.get("dueLimit") ? ` (up to ${StringHelper.encodeHtml((taskRecord.get("dueLimit") as Date).toDateString())}: PayPal holds last 29 days)` : ""}.</i>` : "<br><i>The due date is fixed: work was submitted, or only the client can move it.</i>"),
       },
       onBeforeTaskResize: ({ taskRecord }: { taskRecord: TaskModel }) => canDrag(taskRecord),
       onTaskResizeEnd: ({ changed, taskRecord }: { changed: boolean; taskRecord: TaskModel }) => {
+        if (refused.current === taskRecord) {
+          refused.current = null;
+          onRefuse?.(dueCapMessage(taskRecord.get("dueLimit") as Date));
+          return;
+        }
         if (changed && taskRecord.endDate) onReschedule(String(taskRecord.get("milestoneId")), taskRecord.endDate as Date);
       },
     }),
-    [project, data, onReschedule],
+    [project, data, onReschedule, onRefuse],
   );
 
   useEffect(() => {

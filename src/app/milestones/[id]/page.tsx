@@ -87,7 +87,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   // While CI runs, the objection window ticks or a payout settles, nudge the milestone forward.
   const state = data?.milestone.state;
   useEffect(() => {
-    if (!token || !state || !["SUBMITTED", "IN_REVIEW", "PASSED", "RELEASED"].includes(state)) return;
+    if (!token || !state || !["SUBMITTED", "IN_REVIEW", "PASSED", "CONTESTED", "RELEASED"].includes(state)) return;
     const t = setInterval(() => fetch(`/api/milestones/${id}/check`, authed({ method: "POST" })).then(() => load()), 15_000);
     return () => clearInterval(t);
   }, [id, token, state, authed, load]);

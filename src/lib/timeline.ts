@@ -28,6 +28,7 @@ export type TimelineTask = {
   honorEnd?: string; // hold: end of the 3-day honor period
   holdExpiry?: string; // hold: 29-day expiry
   holdWarn?: boolean; // the work is due after the hold expires
+  dueLimit?: string; // work: the latest due date the PayPal hold allows (see latestDueAt)
   canReschedule?: boolean; // work: the due date can still be moved (the API accepts it in this state)
   milestoneId: string;
   phase?: string;
@@ -62,12 +63,36 @@ export function objectionMs(): number {
   return (Number.isFinite(s) && s >= 0 ? s : 120) * 1000;
 }
 
-/** When the hold needs reauthorizing before the work is due (PayPal holds expire after 29 days). */
+// PayPal holds (authorizations) are valid for 29 days from the original authorization. Reauthorizing
+// gives a new 3-day honor period but never extends the 29 days, so a milestone's work must be due with
+// margin to review, wait out the objection window and capture before the hold expires.
+export const HOLD_VALID_DAYS = 29;
+export const DUE_MARGIN_DAYS = 3;
+
+const capDate = (x: number) => new Date(x).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/**
+ * The latest due date the PayPal hold allows: its expiry minus 3 days once funded. Before funding the
+ * hold doesn't exist yet and will be placed no earlier than now, so 29 − 3 = 26 days from creation (or
+ * from now, if the milestone was created earlier: a later hold expires later).
+ */
+export function latestDueAt(m: Pick<Milestone, "created_at" | "authorization_expires_at">, now = Date.now()): Date {
+  const expiry = t(m.authorization_expires_at);
+  if (expiry) return new Date(expiry - DUE_MARGIN_DAYS * DAY);
+  return new Date(Math.max(t(m.created_at) ?? now, now) + (HOLD_VALID_DAYS - DUE_MARGIN_DAYS) * DAY);
+}
+
+/** Why a due date past latestDueAt is refused (shown by the schedule API and the Gantt). */
+export function dueCapMessage(limit: Date): string {
+  return `PayPal holds last ${HOLD_VALID_DAYS} days, so the work must be due by ${capDate(limit.getTime())}. Split longer work into milestones.`;
+}
+
+/** The work is due after the PayPal hold expires (holds can't be extended past 29 days). */
 export function holdWarning(m: Pick<Milestone, "title" | "due_at" | "authorization_expires_at" | "state">): string | undefined {
   const due = t(m.due_at);
   const expiry = t(m.authorization_expires_at);
   if (!due || !expiry || ["RELEASED", "PAID_OUT", "CANCELLED"].includes(m.state)) return undefined;
-  return due > expiry ? `“${m.title}”: the work is due after the PayPal hold expires. Reauthorize the hold or move the date.` : undefined;
+  return due > expiry ? `“${m.title}”: the work is due after the PayPal hold expires on ${capDate(expiry)}. Move the date earlier; holds can't be extended past ${HOLD_VALID_DAYS} days.` : undefined;
 }
 
 export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now()): Timeline {
@@ -148,6 +173,7 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
       deadlineDate: iso(due),
       resizable: editableDue ? "end" : false,
       canReschedule: editableDue,
+      ...(editableDue ? { dueLimit: latestDueAt(m, now).toISOString() } : {}),
     }),
     phase("review", "Review (CI + AI, fixed rules)", reviewStart, reviewEnd, `Decision ${fmt(decided)} · state ${s}`),
     phase("window", "Objection window", windowStart, windowEnd, `Release after ${fmt(t(m.release_after))}`),

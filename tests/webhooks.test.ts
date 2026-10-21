@@ -120,4 +120,66 @@ describe("handleWebhookEvent", () => {
     assert.equal(retry.status, "processed");
     assert.equal((await getMilestone(id)).state, "PAID_OUT");
   });
+
+  // The resource is a /v1/customer/disputes dispute: seller_transaction_id is our capture id, custom our custom_id.
+  const dispute = (id: string, type = "CUSTOMER.DISPUTE.CREATED", tx: Record<string, unknown> = { seller_transaction_id: "CAP1" }): WebhookEvent => ({
+    id,
+    event_type: type,
+    resource_type: "dispute",
+    resource: { dispute_id: "PP-D-1", reason: "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED", status: "OPEN", disputed_transactions: [tx] },
+  });
+  const disputeRows = (milestoneId: string) =>
+    db().query<{ event: string; actor: string; paypal_id: string; to_state: string | null }>(
+      "select event, actor, paypal_id, to_state from audit_log where milestone_id = $1 and event like 'dispute:%' order by id",
+      [milestoneId],
+    );
+
+  it("CUSTOMER.DISPUTE.CREATED moves a paid-out milestone to DISPUTE once, stores the dispute id and audits it", async () => {
+    const id = await seedMilestone({ ...released, state: "PAID_OUT", payout_status: "SUCCESS" });
+    const stub = stubFetch(() => jsonResponse(500, {}));
+    const out = await handleWebhookEvent(dispute("WH-D1"), depsWith(stub));
+    assert.deepEqual(out, { status: "processed", milestoneId: id });
+    assert.equal((await handleWebhookEvent(dispute("WH-D1"), depsWith(stub))).status, "duplicate");
+    // The same dispute announced again under a new event id (PayPal resends): still one transition.
+    assert.equal((await handleWebhookEvent(dispute("WH-D1b"), depsWith(stub))).status, "processed");
+    const m = await getMilestone(id);
+    assert.equal(m.state, "DISPUTE");
+    assert.equal(m.paypal_dispute_id, "PP-D-1");
+    const { rows } = await disputeRows(id);
+    assert.deepEqual(rows.map((r) => [r.event, r.actor, r.paypal_id, r.to_state]), [
+      ["dispute:opened", "paypal", "PP-D-1", "DISPUTE"],
+      ["dispute:created", "paypal", "PP-D-1", null],
+    ]);
+    assert.equal(stub.calls.length, 0, "no PayPal calls: no money moves on a dispute");
+  });
+
+  it("a dispute matched by custom_id moves a RELEASED milestone; UPDATED and RESOLVED are audited only", async () => {
+    const id = await seedMilestone({ ...released, paypal_capture_id: "OTHER" });
+    const stub = stubFetch(() => jsonResponse(500, {}));
+    await handleWebhookEvent(dispute("WH-D2", "CUSTOMER.DISPUTE.CREATED", { seller_transaction_id: "UNKNOWN", custom: id }), depsWith(stub));
+    assert.equal((await getMilestone(id)).state, "DISPUTE");
+    await handleWebhookEvent(dispute("WH-D3", "CUSTOMER.DISPUTE.UPDATED", { seller_transaction_id: "UNKNOWN" }), depsWith(stub)); // found by the stored dispute id
+    await handleWebhookEvent(dispute("WH-D4", "CUSTOMER.DISPUTE.RESOLVED", { seller_transaction_id: "UNKNOWN" }), depsWith(stub));
+    const { rows } = await disputeRows(id);
+    assert.deepEqual(rows.map((r) => r.event), ["dispute:opened", "dispute:updated", "dispute:resolved"]);
+    assert.equal((await getMilestone(id)).state, "DISPUTE");
+  });
+
+  it("a dispute on a milestone whose money was never captured changes no state", async () => {
+    const id = await seedMilestone({ state: "FUNDED", paypal_order_id: "ORDER1", paypal_authorization_id: "AUTH1" });
+    await handleWebhookEvent(dispute("WH-D5", "CUSTOMER.DISPUTE.CREATED", { custom: id }), depsWith(stubFetch(() => jsonResponse(500, {}))));
+    const m = await getMilestone(id);
+    assert.equal(m.state, "FUNDED");
+    assert.equal(m.paypal_dispute_id, "PP-D-1");
+    assert.deepEqual((await disputeRows(id)).rows.map((r) => r.event), ["dispute:not_applied"]);
+  });
+
+  it("a dispute on a transaction we don't know is audited without a milestone and ignored", async () => {
+    const id = await seedMilestone(released);
+    const out = await handleWebhookEvent(dispute("WH-D6", "CUSTOMER.DISPUTE.CREATED", { seller_transaction_id: "SOMEONE_ELSES" }), depsWith(stubFetch(() => jsonResponse(500, {}))));
+    assert.equal(out.status, "ignored");
+    assert.equal((await getMilestone(id)).state, "RELEASED");
+    const { rows } = await db().query<{ event: string; paypal_id: string }>("select event, paypal_id from audit_log where milestone_id is null");
+    assert.deepEqual(rows, [{ event: "dispute:unmatched", paypal_id: "PP-D-1" }]);
+  });
 });
