@@ -9,7 +9,10 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const { rows } = await db().query<{ model: string; created_at: Date }>("select model, created_at from ai_calls where ok order by id desc limit 1");
-    return json(200, { models: configuredModels(), lastModel: rows[0]?.model ?? null, aiCallsToday: await callsToday(), aiDailyCap: dailyCap() });
+    const { rows: failures } = await db().query(
+      "select model, status, left(error, 300) as error, created_at from ai_calls where not ok order by id desc limit 5",
+    );
+    return json(200, { models: configuredModels(), lastModel: rows[0]?.model ?? null, aiCallsToday: await callsToday(), aiDailyCap: dailyCap(), recentFailures: failures });
   } catch {
     return json(503, { error: "status unavailable" });
   }

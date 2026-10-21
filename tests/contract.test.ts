@@ -121,3 +121,26 @@ describe("contract terms", () => {
     assert.equal(await contractByHash("0".repeat(64)), undefined);
   });
 });
+
+describe("repairing near-miss AI drafts", () => {
+  it("fixes ids, test paths outside acceptance/, test-less 'test' checks and a missing testCommand", async () => {
+    const { repairDraft } = await import("@/lib/contract/terms");
+    const fixed = termsSchema.parse(
+      repairDraft({
+        criteria: [
+          { id: "1", text: "slugify lowercases", kind: "MUST", check: "test", test: { path: "tests/slug.ts", code: "import test from 'node:test'; test('x', () => {});" } },
+          { id: "x", text: "README documents it", kind: "nice-to-have", check: "test" },
+          { text: "   " },
+        ],
+      }),
+    );
+    assert.deepEqual(
+      fixed.criteria.map((c) => [c.id, c.kind, c.check, c.test?.path]),
+      [
+        ["C1", "must", "test", "acceptance/c1.test.ts"],
+        ["C2", "nice", "review", undefined],
+      ],
+    );
+    assert.equal(fixed.testCommand, "node --test 'acceptance/*.test.ts'");
+  });
+});
