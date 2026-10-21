@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { linkFor, rememberLink } from "@/lib/client/links";
+import { TermsPanel } from "./terms";
 
 type Milestone = Record<string, unknown> & { id: string; title: string; state: string; amount_cents: number };
 type AuditRow = { id: number; actor: string; event: string; from_state: string | null; to_state: string | null; paypal_id: string | null; created_at: string };
@@ -13,7 +14,7 @@ const C: Role[] = ["client"];
 const W: Role[] = ["worker"];
 const ANY: Role[] = ["client", "worker"];
 const ACTIONS: Record<string, { label: string; action: string; roles: Role[] }[]> = {
-  DRAFT: [{ label: "Accept the milestone", action: "agree", roles: W }, { label: "Cancel", action: "cancel", roles: C }],
+  DRAFT: [{ label: "Cancel", action: "cancel", roles: C }],
   AGREED: [{ label: "Fund with PayPal hold", action: "fund", roles: C }, { label: "Cancel", action: "cancel", roles: C }],
   FUNDED: [{ label: "Submit PR", action: "submit", roles: W }, { label: "Cancel (void hold)", action: "cancel", roles: C }, { label: "Reauthorize hold", action: "refresh-hold", roles: C }],
   SUBMITTED: [{ label: "Dev: mark review passed", action: "dev-pass", roles: C }],
@@ -86,6 +87,16 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
     load();
   }
 
+  // Terms actions (draft / edit / sign) send JSON bodies and report errors in the banner.
+  async function termsCall(action: string, body: Record<string, unknown>) {
+    setMsg(undefined);
+    const r = await fetch(`/api/milestones/${id}/${action}`, authed({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+    const b = await r.json();
+    if (!r.ok) setMsg(b.error);
+    load();
+    return { ok: r.ok, error: b.error as string | undefined };
+  }
+
   if (!as) return <main className="p-8">You need this milestone&apos;s client or worker link to open it.</main>;
   if (!data?.milestone) return <main className="p-8">{msg ?? "Loading…"}</main>;
   const m = data.milestone;
@@ -126,6 +137,8 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
           </button>
         ))}
       </div>
+
+      <TermsPanel m={m} role={as} call={termsCall} />
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm break-all">
         {[

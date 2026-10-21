@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@openrouter/ai-sdk-provider": "^1.5.4",
+    "ai": "^5.0.279",
     "next": "^15.5.28",
     "paypal": "github:context-plugins/paypal-typescript-sdk#main",
     "pg": "^8.23.1",

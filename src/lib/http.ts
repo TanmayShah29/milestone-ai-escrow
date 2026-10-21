@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { AiBusy, AiUnreadable } from "@/lib/ai/client";
 import { Forbidden, Unauthorized } from "@/lib/auth";
-import { InProgress, InvariantViolation, OutcomeUnknown } from "@/lib/money/flow";
+import { InProgress, InvariantViolation, OutcomeUnknown } from "@/lib/errors";
 import { NotFound, StaleState } from "@/lib/milestones/repo";
 import { InvalidTransition } from "@/lib/milestones/states";
 import { PaypalFailure } from "@/lib/paypal/errors";
@@ -10,6 +11,8 @@ export function toHttp(err: unknown): NextResponse {
   if (err instanceof NotFound) return json(404, { error: err.message });
   if (err instanceof Unauthorized) return json(401, { error: err.message });
   if (err instanceof Forbidden) return json(403, { error: err.message });
+  if (err instanceof AiBusy) return json(503, { error: err.message, aiBusy: true });
+  if (err instanceof AiUnreadable) return json(502, { error: "The AI didn't return usable terms. Try again, or write them by hand." });
   if (err instanceof InvalidTransition || err instanceof StaleState || err instanceof InProgress) return json(409, { error: err.message });
   if (err instanceof InvariantViolation) return json(409, { error: err.message });
   if (err instanceof OutcomeUnknown) return json(202, { error: "Outcome unknown, checking with PayPal. Use sync to settle it.", unknown: true });

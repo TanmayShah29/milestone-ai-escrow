@@ -5,10 +5,16 @@ process.env.PAYPAL_CLIENT_ID = "test-id";
 process.env.PAYPAL_CLIENT_SECRET = "test-secret";
 process.env.PLATFORM_FEE_BPS = "500";
 process.env.PAYPAL_WEBHOOK_ID = "WH-TEST";
+process.env.AI_MODEL = "test/primary:free";
+process.env.AI_MODEL_FALLBACK = "test/fallback:free";
+delete process.env.AI_MODEL_FALLBACK_2;
+process.env.AI_DAILY_CAP = "40";
 
 import { PaypalClient } from "paypal";
 import { db } from "@/lib/db";
 import type { Deps } from "@/lib/money/flow";
+import { hashTerms, type Terms } from "@/lib/contract/terms";
+import type { Milestone } from "@/lib/milestones/repo";
 
 export type Call = { url: URL; request: Request; body: string | undefined };
 type Responder = (call: Call) => Response | Promise<Response>;
@@ -48,9 +54,18 @@ export const connectionDrop = () => {
 };
 
 export async function resetDb() {
-  await db().query("truncate webhook_events, audit_log, money_actions, milestones cascade");
+  await db().query("truncate webhook_events, audit_log, money_actions, ai_calls, milestones cascade");
 }
 
+export const sampleTerms: Terms = {
+  criteria: [
+    { id: "C1", text: "Settings page has a dark mode toggle that persists across reloads", kind: "must", check: "test", test: { path: "acceptance/c1.test.ts", code: "import test from 'node:test';\ntest('c1', () => {});" } },
+    { id: "C2", text: "Toggle is reachable by keyboard", kind: "nice", check: "review" },
+  ],
+  testCommand: "node --test 'acceptance/*.test.ts'",
+};
+
+/** Inserts a milestone. Anything past DRAFT gets terms both sides signed (funding requires them). */
 export async function seedMilestone(fields: Record<string, unknown> = {}): Promise<string> {
   const base: Record<string, unknown> = {
     title: "Test milestone",
@@ -60,11 +75,16 @@ export async function seedMilestone(fields: Record<string, unknown> = {}): Promi
     ...fields,
   };
   const cols = Object.keys(base);
-  const { rows } = await db().query<{ id: string }>(
-    `insert into milestones (${cols.join(", ")}) values (${cols.map((_, i) => `$${i + 1}`).join(", ")}) returning id`,
+  const { rows } = await db().query<Milestone>(
+    `insert into milestones (${cols.join(", ")}) values (${cols.map((_, i) => `$${i + 1}`).join(", ")}) returning *`,
     cols.map((c) => base[c]),
   );
-  return rows[0]!.id;
+  const m = rows[0]!;
+  if (m.state !== "DRAFT" && !("criteria" in fields)) {
+    const hash = hashTerms(m, sampleTerms);
+    await db().query("update milestones set criteria = $2, criteria_hash = $3, client_signed_hash = $3, worker_signed_hash = $3 where id = $1", [m.id, JSON.stringify(sampleTerms), hash]);
+  }
+  return m.id;
 }
 
 export async function claimsFor(milestoneId: string) {

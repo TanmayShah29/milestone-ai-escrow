@@ -7,6 +7,8 @@ import { PaypalFailure, classify } from "@/lib/paypal/errors";
 import { paypal } from "@/lib/paypal/client";
 import { createPayout, getPayout } from "@/lib/paypal/payouts";
 import { centsToValue, splitCapture, valueToCents } from "./amounts";
+import { assertTermsAgreed } from "@/lib/contract/terms";
+import { InProgress, InvariantViolation, OutcomeUnknown } from "@/lib/errors";
 import { claimAction, isStalePending, settleClaim, unknownClaims, type Claim, type MoneyAction } from "./claims";
 
 // The only code that moves money (money rule 1). Every write follows paypal-plan.md 1b.1:
@@ -21,9 +23,7 @@ export function defaultDeps(): Deps {
 
 const PREFER = "return=representation"; // the SDK default "return=minimal" omits the ids we store
 
-export class InProgress extends Error {}
-export class OutcomeUnknown extends Error {}
-export class InvariantViolation extends Error {}
+export { InProgress, InvariantViolation, OutcomeUnknown };
 
 /** Returned by a re-read that proves PayPal did not act: the claim is released and a retry is safe. */
 export const NOT_DONE = Symbol("not done");
@@ -128,6 +128,7 @@ function readCreatedOrder(o: Order): CreatedOrder {
 async function createHoldLocked(milestoneId: string, deps: Deps, opts: { mock?: string }): Promise<Milestone> {
   let m = await getMilestone(milestoneId);
   requireState(m, "AGREED");
+  assertTermsAgreed(m); // the client funds exactly the terms both sides signed
   if (m.paypal_order_id) {
     // Reuse a live order; replace one that expired (unapproved orders lapse after a few hours) or was voided.
     const status = await orderStatus(deps, m.paypal_order_id);
@@ -146,7 +147,8 @@ async function createHoldLocked(milestoneId: string, deps: Deps, opts: { mock?: 
             {
               amount: { currencyCode: "USD", value: centsToValue(m.amount_cents) },
               customId: m.id,
-              description: m.title.slice(0, 127),
+              // The signed terms' fingerprint, visible to the client on PayPal's approval page.
+              description: `${m.title.slice(0, 100)} · terms ${m.criteria_hash!.slice(0, 12)}`,
             },
           ],
           applicationContext: {

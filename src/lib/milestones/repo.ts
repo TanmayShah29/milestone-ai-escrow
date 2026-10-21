@@ -29,6 +29,15 @@ export type Milestone = {
   paypal_refund_id: string | null;
   paypal_dispute_id: string | null;
   platform_id: string | null;
+  repo: string | null;
+  stack: string | null;
+  criteria: unknown;
+  criteria_hash: string | null;
+  criteria_model: string | null;
+  client_signed_hash: string | null;
+  client_signed_at: Date | null;
+  worker_signed_hash: string | null;
+  worker_signed_at: Date | null;
   client_token_hash: string | null;
   worker_token_hash: string | null;
   created_at: Date;

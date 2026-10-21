@@ -142,6 +142,7 @@ A re-read that itself fails leaves the claim `unknown`; the milestone shows "Pay
 | Capture amount ≤ authorized amount (money rule 3) | `milestones.authorized_cents` | `flow.ts` `releaseFunds` before the claim | "releaseFunds › refuses to capture above the authorized amount, before any call" |
 | Payout = captured − fee | `milestones.captured_cents`, `PLATFORM_FEE_BPS` | `src/lib/money/amounts.ts` `payoutCents` | `tests/amounts.test.ts` |
 | Each write is only legal from its source state | `src/lib/milestones/states.ts` transition table | `flow.ts` before the claim | "cancelHold › is refused once work is submitted, with no PayPal call" |
+| Funding only covers terms both sides signed, unchanged | `milestones.criteria` + `criteria_hash` + both signed hashes | `assertTermsAgreed` in `createHoldLocked`, before the claim | "contract terms › funding refuses terms that changed after signing, before any PayPal call" |
 
 ## 1b.3 OPTIONAL FIELDS
 
@@ -153,7 +154,7 @@ A re-read that itself fails leaves the claim `unknown`; the milestone shows "Pay
 | all | `payPalAuthAssertion`, `payPalPartnerAttributionId`, `payPalClientMetadataId` | nothing | ❌ |
 | getOrder | `fields` | nothing | ❌ |
 | OrderRequest | `purchaseUnits[0].customId` | webhook mapping back to the milestone (step 3) + money rule 4 | ✅ milestone id |
-| OrderRequest | `purchaseUnits[0].description` | YOUR CALL: client sees what the hold is for on the approval page | ✅ milestone title (≤127 chars) |
+| OrderRequest | `purchaseUnits[0].description` | the signed-terms fingerprint (Phase 1): `"<title ≤100> · terms <first 12 hex of the terms SHA-256>"`, shown to the client on PayPal's approval page | ✅ [VERIFIED Oct 21: PayPal returned `Phase 1 e2e · terms e9e48faca380`] |
 | OrderRequest | `applicationContext.returnUrl/cancelUrl` | the approve → authorize step (plan step 7–8) | ✅ |
 | OrderRequest | `applicationContext.shippingPreference` | YOUR CALL: a service has no shipping; without it the approval page asks for an address | ✅ `NO_SHIPPING` |
 | OrderRequest | `payer`, `paymentSource`, `processingInstruction`, `items`, `invoiceId`, `brandName`, `userAction`, `locale` | nothing | ❌ |

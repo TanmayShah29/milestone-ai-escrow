@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
-import { authorizedOrder, claimsFor, depsWith, jsonResponse, resetDb, seedMilestone, stubFetch } from "./helpers";
+import { authorizedOrder, claimsFor, depsWith, jsonResponse, resetDb, sampleTerms, seedMilestone, stubFetch } from "./helpers";
 import { db } from "@/lib/db";
 import { authorizeHold, createHold, releaseFunds, syncMilestone, OutcomeUnknown } from "@/lib/money/flow";
 import { createMilestone, getMilestone } from "@/lib/milestones/repo";
@@ -133,11 +133,19 @@ describe("access control", () => {
 
   it("actions need a link token, and each side can only do its own actions", async () => {
     const { milestone, clientToken, workerToken } = await createMilestone({ title: "t", brief: "", amountCents: 100, freelancerEmail: "w@example.com" });
-    assert.equal((await call(milestone.id, "agree")).status, 401);
-    assert.equal((await call(milestone.id, "agree", clientToken)).status, 403); // only the worker accepts
-    assert.equal((await call(milestone.id, "agree", "mwt_forged")).status, 403);
-    assert.equal((await call(milestone.id, "agree", workerToken)).status, 200);
+    const callWith = (act: string, token: string | undefined, body: unknown) =>
+      action(new Request(`http://localhost/api/milestones/${milestone.id}/${act}`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { "x-milestone-token": token } : {}) }, body: JSON.stringify(body) }), {
+        params: Promise.resolve({ id: milestone.id, action: act }),
+      });
+    assert.equal((await call(milestone.id, "edit-terms")).status, 401);
+    assert.equal((await callWith("edit-terms", workerToken, { terms: sampleTerms })).status, 403); // only the client writes terms
+    assert.equal((await callWith("edit-terms", "mct_forged", { terms: sampleTerms })).status, 403);
+    const edited = await callWith("edit-terms", clientToken, { terms: sampleTerms });
+    assert.equal(edited.status, 200);
+    const hash = (await edited.json()).milestone.criteria_hash;
     assert.equal((await call(milestone.id, "cancel", workerToken)).status, 403); // only the client cancels
+    assert.equal((await callWith("sign-terms", workerToken, { hash })).status, 200);
+    assert.equal((await callWith("sign-terms", clientToken, { hash })).status, 200);
     assert.equal((await getMilestone(milestone.id)).state, "AGREED");
   });
 

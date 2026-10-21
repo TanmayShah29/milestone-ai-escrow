@@ -2,13 +2,18 @@ import { publicMilestone, requireRole, roleOn, type Role } from "@/lib/auth";
 import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
 import { cancelHold, createHold, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
+import { draftTerms, editTerms, signTerms } from "@/lib/contract/terms";
 import { getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
 
 export const runtime = "nodejs";
 
+const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+
 // Which side may trigger each action.
 const ALLOWED: Record<string, Role[]> = {
-  agree: ["worker"],
+  "draft-terms": ["client"],
+  "edit-terms": ["client"],
+  "sign-terms": ["client", "worker"],
   submit: ["worker"],
   fund: ["client"],
   cancel: ["client"],
@@ -24,7 +29,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
     const { id, action } = await ctx.params;
     const allowed = ALLOWED[action];
     if (!allowed) return json(404, { error: `unknown action ${action}` });
-    requireRole(await roleOn(req, await getMilestone(id)), ...allowed);
+    const role = await roleOn(req, await getMilestone(id));
+    requireRole(role, ...allowed);
 
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     // Forced PayPal errors (PayPal-Mock-Response) are a demo/dev tool only.
@@ -35,8 +41,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
     const locked = (fn: (m: Milestone) => Promise<Milestone>) => withMilestoneLock(id, async () => fn(await getMilestone(id)));
 
     switch (action) {
-      case "agree":
-        return done(await locked((m) => transition(db(), m, "AGREED", "freelancer")));
+      case "draft-terms":
+        return done(await draftTerms(id, { repo: str(body.repo), stack: str(body.stack) }));
+      case "edit-terms":
+        return done(await editTerms(id, body.terms));
+      case "sign-terms":
+        return done(await signTerms(id, role, str(body.hash) ?? ""));
       case "fund": {
         const m = await createHold(id, undefined, opts);
         return done(m, { approveUrl: m.approve_url });
