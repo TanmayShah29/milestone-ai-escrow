@@ -2,6 +2,16 @@
   "mcpServers": {
     "paypal": {
       "command": "/Users/tanmay/Paypal/scripts/paypal-mcp.sh"
+    },
+    "milestone": {
+      "command": "npx",
+      "args": [
+        "tsx",
+        "mcp/server.mts"
+      ],
+      "env": {
+        "MILESTONE_API": "https://milestone-ai-escrow.onrender.com"
+      }
     }
   }
 }
