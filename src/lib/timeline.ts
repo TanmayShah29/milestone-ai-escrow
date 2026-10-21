@@ -81,17 +81,17 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
   const due = t(m.due_at) ?? created + 7 * DAY;
   const s = m.state;
 
-  // Planned schedule, anchored on the real dates where they exist.
-  const termsStart = created;
-  const termsEnd = Math.max(agreed ?? created + DAY, termsStart + 3_600_000);
+  // What happened uses its real dates; what hasn't happened yet uses the plan. Every bar is at least an
+  // hour long so a phase that took seconds (a live demo run) is still visible after zoom-to-fit.
+  const HOUR = 3_600_000;
+  const span = (start: number, end: number) => [start, Math.max(end, start + HOUR)] as const;
+  const [termsStart, termsEnd] = span(created, agreed ?? created + DAY);
   const holdStart = held ?? termsEnd;
-  const workStart = holdStart;
-  const workEnd = Math.max(due, workStart + DAY);
-  const reviewStart = submitted && submitted < workEnd ? workEnd : (submitted ?? workEnd);
-  const reviewEnd = reviewStart + DAY;
-  const windowEnd = reviewEnd + Math.max(objectionMs(), 2 * DAY);
-  const payoutEnd = windowEnd + DAY;
-  const holdEnd = Math.max(released ?? cancelled ?? t(m.authorization_expires_at) ?? holdStart + 29 * DAY, holdStart + 3_600_000);
+  const [workStart, workEnd] = span(holdStart, submitted ?? Math.max(due, holdStart + DAY));
+  const [reviewStart, reviewEnd] = span(workEnd, decided && submitted ? decided : workEnd + DAY);
+  const [windowStart, windowEnd] = span(reviewEnd, released ?? (passed && t(m.release_after) ? t(m.release_after)! : reviewEnd + Math.max(objectionMs(), 2 * DAY)));
+  const [payoutStart, payoutEnd] = span(windowEnd, paid ?? windowEnd + DAY);
+  const [, holdEnd] = span(holdStart, released ?? cancelled ?? t(m.authorization_expires_at) ?? holdStart + 29 * DAY);
 
   const after = (states: string[]) => states.includes(s);
   const status = {
@@ -143,8 +143,8 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
       resizable: editableDue ? "end" : false,
     }),
     phase("review", "Review (CI + AI, fixed rules)", reviewStart, reviewEnd, `Decision ${fmt(decided)} · state ${s}`),
-    phase("window", "Objection window", reviewEnd, windowEnd, `Release after ${fmt(t(m.release_after))}`),
-    phase("payout", `Payout ${money(m.payout_cents)}`, windowEnd, payoutEnd, `Captured ${fmt(released)} · paid ${fmt(paid)}${m.paypal_payout_item_id ? ` · item ${m.paypal_payout_item_id}` : ""}`),
+    phase("window", "Objection window", windowStart, windowEnd, `Release after ${fmt(t(m.release_after))}`),
+    phase("payout", `Payout ${money(m.payout_cents)}`, payoutStart, payoutEnd, `Captured ${fmt(released)} · paid ${fmt(paid)}${m.paypal_payout_item_id ? ` · item ${m.paypal_payout_item_id}` : ""}`),
   ];
 
   const allDone = s === "PAID_OUT";

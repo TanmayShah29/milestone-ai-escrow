@@ -2,7 +2,7 @@
 
 import { ProjectModel, StringHelper, TaskModel } from "@bryntum/gantt";
 import { BryntumGantt, type BryntumGanttProps } from "@bryntum/gantt-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import "@bryntum/gantt/gantt.css";
 import "@bryntum/gantt/svalbard-light.css";
 import "@bryntum/gantt/fontawesome/css/fontawesome.css";
@@ -33,6 +33,7 @@ type Data = { tasks: unknown[]; dependencies: unknown[] };
 export default function GanttView(props: { data: Data; canReschedule: (milestoneId: string) => boolean; onReschedule: (milestoneId: string, dueAt: Date) => void }) {
   const { data, canReschedule, onReschedule } = props;
 
+  const ref = useRef<BryntumGantt>(null);
   const project = useMemo(() => new ProjectModel({ taskModelClass: MilestoneTask, tasks: data.tasks as never[], dependencies: data.dependencies as never[] }), [data]);
 
   const config = useMemo<BryntumGanttProps>(
@@ -89,5 +90,11 @@ export default function GanttView(props: { data: Data; canReschedule: (milestone
     [project, canReschedule, onReschedule],
   );
 
-  return <BryntumGantt {...config} />;
+  // Fit the view to the data: a live run takes minutes, a real project weeks.
+  useEffect(() => {
+    const id = setTimeout(() => ref.current?.instance?.zoomToFit({ leftMargin: 40, rightMargin: 60 }), 300);
+    return () => clearTimeout(id);
+  }, [project]);
+
+  return <BryntumGantt ref={ref} {...config} />;
 }
