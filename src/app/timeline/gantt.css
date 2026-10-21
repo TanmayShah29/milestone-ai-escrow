@@ -1,21 +1,105 @@
-/* Milestone Gantt: phase states and hold indicators. */
-.b-gantt-task-wrap.ms-blocked .b-gantt-task {
+/* Milestone Gantt: Bryntum's palette mapped onto our tokens, phase states and hold indicators. */
+
+/* Theme. Bryntum's neutral scale runs from neutral-100 (the surface) to neutral-0 (the text). Mixing our
+   panel and ink tokens gives the same scale in either theme, so the chart follows light and dark with the
+   page (globals.css flips the tokens). Higher specificity than the theme file's `:root:not(.b-nothing)`. */
+html:root:not(.b-nothing) {
+  --b-mix: var(--panel);
+  --b-opposite: var(--ink);
+  --b-neutral-100: var(--panel);
+  --b-neutral-99: color-mix(in oklab, var(--panel) 99%, var(--ink));
+  --b-neutral-98: color-mix(in oklab, var(--panel) 98%, var(--ink));
+  --b-neutral-97: color-mix(in oklab, var(--panel) 97%, var(--ink));
+  --b-neutral-96: color-mix(in oklab, var(--panel) 96%, var(--ink));
+  --b-neutral-95: color-mix(in oklab, var(--panel) 95%, var(--ink));
+  --b-neutral-94: color-mix(in oklab, var(--panel) 94%, var(--ink));
+  --b-neutral-93: color-mix(in oklab, var(--panel) 93%, var(--ink));
+  --b-neutral-92: color-mix(in oklab, var(--panel) 92%, var(--ink));
+  --b-neutral-91: color-mix(in oklab, var(--panel) 91%, var(--ink));
+  --b-neutral-90: var(--rule);
+  --b-neutral-85: color-mix(in oklab, var(--panel) 85%, var(--ink));
+  --b-neutral-80: var(--rule-strong);
+  --b-neutral-75: color-mix(in oklab, var(--panel) 75%, var(--ink));
+  --b-neutral-70: color-mix(in oklab, var(--panel) 70%, var(--ink));
+  --b-neutral-65: color-mix(in oklab, var(--panel) 65%, var(--ink));
+  --b-neutral-60: color-mix(in oklab, var(--panel) 60%, var(--ink));
+  --b-neutral-55: color-mix(in oklab, var(--panel) 55%, var(--ink));
+  --b-neutral-50: color-mix(in oklab, var(--panel) 50%, var(--ink));
+  --b-neutral-45: color-mix(in oklab, var(--panel) 45%, var(--ink));
+  --b-neutral-40: color-mix(in oklab, var(--panel) 40%, var(--ink));
+  --b-neutral-35: color-mix(in oklab, var(--panel) 35%, var(--ink));
+  --b-neutral-30: var(--ink-3);
+  --b-neutral-25: var(--ink-2);
+  --b-neutral-20: color-mix(in oklab, var(--panel) 20%, var(--ink));
+  --b-neutral-15: color-mix(in oklab, var(--panel) 15%, var(--ink));
+  --b-neutral-10: color-mix(in oklab, var(--panel) 10%, var(--ink));
+  --b-neutral-5: color-mix(in oklab, var(--panel) 5%, var(--ink));
+  --b-neutral-2: color-mix(in oklab, var(--panel) 2%, var(--ink));
+  --b-neutral-1: color-mix(in oklab, var(--panel) 1%, var(--ink));
+  --b-neutral-0: var(--ink);
+  --b-popup-background: var(--panel);
+  --b-tooltip-rich-background: var(--panel);
+  --b-tooltip-plain-background: var(--panel);
+  --b-column-lines-tick-color: color-mix(in oklab, var(--rule) 50%, var(--panel));
+  /* Short phases (a live run takes minutes) stay visible at week scale. */
+  --b-gantt-task-min-width: 12px;
+  --b-widget-color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  html:root:not([data-theme="light"]):not(.b-nothing) {
+    --b-widget-color-scheme: dark;
+  }
+}
+html:root[data-theme="dark"]:not(.b-nothing) {
+  --b-widget-color-scheme: dark;
+}
+
+/* Time lines: Project start/end and now. Bryntum draws white on amber/orange (fails AA); use token pairs
+   that pass in both themes (blocked on panel ≥5.6:1, ink on panel ≥12:1). */
+.b-gantt .b-sch-line:not(.b-sch-mouse-indicator) {
+  --b-time-range-line-color: var(--blocked);
+  --b-time-range-line-header-background: var(--blocked);
+  --b-time-range-line-label-background: var(--blocked);
+  --b-time-range-line-label-color: var(--panel);
+  --b-time-range-color: var(--panel);
+}
+.b-gantt .b-sch-line.b-sch-current-time,
+.b-gantt .b-sch-current-time {
+  --b-time-range-line-color: var(--ink);
+  --b-time-range-line-header-background: var(--ink);
+  --b-time-range-line-label-background: var(--ink);
+  --b-time-range-line-label-color: var(--panel);
+  --b-time-range-color: var(--panel);
+}
+
+/* Phase states. */
+.b-gantt-task.ms-blocked,
+.b-gantt-task.ms-unfunded {
   background-image: repeating-linear-gradient(45deg, transparent 0 6px, rgb(255 255 255 / 0.35) 6px 12px);
 }
-.b-gantt-task-wrap.ms-failed .b-gantt-task {
-  outline: 2px solid rgb(220 38 38 / 0.7);
+.b-gantt-task.ms-failed {
+  outline: 2px solid var(--failed);
 }
-.b-indicator.ms-ind-honor {
-  color: #b45309;
+
+/* Hold indicators (Bryntum draws the icon as an <i> inside the indicator). */
+.b-indicator.ms-ind-honor > i {
+  color: var(--held);
 }
-.b-indicator.ms-ind-expiry {
-  color: #475569;
+.b-indicator.ms-ind-expiry > i {
+  color: var(--ink-2);
 }
-.b-indicator.ms-ind-danger,
-.b-indicator.ms-ind-danger::before {
-  color: #dc2626 !important;
+.b-indicator.ms-ind-danger > i {
+  color: var(--failed);
   font-size: 1.2em;
 }
-.b-indicator.ms-ind-honor::before {
-  color: #b45309 !important;
+
+/* Phone: the grid is narrowed to the names (GanttView); tighten the tree so the names stay readable. */
+@media (max-width: 639px) {
+  .b-gantt {
+    --b-tree-indent-size: 0.6em;
+    --b-tree-cell-gap: 0.35em;
+    --b-tree-icon-width: 1em;
+    --b-grid-cell-padding-inline: 0.4em;
+    font-size: 13px;
+  }
 }

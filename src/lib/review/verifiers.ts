@@ -2,22 +2,74 @@ import { z } from "zod";
 import { generateJson, type ModelCall } from "@/lib/ai/client";
 import type { Criterion, Terms } from "@/lib/contract/terms";
 import type { Milestone } from "@/lib/milestones/repo";
-import type { GitHub } from "./github";
+import type { CheckRun, GitHub, PrFile, PullRequest } from "./github";
 import { parsePrUrl } from "./github";
 import { addedLines, scanForInjection } from "./injection";
 import type { CriterionVerdict, Verdict } from "./policy";
 
 // Pluggable verifiers: each gathers evidence for every criterion and returns a Verdict; the policy decides.
-//  - code_pr:     tested criteria come from the PR's CI checks (`acceptance (C1)`, ...); the AI judges
-//                 only the review criteria, from the diff.
+//  - code_pr:     tested criteria come from the PR's CI checks (`acceptance (C1) terms <hash>`, ...); the AI
+//                 judges only the review criteria, from the diff.
 //  - rubric_text: a text deliverable judged by the AI against the review criteria.
 
 export type VerifierDeps = { github: GitHub; aiCall?: ModelCall };
 export type VerifierResult = { status: "pending"; reason: string; headSha: string | null } | { status: "done"; verdict: Verdict };
 
-const PROTECTED = /^(\.github\/|acceptance\/)/;
+const PROTECTED = /^(\.github\/|acceptance\/|\.base\/)/;
 const MAX_DIFF_CHARS = 60_000;
 const CI_TIMEOUT_MS = 20 * 60_000;
+
+// ---------------------------------------------------------------------------------------------
+// Which contract the PR and CI used. CI loads the contract named by the `Milestone-Terms:` line in the
+// PR description and puts that hash in each job's name, so a check run proves which contract it ran.
+// Only GitHub Actions can create runs under the `github-actions` app, so other apps can't fake one.
+
+export const CI_APP = "github-actions";
+export const acceptanceCheckName = (criterionId: string, hash: string) => `acceptance (${criterionId}) terms ${hash}`;
+
+/** Same rule as the CI script: exactly one `Milestone-Terms` mention, followed by a 64-hex hash. */
+export function citedTerms(body: string): { count: number; hash: string | null } {
+  const count = (body.match(/Milestone-Terms/gi) ?? []).length;
+  const hash = count === 1 ? (/Milestone-Terms:[ \t]*([0-9a-f]{64})(?![0-9a-z])/.exec(body)?.[1] ?? null) : null;
+  return { count, hash };
+}
+
+/** Why the PR description doesn't cite exactly the signed terms, or undefined when it does. */
+export function termsLineProblem(body: string, signedHash: string | null): string | undefined {
+  const { count, hash } = citedTerms(body);
+  if (count === 0) return "the pull request description has no Milestone-Terms line";
+  if (count > 1) return "the pull request description has more than one Milestone-Terms line";
+  if (!signedHash || hash !== signedHash) return "the pull request description cites terms other than the signed ones";
+  return undefined;
+}
+
+/** The latest run of a check, by start time. */
+function latest(runs: CheckRun[]): CheckRun | undefined {
+  return [...runs].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))[0];
+}
+
+// Code in the PR that could make a test run look green without the tests passing: ending the process
+// early, touching the test runner or assert, reading other processes, writing CI files, or hooking the
+// module loader. The CI harness blocks the cheap versions; anything like this still goes to a person.
+const HARNESS_ESCAPES: { re: RegExp; what: string; testFilesOk?: boolean }[] = [
+  { re: /\bprocess\s*\.\s*(exit|reallyExit|abort|kill|exitCode)\b/, what: "ends the process" },
+  { re: /\/proc\//, what: "reads /proc" },
+  { re: /(from|import|require)\s*\(?\s*["'](node:)?(test|assert(\/strict)?)["']/, what: "touches the test runner", testFilesOk: true },
+  { re: /\bGITHUB_(OUTPUT|ENV|PATH|STATE|STEP_SUMMARY)\b/, what: "writes CI files" },
+  { re: /(from|import|require)\s*\(?\s*["'](node:)?module["']|\bregisterHooks\b/, what: "hooks the module loader" },
+];
+const TEST_FILE = /(^|\/)(tests?|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
+
+export function harnessEscapes(files: PrFile[]): string[] {
+  const out: string[] = [];
+  for (const f of files) {
+    if (PROTECTED.test(f.filename)) continue; // already flagged as a protected file
+    const added = addedLines(f.patch ?? "");
+    const hits = HARNESS_ESCAPES.filter((h) => !(h.testFilesOk && TEST_FILE.test(f.filename)) && h.re.test(added)).map((h) => h.what);
+    if (hits.length) out.push(`${f.filename} (${hits.join(", ")})`);
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------------------------
 // One AI call for the criteria code can't check.
@@ -68,19 +120,40 @@ function mergeAi(criteria: Criterion[], reply: z.infer<typeof aiReplySchema> | u
 // ---------------------------------------------------------------------------------------------
 // code_pr
 
-export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDeps): Promise<VerifierResult> {
+export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDeps, fetched?: PullRequest): Promise<VerifierResult> {
   const ref = m.pr_url ? parsePrUrl(m.pr_url) : undefined;
   if (!ref) throw new Error("milestone has no pull request");
-  const pr = await deps.github.pr(ref.owner, ref.repo, ref.number);
-  const runs = await deps.github.checkRuns(ref.owner, ref.repo, pr.headSha);
-
+  const pr = fetched ?? (await deps.github.pr(ref.owner, ref.repo, ref.number));
   const tested = terms.criteria.filter((c) => c.test);
+
+  // The description can be edited after submit (and CI re-runs on edits): check it again now.
+  const problem = termsLineProblem(pr.body, m.criteria_hash);
+  if (problem) {
+    const evidence = [`not checked: ${problem}`];
+    return {
+      status: "done",
+      verdict: {
+        criteria: terms.criteria.map((c) => ({ id: c.id, kind: c.kind, source: c.test ? "test" : "ai", verdict: "unclear", confidence: 0, evidence })),
+        summary: `Not reviewed: ${problem}.`,
+        feedbackForWorker: `Put exactly one line in the pull request description, \`Milestone-Terms: ${m.criteria_hash}\`, then submit again.`,
+        injection: { detected: false, quotes: [] },
+        tampering: [],
+        blocked: problem,
+        model: null,
+        headSha: pr.headSha,
+      },
+    };
+  }
+  const hash = m.criteria_hash!;
+
+  // Only GitHub Actions jobs for this exact commit count, and only the ones named for the signed contract.
+  const runs = (await deps.github.checkRuns(ref.owner, ref.repo, pr.headSha)).filter((r) => r.app === CI_APP && r.headSha === pr.headSha);
+  const contractJob = latest(runs.filter((r) => r.name === "contract"));
   const testVerdicts: CriterionVerdict[] = [];
-  const contractJob = runs.find((r) => r.name === "contract");
   for (const c of tested) {
-    const run = runs.find((r) => r.name === `acceptance (${c.id})`);
-    if (contractJob?.status === "completed" && contractJob.conclusion !== "success") {
-      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: ["CI could not load the signed contract (is `Milestone-Terms:` in the PR description?)"] });
+    const run = latest(runs.filter((r) => r.name === acceptanceCheckName(c.id, hash)));
+    if (!run && contractJob?.status === "completed" && contractJob.conclusion !== "success") {
+      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: ["CI could not load the signed contract (is exactly one `Milestone-Terms:` line in the PR description?)"] });
       continue;
     }
     if (!run || run.status !== "completed") {
@@ -88,7 +161,7 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
       if (!started || Date.now() - new Date(started).getTime() < CI_TIMEOUT_MS) {
         return { status: "pending", reason: `waiting for CI: acceptance (${c.id}) ${run ? run.status : "not started"}`, headSha: pr.headSha };
       }
-      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: ["CI did not finish within 20 minutes"] });
+      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: ["CI did not run the signed tests within 20 minutes"] });
       continue;
     }
     const verdict = run.conclusion === "success" ? "pass" : run.conclusion === "failure" ? "fail" : "unclear";
@@ -97,7 +170,7 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
 
   // Everything below runs once per commit, after CI is final.
   const files = await deps.github.files(ref.owner, ref.repo, ref.number);
-  const tampering = files.filter((f) => PROTECTED.test(f.filename)).map((f) => f.filename);
+  const tampering = [...files.filter((f) => PROTECTED.test(f.filename)).map((f) => f.filename), ...harnessEscapes(files)];
   const written = [pr.title, pr.body, ...files.map((f) => addedLines(f.patch ?? ""))].join("\n");
   const quotes = scanForInjection(written);
 

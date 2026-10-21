@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { MoneyTracker, StatusPill } from "@/components/MoneyTracker";
 import { heldLinks } from "@/lib/client/links";
-import { STATUS, usd, type MilestoneView, type Role } from "@/lib/client/states";
+import { STATUS, cancelledAt, usd, type MilestoneView, type Role } from "@/lib/client/states";
 
 // The milestones this browser holds links for (there are no accounts: links are the keys).
 
@@ -71,7 +71,7 @@ export default function Milestones() {
                   <div className="flex items-center gap-5">
                     {m && (
                       <div className="w-40">
-                        <MoneyTracker state={m.state} compact />
+                        <MoneyTracker state={m.state} compact cancelledAt={m.state === "CANCELLED" ? cancelledAt(m) : undefined} />
                       </div>
                     )}
                     <span className="w-24 text-right text-lg font-semibold text-ink">{m ? usd(m.amount_cents) : ""}</span>

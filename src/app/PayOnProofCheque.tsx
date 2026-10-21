@@ -82,7 +82,7 @@ export function PayOnProofCheque() {
         ))}
       </svg>
 
-      <div className="grid gap-6 px-5 pb-10 pt-10 sm:px-10 md:grid-cols-[1fr_auto] md:gap-10">
+      <div className="grid gap-6 px-5 pb-10 pt-10 sm:px-10 md:grid-cols-[1fr_auto] md:gap-10 lg:pb-8 lg:pt-8">
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-rule-strong pb-3">
             <p className="text-sm text-ink-2">
@@ -93,7 +93,7 @@ export function PayOnProofCheque() {
               No. ms-demo-1 · PayPal sandbox
             </p>
           </div>
-          <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
+          <div className="mt-4 flex flex-wrap items-end justify-between gap-4 lg:mt-3">
             <p className="text-sm text-ink-2">
               Held on PayPal until every condition below passes.
               <span className="block text-ink-3">
@@ -108,7 +108,7 @@ export function PayOnProofCheque() {
             </p>
           </div>
 
-          <div className="mt-6 flex flex-col">
+          <div className="mt-6 flex flex-col lg:mt-4">
             <div className="order-2 mt-6 md:order-1 md:mt-0">
               <p className="text-sm font-medium text-ink">Conditions</p>
               <ol className="mt-2 divide-y divide-rule border-y border-rule">
@@ -135,7 +135,7 @@ export function PayOnProofCheque() {
               </ol>
             </div>
 
-            <div className="order-1 md:order-2 md:mt-6">
+            <div className="order-1 md:order-2 md:mt-6 lg:mt-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <Link
                   href="/demo"
@@ -151,7 +151,7 @@ export function PayOnProofCheque() {
                 </Link>
               </div>
               <p className="mt-2 text-[11px] text-ink-3">
-                Replay of a real sandbox run: milestone-demo pull request #1.
+                Conditions, fingerprint and amounts from a real sandbox run: milestone-demo pull request #1.
               </p>
             </div>
           </div>

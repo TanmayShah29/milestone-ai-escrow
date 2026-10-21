@@ -5,7 +5,8 @@ import type { Milestone } from "@/lib/milestones/repo";
 // Planned dates make the bars readable at project scale; what actually happened (from the audit log)
 // sets status, progress and the tooltip. Pure: no DB or network, so it is unit-tested directly.
 
-export type PhaseStatus = "done" | "active" | "blocked" | "failed" | "todo";
+// "unfunded": the PayPal hold has not been placed yet (nothing is held, so it is never shown as active).
+export type PhaseStatus = "done" | "active" | "blocked" | "failed" | "todo" | "unfunded";
 
 export type TimelineTask = {
   id: string;
@@ -27,6 +28,7 @@ export type TimelineTask = {
   honorEnd?: string; // hold: end of the 3-day honor period
   holdExpiry?: string; // hold: 29-day expiry
   holdWarn?: boolean; // the work is due after the hold expires
+  canReschedule?: boolean; // work: the due date can still be moved (the API accepts it in this state)
   milestoneId: string;
   phase?: string;
 };
@@ -49,7 +51,11 @@ const ICON: Record<string, string> = {
   payout: "fa fa-money-bill-wave",
 };
 
-const COLOR: Record<PhaseStatus, string> = { done: "green", active: "blue", blocked: "gray", failed: "red", todo: "gray" };
+const COLOR: Record<PhaseStatus, string> = { done: "green", active: "blue", blocked: "gray", failed: "red", todo: "gray", unfunded: "gray" };
+
+/** States in which the client can still move the work's due date (the schedule API enforces the same rule). */
+export const RESCHEDULABLE_STATES = ["DRAFT", "AGREED", "FUNDED"] as const;
+export const canMoveDueDate = (state: string) => (RESCHEDULABLE_STATES as readonly string[]).includes(state);
 
 export function objectionMs(): number {
   const s = Number(process.env.OBJECTION_WINDOW_SECONDS ?? "120");
@@ -57,11 +63,11 @@ export function objectionMs(): number {
 }
 
 /** When the hold needs reauthorizing before the work is due (PayPal holds expire after 29 days). */
-export function holdWarning(m: Pick<Milestone, "due_at" | "authorization_expires_at" | "state">): string | undefined {
+export function holdWarning(m: Pick<Milestone, "title" | "due_at" | "authorization_expires_at" | "state">): string | undefined {
   const due = t(m.due_at);
   const expiry = t(m.authorization_expires_at);
   if (!due || !expiry || ["RELEASED", "PAID_OUT", "CANCELLED"].includes(m.state)) return undefined;
-  return due > expiry ? "The work is due after the PayPal hold expires: reauthorize the hold or move the date." : undefined;
+  return due > expiry ? `“${m.title}”: the work is due after the PayPal hold expires. Reauthorize the hold or move the date.` : undefined;
 }
 
 export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now()): Timeline {
@@ -96,7 +102,7 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
   const after = (states: string[]) => states.includes(s);
   const status = {
     terms: agreed ? "done" : s === "DRAFT" ? "active" : cancelled ? "failed" : "todo",
-    hold: cancelled && held ? "failed" : held ? (after(["RELEASED", "PAID_OUT", "PAYOUT_FAILED"]) ? "done" : "active") : s === "AGREED" ? "active" : "blocked",
+    hold: cancelled && held ? "failed" : held ? (after(["RELEASED", "PAID_OUT", "PAYOUT_FAILED"]) ? "done" : "active") : "unfunded",
     work: submitted ? (s === "CHANGES_REQUESTED" ? "active" : "done") : held ? (now > due ? "failed" : "active") : "blocked",
     review: s === "CHANGES_REQUESTED" ? "failed" : decided && after(["PASSED", "CONTESTED", "RELEASED", "PAID_OUT", "PAYOUT_FAILED", "HUMAN_CHECK"]) ? (s === "HUMAN_CHECK" ? "active" : "done") : after(["SUBMITTED", "IN_REVIEW"]) ? "active" : "blocked",
     window: s === "CONTESTED" ? "failed" : passed && after(["RELEASED", "PAID_OUT", "PAYOUT_FAILED"]) ? "done" : s === "PASSED" ? "active" : "blocked",
@@ -105,7 +111,7 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
   if (cancelled) for (const k of Object.keys(status) as (keyof typeof status)[]) if (status[k] === "blocked" || status[k] === "todo" || status[k] === "active") status[k] = "failed";
 
   const fmt = (x?: number) => (x ? new Date(x).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "not yet");
-  const editableDue = !submitted && ["DRAFT", "AGREED", "FUNDED"].includes(s);
+  const editableDue = !submitted && canMoveDueDate(s);
   const phase = (key: keyof typeof status, name: string, start: number, end: number, note: string, extra: Partial<TimelineTask> = {}): TimelineTask => ({
     id: `${m.id}:${key}`,
     name,
@@ -114,7 +120,7 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
     manuallyScheduled: true,
     percentDone: status[key] === "done" ? 100 : status[key] === "active" ? 50 : 0,
     cls: `ms-phase ms-${status[key]}`,
-    iconCls: status[key] === "blocked" ? "fa fa-lock" : ICON[key]!,
+    iconCls: status[key] === "blocked" || status[key] === "unfunded" ? "fa fa-lock" : ICON[key]!,
     eventColor: COLOR[status[key]],
     status: status[key],
     note,
@@ -134,13 +140,14 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
 
   const children: TimelineTask[] = [
     phase("terms", "Terms signed", termsStart, termsEnd, `Fingerprint ${m.criteria_hash?.slice(0, 12) ?? "pending"} · agreed ${fmt(agreed)}`),
-    phase("hold", `PayPal hold ${money(m.authorized_cents ?? m.amount_cents)}`, holdStart, holdEnd, `Authorization ${m.paypal_authorization_id ?? "not yet"} · held ${fmt(held)} · expires ${fmt(expiry)}${warning ? ` · ${warning}` : ""}`, {
+    phase("hold", held ? `PayPal hold ${money(m.authorized_cents ?? m.amount_cents)}` : `PayPal hold (not funded) ${money(m.amount_cents)}`, holdStart, holdEnd, `${held ? "" : "Not funded yet: the client approves the hold on PayPal · "}Authorization ${m.paypal_authorization_id ?? "not yet"} · held ${fmt(held)} · expires ${fmt(expiry)}${warning ? ` · ${warning}` : ""}`, {
       ...holdMarks,
       ...(warning && holdLive ? { eventColor: "orange", cls: "ms-phase ms-warn" } : {}),
     }),
     phase("work", "Work", workStart, workEnd, `Due ${fmt(due)} · submitted ${fmt(submitted)}${m.pr_url ? ` · ${m.pr_url}` : ""}`, {
       deadlineDate: iso(due),
       resizable: editableDue ? "end" : false,
+      canReschedule: editableDue,
     }),
     phase("review", "Review (CI + AI, fixed rules)", reviewStart, reviewEnd, `Decision ${fmt(decided)} · state ${s}`),
     phase("window", "Objection window", windowStart, windowEnd, `Release after ${fmt(t(m.release_after))}`),

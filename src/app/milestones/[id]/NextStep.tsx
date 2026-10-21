@@ -1,8 +1,9 @@
 "use client";
 
 import { Check, Copy, CreditCard, Hourglass, Loader2, Wallet } from "lucide-react";
-import { useEffect, useState } from "react";
-import { usd, type MilestoneView, type Role } from "@/lib/client/states";
+import { useEffect, useRef, useState } from "react";
+import { holdExpiryWarning, usd, type MilestoneView, type Role } from "@/lib/client/states";
+import { HoldWarning } from "./MoneyPanel";
 import type { Call } from "./TermsCard";
 import type { Review } from "./VerdictTable";
 
@@ -54,11 +55,60 @@ function Waiting({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Releasing the hold can't be undone, so it takes two steps: ask, then confirm (or keep it). */
+function CancelHold({ amount, busy, onConfirm }: { amount: string; busy: boolean; onConfirm: () => Promise<void> }) {
+  const [asking, setAsking] = useState(false);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const moved = useRef(false);
+  useEffect(() => {
+    if (!moved.current) return;
+    (asking ? keepRef : cancelRef).current?.focus();
+  }, [asking]);
+  const toggle = (v: boolean) => {
+    moved.current = true;
+    setAsking(v);
+  };
+  if (!asking) {
+    return (
+      <button ref={cancelRef} className={secondary} disabled={busy} onClick={() => toggle(true)}>
+        Cancel and release the hold
+      </button>
+    );
+  }
+  return (
+    <div role="group" aria-labelledby="cancel-q" className="space-y-3 rounded-md border border-rule-strong bg-paper p-3">
+      <p id="cancel-q" className="text-sm text-ink">
+        Release the {amount} hold? The worker will be told the milestone is cancelled.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button className={primary} disabled={busy} onClick={onConfirm}>
+          {busy && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}Confirm, release the hold
+        </button>
+        <button ref={keepRef} className={secondary} disabled={busy} onClick={() => toggle(false)}>
+          Keep it
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FieldError({ id, text }: { id: string; text?: string }) {
+  if (!text) return null;
+  return (
+    <p id={id} role="status" className="rounded-md border border-failed/40 bg-failed-field/60 px-3 py-2 text-sm text-ink">
+      {text}
+    </p>
+  );
+}
+
 export function NextStep(props: { m: MilestoneView; role: Role; review: Review | null; call: Call; workerLink?: string }) {
   const { m, role, review, call, workerLink } = props;
   const [busy, setBusy] = useState<string>();
   const [prUrl, setPrUrl] = useState(String(m.pr_url ?? ""));
   const [text, setText] = useState("");
+  const [submitError, setSubmitError] = useState<string>();
+  const holdWarning = role === "client" ? holdExpiryWarning(m) : undefined;
   const releaseAt = m.release_after ? new Date(m.release_after).getTime() : 0;
   const now = useNow(m.state === "PASSED");
   const hash = m.criteria_hash ?? "";
@@ -68,9 +118,16 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
 
   const act = async (label: string, action: string, body: Record<string, unknown> = {}) => {
     setBusy(label);
-    await call(action, body);
+    const r = await call(action, body);
     setBusy(undefined);
+    return r;
   };
+  const submit = async (body: Record<string, unknown>) => {
+    setSubmitError(undefined);
+    const r = await act("submit", "submit", body);
+    if (!r.ok) setSubmitError(r.error ?? "That didn't go through. Try again.");
+  };
+  const errorProps = submitError ? { "aria-invalid": true, "aria-describedby": "submit-error" } : {};
   const spin = (label: string) => busy === label && <Loader2 className="size-4 animate-spin" aria-hidden="true" />;
 
   let title = "";
@@ -98,12 +155,15 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
         body = (
           <div className="space-y-3">
             <Waiting>You signed these terms. {signedTheirs ? "" : `When the ${role === "client" ? "worker" : "client"} signs, they're sealed.`}</Waiting>
-            {role === "client" && workerLink && (
-              <>
-                <p className="text-sm text-ink-2">Send the worker (a person or an AI agent) their link:</p>
-                <CopyLine text={workerLink} label="Copy worker link" />
-              </>
-            )}
+            {role === "client" &&
+              (workerLink ? (
+                <>
+                  <p className="text-sm text-ink-2">Send the worker (a person or an AI agent) their link:</p>
+                  <CopyLine text={workerLink} label="Copy worker link" />
+                </>
+              ) : (
+                <p className="text-sm text-ink-2">Send the worker (a person or an AI agent) the worker link you were given when you created this milestone.</p>
+              ))}
           </div>
         );
       }
@@ -136,8 +196,20 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
         body =
           m.verifier === "rubric_text" ? (
             <div className="space-y-3">
-              <textarea rows={6} className="w-full rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm" placeholder="Paste the deliverable" value={text} onChange={(e) => setText(e.target.value)} aria-label="Deliverable text" />
-              <button className={primary} disabled={!!busy || text.length < 20} onClick={() => act("submit", "submit", { text })}>
+              <textarea
+                rows={6}
+                className="w-full rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm aria-[invalid=true]:border-failed"
+                placeholder="Paste the deliverable"
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  setSubmitError(undefined);
+                }}
+                aria-label="Deliverable text"
+                {...errorProps}
+              />
+              <FieldError id="submit-error" text={submitError} />
+              <button className={primary} disabled={!!busy || text.length < 20} onClick={() => submit({ text })}>
                 {spin("submit")}Submit
               </button>
             </div>
@@ -148,12 +220,23 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
               </p>
               <CopyLine text={`Milestone-Terms: ${hash}`} label="Copy terms line" />
               <div className="flex flex-col gap-2 sm:flex-row">
-                <input className="min-w-0 flex-1 rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm" placeholder="https://github.com/owner/repo/pull/1" value={prUrl} onChange={(e) => setPrUrl(e.target.value)} aria-label="Pull request URL" />
-                <button className={primary} disabled={!!busy || !prUrl} onClick={() => act("submit", "submit", { prUrl })}>
+                <input
+                  className="min-w-0 flex-1 rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm aria-[invalid=true]:border-failed"
+                  placeholder="https://github.com/owner/repo/pull/1"
+                  value={prUrl}
+                  onChange={(e) => {
+                    setPrUrl(e.target.value);
+                    setSubmitError(undefined);
+                  }}
+                  aria-label="Pull request URL"
+                  {...errorProps}
+                />
+                <button className={primary} disabled={!!busy || !prUrl} onClick={() => submit({ prUrl })}>
                   {spin("submit")}
                   {m.state === "CHANGES_REQUESTED" ? "Resubmit" : "Submit pull request"}
                 </button>
               </div>
+              <FieldError id="submit-error" text={submitError} />
             </div>
           );
       } else {
@@ -162,9 +245,13 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
           <div className="space-y-3">
             <Waiting>{m.state === "CHANGES_REQUESTED" ? "The work didn't pass. The money stays held while the worker fixes it." : `The money is held and the worker has been told to start${due ? `; due ${due}` : ""}.`}</Waiting>
             {m.state === "FUNDED" && (
-              <button className={secondary} disabled={!!busy} onClick={() => act("cancel", "cancel")}>
-                {spin("cancel")}Cancel and release the hold
-              </button>
+              <CancelHold
+                amount={usd(m.authorized_cents ?? m.amount_cents)}
+                busy={!!busy}
+                onConfirm={async () => {
+                  await act("cancel", "cancel");
+                }}
+              />
             )}
           </div>
         );
@@ -248,6 +335,7 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
         {title}
       </h2>
       <div className="mt-2">{body}</div>
+      {holdWarning && <HoldWarning text={holdWarning} />}
     </section>
   );
 }

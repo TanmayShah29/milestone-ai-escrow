@@ -36,27 +36,27 @@ export async function platformFrom(req: Request): Promise<Platform | undefined> 
   const t = bearer(req);
   if (!t?.startsWith("msk_")) return undefined;
   const { rows } = await db().query<Platform>("select id, name from platforms where api_key_hash = $1", [hashToken(t)]);
-  if (!rows[0]) throw new Unauthorized("invalid API key");
+  if (!rows[0]) throw new Unauthorized("That API key isn't valid.");
   return rows[0];
 }
 
 /** The caller's role on this milestone, from a milestone token or the owning platform's key. */
 export async function roleOn(req: Request, m: Milestone): Promise<Role> {
   const t = bearer(req);
-  if (!t) throw new Unauthorized("this milestone needs its client or worker link");
+  if (!t) throw new Unauthorized("Open this milestone with its client or worker link.");
   if (t.startsWith("msk_")) {
     const p = await platformFrom(req);
     if (p && p.id === m.platform_id) return "client";
-    throw new Forbidden("this API key does not own this milestone");
+    throw new Forbidden("This API key didn't create this milestone.");
   }
   const h = hashToken(t);
   if (sameHash(h, m.client_token_hash)) return "client";
   if (sameHash(h, m.worker_token_hash)) return "worker";
-  throw new Forbidden("that link is not valid for this milestone");
+  throw new Forbidden("This link doesn't open this milestone.");
 }
 
 export function requireRole(role: Role, ...allowed: Role[]): void {
-  if (!allowed.includes(role)) throw new Forbidden(`only the ${allowed.join(" or ")} can do that`);
+  if (!allowed.includes(role)) throw new Forbidden(`Only the ${allowed.join(" or ")} can do that.`);
 }
 
 /** Never send token hashes to a browser. */

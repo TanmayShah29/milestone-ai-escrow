@@ -1,6 +1,6 @@
-import { eventLabel } from "@/lib/client/states";
+import { eventDetail, eventLabel } from "@/lib/client/states";
 
-export type AuditRow = { id: number; actor: string; event: string; from_state: string | null; to_state: string | null; paypal_id: string | null; created_at: string };
+export type AuditRow = { id: number; actor: string; event: string; from_state: string | null; to_state: string | null; paypal_id: string | null; created_at: string; detail?: Record<string, unknown> | null };
 
 const fmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -19,7 +19,10 @@ export function ProofTrail({ audit }: { audit: AuditRow[] }) {
             <time dateTime={a.created_at} className="text-xs text-ink-3">
               {fmt.format(new Date(a.created_at))}
             </time>
-            <span className="text-ink">{eventLabel(a.event)}</span>
+            <span className="text-ink">
+              {eventLabel(a.event)}
+              {eventDetail(a.event, a.detail) && <span className="text-ink-2"> {eventDetail(a.event, a.detail)}</span>}
+            </span>
             {a.paypal_id &&
               (/^https:\/\/github\.com\/.+\/pull\/(\d+)/.test(a.paypal_id) ? (
                 <a href={a.paypal_id} target="_blank" rel="noreferrer" className="col-start-2 text-xs text-ink underline sm:col-start-auto">

@@ -14,14 +14,28 @@ const DAY = 86_400_000;
 const phases = (tl: ReturnType<typeof buildTimeline>) => Object.fromEntries(tl.tasks[0]!.children!.map((c) => [c.phase, c]));
 
 describe("timeline builder", () => {
-  it("an unfunded milestone: terms active, everything after the hold locked behind money gates", async () => {
+  it("an unfunded milestone: the hold is shown as not funded and everything after it is locked behind money gates", async () => {
     const m = await getMilestone(await seedMilestone({ state: "AGREED" }));
     const p = phases(buildTimeline(m, [{ event: "terms:agreed", to_state: "AGREED", created_at: new Date() }]));
     assert.equal(p.terms!.status, "done");
-    assert.equal(p.hold!.status, "active");
+    assert.equal(p.hold!.status, "unfunded");
+    assert.match(p.hold!.name, /not funded/);
+    assert.equal(p.hold!.eventColor, "gray");
     assert.equal(p.work!.status, "blocked");
     assert.equal(p.payout!.status, "blocked");
     assert.equal(p.work!.iconCls, "fa fa-lock");
+    assert.equal(p.work!.canReschedule, true);
+  });
+
+  it("the due date can be dragged only while the API would accept it", async () => {
+    const funded = phases(buildTimeline(await getMilestone(await seedMilestone({ state: "FUNDED" })), []));
+    assert.equal(funded.work!.canReschedule, true);
+    assert.equal(funded.work!.resizable, "end");
+    const submitted = await getMilestone(await seedMilestone({ state: "SUBMITTED" }));
+    const p = phases(buildTimeline(submitted, [{ event: "deliverable:submitted", to_state: "SUBMITTED", created_at: new Date() }]));
+    assert.equal(p.work!.canReschedule, false);
+    assert.equal(p.work!.resizable, false);
+    assert.ok(phases(buildTimeline(await getMilestone(await seedMilestone({ state: "FUNDED" })), [{ event: "hold:authorized", to_state: "FUNDED", created_at: new Date() }])).hold!.name.startsWith("PayPal hold $"));
   });
 
   it("phases are chained by finish-to-start dependencies, plus the tranche link to a predecessor", async () => {
@@ -49,7 +63,7 @@ describe("timeline builder", () => {
 
   it("work due after the hold expires is flagged and the hold turns orange", async () => {
     const m = await getMilestone(await seedMilestone({ state: "FUNDED", authorization_expires_at: new Date(Date.now() + 10 * DAY), due_at: new Date(Date.now() + 20 * DAY) }));
-    assert.ok(holdWarning(m));
+    assert.match(holdWarning(m) ?? "", /Test milestone/);
     const tl = buildTimeline(m, [{ event: "hold:authorized", to_state: "FUNDED", created_at: new Date() }]);
     assert.equal(tl.warnings.length, 1);
     assert.equal(phases(tl).hold!.eventColor, "orange");

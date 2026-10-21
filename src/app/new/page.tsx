@@ -28,7 +28,8 @@ export default function NewMilestone() {
       return setError(b.error ?? "Couldn't create the milestone. The demo server may be waking up; try again.");
     }
     const id = b.milestone.id as string;
-    rememberLink({ id, title: b.milestone.title, client: b.clientToken, worker: b.workerToken });
+    // This browser is the client's: the worker token is kept only to show as the link to send them.
+    rememberLink({ id, title: b.milestone.title, client: b.clientToken, shareWorker: b.workerToken });
     setBusy("Drafting your terms with AI… (about 20 seconds)");
     const d = await fetch(`/api/milestones/${id}/draft-terms`, {
       method: "POST",

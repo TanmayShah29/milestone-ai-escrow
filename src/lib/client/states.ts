@@ -21,6 +21,7 @@ export type MilestoneView = Record<string, unknown> & {
   payout_status?: string | null;
   release_after?: string | null;
   due_at?: string | null;
+  paypal_authorization_id?: string | null;
 };
 
 export const usd = (cents: number | null | undefined) => (cents == null ? "—" : `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
@@ -69,6 +70,37 @@ export function stepIndex(state: string): number {
   }
 }
 
+/** A state's human label, for sentences ("Waiting for funding"). Never shows a raw state name. */
+export function stateLabel(state: string): string {
+  return STATUS[state]?.label ?? "another step";
+}
+
+/**
+ * Where a cancelled milestone stopped on the tracker (0–4): the step it never got past. A voided hold
+ * means Agree and Fund were done; signed terms without a hold mean only Agree was done.
+ */
+export function cancelledAt(m: Pick<MilestoneView, "criteria_hash" | "client_signed_hash" | "worker_signed_hash" | "paypal_authorization_id" | "authorized_cents">): number {
+  if (m.paypal_authorization_id || m.authorized_cents != null) return 2;
+  const hash = m.criteria_hash;
+  if (hash && m.client_signed_hash === hash && m.worker_signed_hash === hash) return 1;
+  return 0;
+}
+
+const shortDate = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+/**
+ * The work is due after the PayPal hold expires (same rule as holdWarning in src/lib/timeline.ts, kept
+ * here so client components don't import server modules). Only while the hold is still live.
+ */
+export function holdExpiryWarning(m: MilestoneView): string | undefined {
+  if (!m.due_at || !m.authorization_expires_at) return undefined;
+  if (["DRAFT", "AGREED", "RELEASED", "PAID_OUT", "PAYOUT_FAILED", "CANCELLED"].includes(m.state)) return undefined;
+  const due = new Date(m.due_at);
+  const expiry = new Date(m.authorization_expires_at);
+  if (!(due.getTime() > expiry.getTime())) return undefined;
+  return `Work is due ${shortDate(due)}, after the PayPal hold expires ${shortDate(expiry)}. Move the date or reauthorize the hold.`;
+}
+
 /** Where the money is right now, in one line. */
 export function moneyLine(m: MilestoneView): { headline: string; detail: string; tone: Tone } {
   const held = m.authorized_cents ?? m.amount_cents;
@@ -78,7 +110,9 @@ export function moneyLine(m: MilestoneView): { headline: string; detail: string;
     case "AGREED":
       return { headline: "Not funded yet", detail: `${usd(m.amount_cents)} will be held on PayPal once both sides sign and the client funds.`, tone: "neutral" };
     case "CANCELLED":
-      return { headline: "Hold released", detail: "Nothing was charged. The PayPal hold was voided.", tone: "blocked" };
+      return cancelledAt(m) >= 2
+        ? { headline: "Hold released", detail: "Nothing was charged. The PayPal hold was voided.", tone: "blocked" }
+        : { headline: "Cancelled before funding", detail: "Nothing was held or charged.", tone: "blocked" };
     case "RELEASED":
       return { headline: "Captured, paying the worker", detail: `${usd(m.captured_cents)} captured; ${usd(m.payout_cents)} is on its way to the worker.`, tone: "paid" };
     case "PAID_OUT":
@@ -118,6 +152,25 @@ const EVENT_COPY: Record<string, string> = {
   "release:objected": "Client objected; money stays held",
   "schedule:due_changed": "Due date moved",
 };
+
+const dayFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+const asDay = (v: unknown) => {
+  if (typeof v !== "string" && !(v instanceof Date)) return undefined;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? undefined : dayFmt.format(d);
+};
+
+/** Extra words for an audit row, from its detail (e.g. "from Nov 2, 2026 to Nov 9, 2026"). */
+export function eventDetail(event: string, detail: Record<string, unknown> | null | undefined): string | undefined {
+  if (!detail) return undefined;
+  if (event === "schedule:due_changed") {
+    const from = asDay(detail.from);
+    const to = asDay(detail.to);
+    if (from && to) return `from ${from} to ${to}`;
+    if (to) return `set to ${to}`;
+  }
+  return undefined;
+}
 
 export function eventLabel(event: string): string {
   if (EVENT_COPY[event]) return EVENT_COPY[event]!;

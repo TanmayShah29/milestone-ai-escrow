@@ -12,7 +12,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export async function GET(req: Request) {
   try {
     const platform = await platformFrom(req);
-    if (!platform) throw new Unauthorized("listing milestones needs a platform API key");
+    if (!platform) throw new Unauthorized("Listing milestones needs a platform API key.");
     const { rows } = await db().query<Milestone>("select * from milestones where platform_id = $1 order by created_at desc limit 100", [platform.id]);
     return json(200, { milestones: rows.map(publicMilestone) });
   } catch (err) {
@@ -32,13 +32,13 @@ export async function POST(req: Request) {
     try {
       amountCents = valueToCents(String(b.amount ?? ""));
     } catch {
-      return json(400, { error: 'amount must look like "300.00"' });
+      return json(400, { error: 'Enter the amount in dollars, like 300.00.' });
     }
-    if (!title || title.length > 200) return json(400, { error: "title is required (max 200 characters)" });
-    if (!EMAIL.test(freelancerEmail)) return json(400, { error: "freelancerEmail must be the worker's PayPal email" });
-    if (amountCents <= 0 || amountCents > 1_000_000) return json(400, { error: "amount must be between 0.01 and 10000.00" });
+    if (!title || title.length > 200) return json(400, { error: "Give the milestone a title (200 characters at most)." });
+    if (!EMAIL.test(freelancerEmail)) return json(400, { error: "Enter the worker's PayPal email address." });
+    if (amountCents <= 0 || amountCents > 1_000_000) return json(400, { error: "The amount must be between $0.01 and $10,000.00." });
     const dueAt = typeof b.dueDate === "string" && b.dueDate ? new Date(b.dueDate) : undefined;
-    if (dueAt && (Number.isNaN(dueAt.getTime()) || dueAt.getTime() < Date.now())) return json(400, { error: "dueDate must be a future date" });
+    if (dueAt && (Number.isNaN(dueAt.getTime()) || dueAt.getTime() < Date.now())) return json(400, { error: "Pick a due date in the future." });
     const afterId = typeof b.afterMilestoneId === "string" && /^[0-9a-f-]{36}$/i.test(b.afterMilestoneId) ? b.afterMilestoneId : undefined;
     const clientEmail = typeof b.clientEmail === "string" && EMAIL.test(b.clientEmail.trim()) ? b.clientEmail.trim() : undefined;
     const { milestone, clientToken, workerToken } = await createMilestone({

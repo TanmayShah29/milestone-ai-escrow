@@ -8,6 +8,7 @@ import { paypal } from "@/lib/paypal/client";
 import { createPayout, getPayout } from "@/lib/paypal/payouts";
 import { centsToValue, splitCapture, valueToCents } from "./amounts";
 import { assertTermsAgreed } from "@/lib/contract/terms";
+import { stateLabel } from "@/lib/client/states";
 import { InProgress, InvariantViolation, OutcomeUnknown } from "@/lib/errors";
 import { claimAction, isStalePending, settleClaim, unknownClaims, type Claim, type MoneyAction } from "./claims";
 
@@ -111,7 +112,7 @@ function mockHeader(mock?: string) {
 }
 
 function requireState(m: Milestone, ...states: MilestoneState[]) {
-  if (!states.includes(m.state)) throw new InvariantViolation(`milestone is ${m.state}, expected ${states.join(" or ")}`);
+  if (!states.includes(m.state)) throw new InvariantViolation(`That can't be done at this step. The milestone is at "${stateLabel(m.state)}"; it needs to be at "${[...new Set(states.map(stateLabel))].join('" or "')}". Refresh to see where it stands.`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -193,7 +194,7 @@ async function fundWithTestCardLocked(milestoneId: string, deps: Deps, opts: { m
   const m = await getMilestone(milestoneId);
   requireState(m, "AGREED");
   assertTermsAgreed(m);
-  if (m.paypal_order_id) throw new InvariantViolation("a PayPal checkout is already open for this milestone; finish it or cancel");
+  if (m.paypal_order_id) throw new InvariantViolation("A PayPal checkout is already open for this milestone. Finish it, or cancel it first.");
   const send = async (requestId: string): Promise<CardHold> => {
     const o = await deps.paypal.orders.createOrder({
       payPalRequestId: requestId,
@@ -262,7 +263,7 @@ function readAuthorization(units: Order["purchaseUnits"]): AuthInfo | undefined 
 async function authorizeHoldLocked(milestoneId: string, returnedOrderId: string, deps: Deps, opts: { mock?: string }): Promise<Milestone> {
   const m = await getMilestone(milestoneId);
   // Only this milestone's own order may be authorized, whatever the return URL says.
-  if (!m.paypal_order_id || returnedOrderId !== m.paypal_order_id) throw new InvariantViolation("that PayPal order does not belong to this milestone");
+  if (!m.paypal_order_id || returnedOrderId !== m.paypal_order_id) throw new InvariantViolation("That PayPal order doesn't belong to this milestone.");
   if (m.state === "FUNDED" && m.paypal_authorization_id) return m;
   requireState(m, "AGREED");
   assertTransition(m.state, "FUNDED");
@@ -302,10 +303,10 @@ type CaptureInfo = { captureId: string; status: string; cents: number };
 async function releaseFundsLocked(milestoneId: string, deps: Deps, opts: { mock?: string }): Promise<Milestone> {
   let m = await getMilestone(milestoneId);
   if (m.state === "PASSED") {
-    if (!m.paypal_authorization_id || !m.paypal_order_id || m.authorized_cents == null) throw new InvariantViolation("milestone has no hold to capture");
+    if (!m.paypal_authorization_id || !m.paypal_order_id || m.authorized_cents == null) throw new InvariantViolation("This milestone has no PayPal hold to capture.");
     const captureCents = m.amount_cents;
     // Money rule 3: never capture more than was authorized.
-    if (captureCents > m.authorized_cents) throw new InvariantViolation("capture would exceed the authorized amount");
+    if (captureCents > m.authorized_cents) throw new InvariantViolation("The capture would be more than the amount held, so it was stopped.");
     const authorizationId = m.paypal_authorization_id;
     const orderId = m.paypal_order_id;
     const cur = m;
@@ -353,7 +354,7 @@ type PayoutInfo = { batchId: string; batchStatus: string };
 async function payoutFreelancer(m: Milestone, deps: Deps): Promise<Milestone> {
   requireState(m, "RELEASED");
   if (!m.payout_cents || m.payout_cents <= 0 || m.captured_cents == null || m.payout_cents > m.captured_cents) {
-    throw new InvariantViolation("payout amount is not valid for the captured amount");
+    throw new InvariantViolation("The payout doesn't match the captured amount, so it was stopped.");
   }
   const payoutCents = m.payout_cents;
   const send = (requestId: string) =>
@@ -384,7 +385,7 @@ async function cancelHoldLocked(milestoneId: string, deps: Deps): Promise<Milest
     return transition(db(), m, "CANCELLED", "client");
   }
   requireState(m, "FUNDED");
-  if (!m.paypal_authorization_id) throw new InvariantViolation("milestone has no hold to void");
+  if (!m.paypal_authorization_id) throw new InvariantViolation("This milestone has no PayPal hold to release.");
   const authorizationId = m.paypal_authorization_id;
   return runWrite<VoidInfo>(m, {
     action: "void",
@@ -413,7 +414,7 @@ type ReauthInfo = { authorizationId: string; expiresAt: string | null };
 async function refreshHoldLocked(milestoneId: string, deps: Deps): Promise<Milestone> {
   const m = await getMilestone(milestoneId);
   requireState(m, ...HOLD_STATES);
-  if (!m.paypal_authorization_id || !m.paypal_order_id) throw new InvariantViolation("milestone has no hold to refresh");
+  if (!m.paypal_authorization_id || !m.paypal_order_id) throw new InvariantViolation("This milestone has no PayPal hold to renew.");
   const authorizationId = m.paypal_authorization_id;
   const orderId = m.paypal_order_id;
   return runWrite<ReauthInfo>(m, {

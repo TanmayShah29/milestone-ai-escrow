@@ -15,7 +15,9 @@ export type Verdict = {
   summary: string;
   feedbackForWorker: string;
   injection: { detected: boolean; quotes: string[] };
-  tampering: string[]; // files the PR changed that it must not (CI config, acceptance tests)
+  tampering: string[]; // files the PR changed that it must not (CI config, acceptance tests), or code that escapes the test harness
+  /** Set when the work could not be checked against the signed terms at all (e.g. the PR cites other terms). Never passes. */
+  blocked?: string;
   model: string | null;
   headSha: string | null;
 };
@@ -25,6 +27,7 @@ export type Decision = "PASSED" | "CHANGES_REQUESTED" | "HUMAN_CHECK";
 export const CONFIDENCE_FLOOR = 0.8;
 
 export function decide(v: Verdict): { decision: Decision; reasons: string[] } {
+  if (v.blocked) return { decision: "CHANGES_REQUESTED", reasons: [v.blocked, ...flags(v)] };
   const musts = v.criteria.filter((c) => c.kind === "must");
   const failed = musts.filter((c) => c.verdict === "fail");
   if (failed.length) {

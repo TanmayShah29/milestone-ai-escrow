@@ -1,14 +1,16 @@
 "use client";
 
-import { FlaskConical, Plus, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, FlaskConical, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { GuillocheSeal } from "@/components/GuillocheSeal";
 import type { MilestoneView, Role } from "@/lib/client/states";
 
 // The contract: criteria (compiled into tests where testable), editable by the client in DRAFT, sealed by
-// both signatures on the exact fingerprint shown.
+// both signatures on the exact fingerprint shown. A tested criterion whose text was edited without a new
+// test comes back from the server marked testStale; neither side can sign until it's regenerated or
+// switched to AI review.
 
-type Criterion = { id: string; text: string; kind: "must" | "nice"; check: "test" | "review"; test?: { path: string; code: string } };
+type Criterion = { id: string; text: string; kind: "must" | "nice"; check: "test" | "review"; test?: { path: string; code: string }; testStale?: true };
 type Terms = { criteria: Criterion[]; testCommand?: string };
 export type Call = (action: string, body?: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
 
@@ -52,6 +54,19 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
     setDirty(true);
   };
   const repoChanged = repo !== String(m.repo ?? "");
+  const savedById = new Map((stored?.criteria ?? []).map((c) => [c.id, c]));
+  // Unsaved text edits that saving will mark stale (the server decides; this only warns ahead).
+  const willGoStale = (c: Criterion) => {
+    const saved = savedById.get(c.id);
+    return !c.testStale && c.check === "test" && !!saved?.test && saved.test.code === c.test?.code && saved.text !== c.text;
+  };
+  const anyStale = !!draft?.criteria.some((c) => c.testStale);
+  // Switching to AI review drops the test (CI runs every test present) and saves straight away.
+  const toReview = (i: number) => {
+    if (!draft) return;
+    const criteria = draft.criteria.map((c, j) => (j === i ? { ...c, check: "review" as const, test: undefined, testStale: undefined } : c));
+    run("review", "edit-terms", { terms: { ...draft, criteria }, repo });
+  };
 
   return (
     <section aria-labelledby="terms-h" className="rounded-lg border border-rule bg-panel p-4 sm:p-5">
@@ -110,9 +125,9 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
                 ) : (
                   <span className={`rounded px-1.5 py-0.5 text-xs ${c.kind === "must" ? "bg-blocked-field font-medium text-ink" : "text-ink-2"}`}>{c.kind === "must" ? "Must have" : "Nice to have"}</span>
                 )}
-                <span className="inline-flex items-center gap-1 text-xs text-ink-2">
-                  {c.check === "test" ? <FlaskConical className="size-3.5" aria-hidden="true" /> : <Sparkles className="size-3.5" aria-hidden="true" />}
-                  {c.check === "test" ? "Checked by a CI test" : "Checked by AI review"}
+                <span className={`inline-flex items-center gap-1 text-xs ${c.testStale ? "font-medium text-failed" : "text-ink-2"}`}>
+                  {c.testStale ? <AlertTriangle className="size-3.5" aria-hidden="true" /> : c.check === "test" ? <FlaskConical className="size-3.5" aria-hidden="true" /> : <Sparkles className="size-3.5" aria-hidden="true" />}
+                  {c.testStale ? "Test out of date" : c.check === "test" ? "Checked by a CI test" : "Checked by AI review"}
                 </span>
                 {editable && (
                   <button onClick={() => remove(i)} className="ml-auto inline-flex items-center gap-1 text-xs text-ink-2 hover:text-failed" aria-label={`Remove ${c.id}`}>
@@ -126,8 +141,28 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
               ) : (
                 <p className="text-ink">{c.text}</p>
               )}
+              {willGoStale(c) && <p className="text-xs text-held">The test below still checks the old text. Saving marks it out of date, and the terms can&apos;t be signed until it&apos;s regenerated or switched to AI review.</p>}
+              {c.testStale && (
+                <div role="status" className="rounded-md border border-failed/40 bg-failed-field p-3 text-xs text-ink">
+                  <p>
+                    <span className="font-medium">{c.id}&apos;s test no longer matches its text.</span> The text was edited after the test was written, so CI wouldn&apos;t check what it says. Neither side can sign until the test is regenerated or {c.id} is checked by AI review.
+                  </p>
+                  {editable && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button disabled={!!busy || dirty} onClick={() => run("regen", "draft-terms", { repo, stack })} className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 font-medium text-accent-ink disabled:opacity-50">
+                        <Sparkles className="size-3.5" aria-hidden="true" />
+                        {busy === "regen" ? "Regenerating…" : "Regenerate tests with AI"}
+                      </button>
+                      <button disabled={!!busy} onClick={() => toReview(i)} className="rounded-md border border-rule-strong bg-panel px-2.5 py-1 hover:bg-paper disabled:opacity-50">
+                        {busy === "review" ? "Switching…" : "Check it by AI review instead"}
+                      </button>
+                      {dirty && <span className="self-center text-ink-2">Save your changes first to regenerate.</span>}
+                    </div>
+                  )}
+                </div>
+              )}
               {c.test && (
-                <details>
+                <details open={c.testStale || willGoStale(c) || undefined}>
                   <summary className="cursor-pointer text-xs text-ink-2 hover:text-ink">
                     Test: <span className="font-mono">{c.test.path}</span>
                   </summary>
@@ -145,10 +180,13 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
             <Plus className="size-4" aria-hidden="true" />
             Add criterion
           </button>
-          <button onClick={() => run("draft", "draft-terms", { repo, stack })} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong px-3 py-1.5 text-sm hover:bg-paper disabled:opacity-50">
-            <Sparkles className="size-4" aria-hidden="true" />
-            {busy === "draft" ? "Redrafting…" : "Redraft with AI"}
-          </button>
+          {/* While a test is out of date, the draft action regenerates only those tests (the button above). */}
+          {!anyStale && (
+            <button onClick={() => run("draft", "draft-terms", { repo, stack })} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong px-3 py-1.5 text-sm hover:bg-paper disabled:opacity-50">
+              <Sparkles className="size-4" aria-hidden="true" />
+              {busy === "draft" ? "Redrafting…" : "Redraft with AI"}
+            </button>
+          )}
           {(dirty || repoChanged) && (
             <button disabled={!!busy} onClick={() => run("save", "edit-terms", { terms: draft, repo })} className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink disabled:opacity-50">
               {busy === "save" ? "Saving…" : "Save changes"}

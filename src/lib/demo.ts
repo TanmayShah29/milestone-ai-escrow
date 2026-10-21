@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db, tx } from "@/lib/db";
 import { hashTerms, type Terms } from "@/lib/contract/terms";
 import { createMilestone, type Milestone } from "@/lib/milestones/repo";
 
@@ -50,20 +50,25 @@ async function seed(opts: { title: string; brief: string; cents: number; created
   const hash = hashTerms(m, opts.terms);
   const cols: Record<string, unknown> = { repo: REPO, stack: "TypeScript, node:test", criteria: JSON.stringify(opts.terms), criteria_hash: hash, client_signed_hash: hash, worker_signed_hash: hash, criteria_model: "minimax/minimax-m3.1-flash:free", created_at: new Date(opts.created), ...opts.set };
   const keys = Object.keys(cols);
-  await db().query(`update milestones set ${keys.map((k, i) => `${k} = $${i + 2}`).join(", ")} where id = $1`, [m.id, ...keys.map((k) => cols[k])]);
-  await db().query("delete from audit_log where milestone_id = $1", [m.id]);
-  for (const [event, to, at, ref] of [["created", "DRAFT", opts.created] as History[number], ...opts.history]) {
-    await db().query("insert into audit_log (milestone_id, actor, event, to_state, created_at, paypal_id) values ($1, 'system', $2, $3, $4, $5)", [m.id, event, to, new Date(at), ref ?? null]);
-  }
-  if (opts.review) {
-    await db().query("insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, 'minimax/minimax-m3.1-flash:free')", [
-      m.id,
-      opts.review.sha,
-      JSON.stringify(opts.review.verdict),
-      opts.review.decision,
-      JSON.stringify(opts.review.reasons),
-    ]);
-  }
+  const events = [["created", "DRAFT", opts.created] as History[number], ...opts.history];
+  // One transaction, four round trips: the seeded row, its replaced audit trail (one multi-row insert) and review.
+  await tx(async (c) => {
+    await c.query(`update milestones set ${keys.map((k, i) => `${k} = $${i + 2}`).join(", ")} where id = $1`, [m.id, ...keys.map((k) => cols[k])]);
+    await c.query("delete from audit_log where milestone_id = $1", [m.id]);
+    await c.query(
+      `insert into audit_log (milestone_id, actor, event, to_state, created_at, paypal_id) values ${events.map((_, i) => `($1, 'system', $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, $${i * 4 + 5})`).join(", ")}`,
+      [m.id, ...events.flatMap(([event, to, at, ref]) => [event, to, new Date(at), ref ?? null])],
+    );
+    if (opts.review) {
+      await c.query("insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, 'minimax/minimax-m3.1-flash:free')", [
+        m.id,
+        opts.review.sha,
+        JSON.stringify(opts.review.verdict),
+        opts.review.decision,
+        JSON.stringify(opts.review.reasons),
+      ]);
+    }
+  });
   return { id: m.id, title: opts.title, client: clientToken, worker: workerToken };
 }
 
@@ -75,7 +80,7 @@ export type DemoMilestone = { id: string; title: string; client: string; worker:
 export async function seedDemoProject(now = Date.now()): Promise<DemoMilestone[]> {
   const a0 = now - 9 * DAY;
   const aOrder = demoId("O-"), aAuth = demoId("A-"), aCap = demoId("C-"), aItem = demoId("I-");
-  const paid = await seed({
+  const paidSeed = seed({
     title: "Add a slugify utility",
     brief: "Add src/slugify.ts exporting slugify(input: string): string, with accents transliterated and a README section.",
     cents: 2500,
@@ -113,7 +118,7 @@ export async function seedDemoProject(now = Date.now()): Promise<DemoMilestone[]
 
   const b0 = now - 2 * DAY;
   const bAuth = demoId("A-");
-  const caught = await seed({
+  const caughtSeed = seed({
     title: "Add a slugify utility (second contractor)",
     brief: "Same brief, a different contractor.",
     cents: 2500,
@@ -146,6 +151,8 @@ export async function seedDemoProject(now = Date.now()): Promise<DemoMilestone[]
     },
   });
 
+  // The first two are independent; the third depends on the first (it follows it on the timeline).
+  const [paid, caught] = await Promise.all([paidSeed, caughtSeed]);
   const c0 = now - 0.2 * DAY;
   const fund = await seed({
     title: "Add a wordCount utility",

@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { writeDemo } from "@/lib/client/demo";
 import { rememberLink } from "@/lib/client/links";
+import { preloadTimeline } from "@/app/timeline/preload";
 
 type Seeded = { id: string; title: string; client: string; worker: string; story: "paid" | "caught" | "fund" };
 
@@ -13,6 +14,7 @@ export default function DemoPage() {
 
   async function start() {
     setBusy(true);
+    preloadTimeline(); // the tour ends on the timeline; fetch its large chunk while the demo seeds
     setError(undefined);
     const r = await fetch("/api/demo", { method: "POST" }).catch(() => undefined);
     const b = r ? await r.json().catch(() => ({})) : {};
@@ -31,20 +33,25 @@ export default function DemoPage() {
       <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Try Milestone in about a minute</h1>
       <p className="mt-4 text-lg text-ink-2">We&apos;ll set up a small project with three milestones, each showing one part of the idea. You&apos;ll be both the client and the worker; switch sides at the top of each milestone.</p>
       <ul className="mt-6 space-y-3 text-ink">
-        <li><span className="font-semibold">Hold real money.</span> Fund a milestone with PayPal&apos;s sandbox test card and watch the hold appear. No login, no real money.</li>
+        <li><span className="font-semibold">Place a real sandbox hold.</span> Fund a milestone with PayPal&apos;s sandbox test card and watch the hold appear. No login; sandbox test money only.</li>
         <li><span className="font-semibold">See proof pay out.</span> A finished milestone with its verdict, proof trail and sealed terms.</li>
         <li><span className="font-semibold">Watch a trick fail.</span> A pull request that told the AI reviewer to pass everything, caught by the rules.</li>
       </ul>
       <button onClick={start} disabled={busy} className="mt-8 inline-flex items-center gap-2 rounded-md bg-accent px-5 py-3 font-medium text-accent-ink hover:opacity-90 disabled:opacity-60">
         {busy && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
-        {busy ? "Setting up your project… (the demo server can take up to a minute to wake)" : "Start the demo"}
+        {busy ? "Setting up your demo… about 15 seconds" : "Start the demo"}
       </button>
+      {busy && (
+        <p role="status" className="mt-3 text-sm text-ink-3">
+          Creating three milestones with signed terms. If the server was asleep, it can take up to a minute.
+        </p>
+      )}
       {error && (
         <p role="alert" className="mt-4 rounded-md border border-failed/40 bg-failed-field p-3 text-sm text-ink">
           {error}
         </p>
       )}
-      <p className="mt-10 text-sm text-ink-3">Everything runs on PayPal&apos;s sandbox. The finished milestones replay real runs; their pull requests are real and public on GitHub.</p>
+      <p className="mt-10 text-sm text-ink-3">Everything runs on PayPal&apos;s sandbox. The finished milestones replay real runs: their pull requests and CI logs are real and public on GitHub; the PayPal ids shown on them are illustrative. The hold you place on the first milestone is a real sandbox hold.</p>
     </main>
   );
 }

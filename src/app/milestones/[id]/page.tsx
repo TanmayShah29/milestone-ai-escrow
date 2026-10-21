@@ -4,8 +4,8 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { DemoTour } from "@/components/DemoTour";
 import { MoneyTracker, StatusPill } from "@/components/MoneyTracker";
-import { linkFor, rememberLink } from "@/lib/client/links";
-import { STATUS, usd, type MilestoneView, type Role } from "@/lib/client/states";
+import { discardLink, linkFor, rememberLink, workerShareToken } from "@/lib/client/links";
+import { STATUS, cancelledAt, usd, type MilestoneView, type Role } from "@/lib/client/states";
 import { ContractSeal } from "./ContractSeal";
 import { MoneyPanel } from "./MoneyPanel";
 import { NextStep } from "./NextStep";
@@ -15,13 +15,36 @@ import { VerdictTable, type Review } from "./VerdictTable";
 
 type Data = { role: Role; milestone: MilestoneView; audit: AuditRow[]; review: Review | null };
 
+const ROLE_LABEL: Record<Role, string> = { client: "Client", worker: "Worker" };
+
+/** The page can't open the milestone: no link in this browser, or a link that isn't for it. */
+function LinkCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <main className="mx-auto max-w-xl px-4 py-16">
+      <h1 className="text-xl font-semibold">{title}</h1>
+      <p className="mt-2 text-ink-2">{children}</p>
+      <div className="mt-4 flex flex-wrap gap-4">
+        <Link href="/milestones" className="underline">
+          Your milestones
+        </Link>
+        <Link href="/" className="underline">
+          Back to Milestone
+        </Link>
+      </div>
+    </main>
+  );
+}
+
 export default function MilestonePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [data, setData] = useState<Data>();
   const [msg, setMsg] = useState<string>();
   const [as, setAs] = useState<Role>();
   const [tokens, setTokens] = useState<{ client?: string; worker?: string }>({});
+  // The worker link a client holds only to hand over (never to act as the worker).
+  const [shareToken, setShareToken] = useState<string>();
   const [ready, setReady] = useState(false);
+  const [denied, setDenied] = useState(false);
   const token = as ? tokens[as] : undefined;
 
   // A shared link arrives as ?t=<token>: remember it, then drop it from the address bar.
@@ -35,6 +58,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
     }
     const held = linkFor(id);
     setTokens({ client: held?.client, worker: held?.worker });
+    setShareToken(workerShareToken(held));
     setAs(held?.client ? "client" : held?.worker ? "worker" : undefined);
     const err = q.get("error");
     if (err) setMsg(err);
@@ -46,8 +70,13 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   const load = useCallback(async () => {
     if (!token) return;
     const r = await fetch(`/api/milestones/${id}`, authed());
-    const b = await r.json();
-    if (!r.ok) return setMsg(b.error);
+    const b = await r.json().catch(() => ({}));
+    if (r.status === 401 || r.status === 403) {
+      discardLink(id);
+      return setDenied(true);
+    }
+    if (!r.ok) return setMsg(b.error ?? "Couldn't load the milestone. Try again in a moment.");
+    setDenied(false);
     setData(b);
     rememberLink({ id, title: b.milestone.title });
   }, [id, token, authed]);
@@ -81,15 +110,17 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
 
   if (ready && !as) {
     return (
-      <main className="mx-auto max-w-xl px-4 py-16">
-        <h1 className="text-xl font-semibold">This milestone needs its link</h1>
-        <p className="mt-2 text-ink-2">
-          Open it from the client or worker link you were given (it ends with <span className="font-mono">?t=…</span>). Links are the keys: there are no accounts.
-        </p>
-        <Link href="/" className="mt-4 inline-block underline">
-          Back to Milestone
-        </Link>
-      </main>
+      <LinkCard title="This milestone needs its link">
+        Open it from the client or worker link you were given (it ends with <span className="font-mono">?t=…</span>). Links are the keys: there are no accounts.
+      </LinkCard>
+    );
+  }
+  if (denied && !data) {
+    return (
+      <LinkCard title="This link doesn't open this milestone">
+        The link may be mistyped, cut short, or meant for a different milestone. Open the client or worker link you were given again (it ends with{" "}
+        <span className="font-mono">?t=…</span>).
+      </LinkCard>
     );
   }
   if (!data) {
@@ -103,7 +134,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   const m = data.milestone;
   const status = STATUS[m.state] ?? { label: m.state, tone: "neutral" as const };
   const criteriaText = Object.fromEntries(((m.criteria?.criteria ?? []) as { id: string; text: string }[]).map((c) => [c.id, c.text]));
-  const workerLink = tokens.worker ? `${typeof window !== "undefined" ? window.location.origin : ""}/milestones/${id}?t=${tokens.worker}` : undefined;
+  const workerLink = shareToken ? `${typeof window !== "undefined" ? window.location.origin : ""}/milestones/${id}?t=${shareToken}` : undefined;
 
   return (
     <main className="mx-auto max-w-6xl px-4 pb-40 pt-6 sm:pb-16">
@@ -126,17 +157,28 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
             <span className="text-3xl font-semibold tracking-tight">{usd(m.amount_cents)}</span>
           </p>
           <div role="group" aria-label="View as" className="flex rounded-md border border-rule-strong p-0.5 text-sm">
-            {(["client", "worker"] as const).map((r) => (
-              <button key={r} disabled={!tokens[r]} onClick={() => setAs(r)} aria-pressed={as === r} className={`rounded px-2.5 py-1 capitalize disabled:opacity-30 ${as === r ? "bg-accent text-accent-ink" : "text-ink-2 hover:text-ink"}`}>
-                {r}
-              </button>
-            ))}
+            {(["client", "worker"] as const).map((r) => {
+              const missing = !tokens[r];
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  aria-disabled={missing || undefined}
+                  title={missing ? `Only the ${r}'s own link can act as the ${r}.` : undefined}
+                  onClick={() => !missing && setAs(r)}
+                  aria-pressed={as === r}
+                  className={`rounded px-2.5 py-1 ${missing ? "cursor-not-allowed text-ink-3 opacity-60" : as === r ? "bg-accent text-accent-ink" : "text-ink-2 hover:text-ink"}`}
+                >
+                  {ROLE_LABEL[r]}
+                </button>
+              );
+            })}
           </div>
         </div>
       </header>
 
       <div className="py-5">
-        <MoneyTracker state={m.state} />
+        <MoneyTracker state={m.state} cancelledAt={m.state === "CANCELLED" ? cancelledAt(m) : undefined} />
       </div>
 
       {msg && (

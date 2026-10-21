@@ -18,12 +18,12 @@ const RUNS = [
 export default function Home() {
   return (
     <main>
-      <section className="mx-auto max-w-6xl px-4 pb-14 pt-10 sm:pt-14">
+      <section className="mx-auto max-w-6xl px-4 pb-14 pt-10 sm:pt-12 lg:pt-8">
         <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-ink sm:text-6xl">Money moves only on proof.</h1>
-        <p className="mt-4 max-w-2xl text-lg text-ink-2">
+        <p className="mt-4 max-w-2xl text-lg text-ink-2 lg:mt-3">
           Milestone holds a client&apos;s payment on PayPal and releases it only when the work passes the tests both sides signed. The AI checks; fixed rules decide.
         </p>
-        <div className="mt-8">
+        <div className="mt-8 lg:mt-6">
           <PayOnProofCheque />
         </div>
       </section>
