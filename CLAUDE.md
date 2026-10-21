@@ -37,12 +37,16 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - Holds: 3-day honor period, valid 29 days. Reauthorize after day 3. Refunds need the **capture id**
 - Force errors with the `PayPal-Mock-Response: {"mock_application_codes":"INSTRUMENT_DECLINED"}` header
 
-## Setup items still open (found in the Oct 20 audit)
-- **Repo layout**: the local folder isn't a git repo, and GitHub `milestone-ai-escrow` is empty. Proposed: make `/Users/tanmay/Paypal` the repo root (Next.js app at the root; docs/, scripts/, CLAUDE.md committed; agent-toolkit/ and .env gitignored). Confirm with the user before `git init`
-- **Local DB**: Homebrew PostgreSQL 14 is installed but not running. Start it with `brew services start postgresql@14` (ask first), create a `milestone` DB, and have the user add `DATABASE_URL=postgres://localhost:5432/milestone` to `.env`
-- **GITHUB_TOKEN** (needed at the reviewer step): ask the user for a fine-grained, read-only token for public repos, added to `.env`. Don't reuse the gh CLI token (it has full `repo` scope)
-- **Render**: done Oct 20. Free web service `milestone-ai-escrow` (`srv-dbbpughjfumc73d08ia0`, https://milestone-ai-escrow.onrender.com). The user will not add a card: free tiers only. The production DB is **Neon** free tier (project `milestone` / `ancient-bonus-35699012`, branch `production`, Oregon, never expires), live since Oct 21. The unused Render free Postgres (`dpg-dbbpubbrjlhs73eqglbg-a`) expires on its own Nov 19. Secrets (`DATABASE_URL`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`) are pasted by the user in the Render dashboard; non-secret env vars can be set through the Render MCP
-- **Bryntum trial**: start around Nov 1 (the 45-day trial must outlast judging, which ends Dec 15)
+## Current status (updated Oct 21, end of session)
+**Phases 0–5 of `docs/MILESTONE_PLAN.md` are done and live.** Next: README + submission polish, then the demo video. Feature freeze Nov 6.
+- **Live app:** https://milestone-ai-escrow.onrender.com (Render free web service `srv-dbbpughjfumc73d08ia0`, auto-deploys from `main`; `/api/health` reports the live commit). Workspace `tea-dbbntvgn74is73daou00`. The user will not add a card anywhere: free tiers only.
+- **DB:** Neon free (project `milestone` / `ancient-bonus-35699012`, branch `production`, never expires). Local dev: Postgres 14 DBs `milestone` and `milestone_test`. Migrations run at startup (`npm run db:migrate`).
+- **Render env:** `DATABASE_URL`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `OPENROUTER_API_KEY`, `GITHUB_TOKEN` (fine-grained, PR read/write on milestone-demo only; fine-grained tokens have no Checks permission and public check runs need none) were pasted by the user. Non-secret vars (`APP_URL`, `PAYPAL_ENVIRONMENT`, `PAYPAL_WEBHOOK_ID=2JC020923H9067634`, `AI_MODEL*`, `AI_DAILY_CAP=40`, `PLATFORM_FEE_BPS`, `NODE_VERSION`, `ALLOW_DEV_ACTIONS=1`) were set through the Render MCP. Turn `ALLOW_DEV_ACTIONS` off before submission.
+- **Demo repo:** https://github.com/TanmayShah29/milestone-demo has a `milestone` workflow that runs the signed acceptance tests per criterion. Real paid runs: PR #1 (paid), #2 (prompt injection caught, then fixed and paid), #3 (an AI agent via MCP, paid).
+- **Design:** `PRODUCT.md`, `DESIGN.md`, `docs/design/deal-room.brief.md` ("Security print"). Skills in `.claude/skills/`: `frontend-design`, `impeccable`. Impeccable's binary launcher is **not** run (it downloads a binary); ask the user before enabling it.
+- **Verification tools:** Playwright + headless Chromium are installed (`node_modules/playwright`) for screenshots. The Claude in Chrome extension was not connected on Oct 21.
+- **Key code:** money flow `src/lib/money/flow.ts` (claims, locks, unknown-outcome settling), contract `src/lib/contract/terms.ts`, verifiers and policy `src/lib/review/`, webhooks `src/lib/money/webhooks.ts`, MCP server `mcp/server.mts`, judge mode `src/lib/demo.ts` + `/demo`, Gantt `src/app/timeline/`.
+- **Open user actions:** (1) set up a free keep-awake pinger (cron-job.org, every 10 min) on `/api/tick`; (2) post the Bryntum hackathon-license request in the PayPal Discord (https://discord.gg/sJ2G6DyvSK); remind them before the video; (3) around Nov 9–11, submit APIMatic's usage form (link in the checklist below).
 
 ## Money rules (do not break these)
 1. **The AI never moves money.** Model output is a recommendation. Only deterministic code applies the decision policy and calls capture, void, payout or refund. Never expose those calls as tools the model can use.
