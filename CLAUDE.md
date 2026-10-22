@@ -47,6 +47,16 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
   - Dispute webhooks move a milestone to DISPUTE.
   - Per-IP rate limits. `/api/status` no longer shows raw errors. `ALLOW_DEV_ACTIONS=0` in production.
   - Multiparty is NO-GO in the sandbox (`docs/MULTIPARTY.md`).
+  - Round 3 (Oct 22, after an 8-persona review):
+    - Every HUMAN_CHECK has a deadline when a hold exists: hold expiry − 3 days, or 72h after an objection. At the deadline it releases, unless there was genuine tampering or injection, in which case the system voids the hold (`cancelHold(..., { actor: "system" })`).
+    - "Ask for changes" after an objection needs a reason and counts as the client's one objection.
+    - Voided or expired holds move to CANCELLED, via the VOIDED webhook, sync, or the `tickAll` sweep.
+    - Payout = captured − actual PayPal fee − payout fee − the platform fee signed in the terms' `policy`. Minimum milestone $10.
+    - Client-written tests get a static check only and are never run on the server; they are labelled `testBy: "client"`.
+    - "Save your client link" panel.
+    - Bryntum auto-schedules the future phases, with a `finishnolaterthan` constraint at the hold cap.
+    - CI check runs are bound to `.github/workflows/milestone.yml`, triggered by `pull_request`, at the PR head commit. Verified unauthenticated against real GitHub.
+  - Judge funding rotates through PayPal's sandbox test cards, because `…0004` gets `PAYER_CANNOT_PAY` after heavy use.
 - **Docs:** the README has the threat model and limits; `docs/DEVPOST.md` has the submission text and video outline (YouTube link still a placeholder).
 - **Open user actions (Oct 22):**
   - Set `RATE_LIMIT_SALT` on Render (`openssl rand -hex 32`).
