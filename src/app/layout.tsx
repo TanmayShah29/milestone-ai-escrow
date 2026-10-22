@@ -36,6 +36,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             <Link href="/timeline" className="text-[#b9c7cf] no-underline hover:text-white">
               Timeline
             </Link>
+            <Link href="/ledger" className="text-[#b9c7cf] no-underline hover:text-white">
+              Ledger
+            </Link>
             <Link href="/new" className="ml-auto whitespace-nowrap rounded-md bg-[#e4ecea] px-3 py-1.5 font-medium text-[#13233a] no-underline hover:bg-white">
               New<span className="hidden sm:inline"> milestone</span>
             </Link>

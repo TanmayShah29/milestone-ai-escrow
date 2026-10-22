@@ -1,42 +1,51 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
+import { useHeldMilestones } from "@/components/grid/useHeldMilestones";
 import { MoneyTracker, StatusPill } from "@/components/MoneyTracker";
-import { heldLinks, needsLinkReminder } from "@/lib/client/links";
-import { STATUS, cancelledAt, usd, type MilestoneView, type Role } from "@/lib/client/states";
+import { portfolioRow } from "@/lib/client/ledger";
+import { STATUS, cancelledAt, usd } from "@/lib/client/states";
 
 // The milestones this browser holds links for (there are no accounts: links are the keys).
+// From the sm breakpoint up they're an AG Grid portfolio; phones keep the cards.
 
-type Row = { id: string; role: Role; m?: MilestoneView; error?: string; saveLink?: boolean };
+const PortfolioGrid = dynamic(() => import("@/components/grid/PortfolioGrid"), {
+  ssr: false,
+  loading: () => <p className="mt-8 text-ink-2" aria-busy="true">Loading the table…</p>,
+});
+
+const WIDE = "(min-width: 640px)";
+const subscribeWide = (cb: () => void) => {
+  const q = window.matchMedia(WIDE);
+  q.addEventListener("change", cb);
+  return () => q.removeEventListener("change", cb);
+};
+const useWide = () => useSyncExternalStore(subscribeWide, () => window.matchMedia(WIDE).matches, () => false);
 
 export default function Milestones() {
-  const [rows, setRows] = useState<Row[]>();
-  useEffect(() => {
-    const held = heldLinks();
-    Promise.all(
-      held.map(async (h): Promise<Row> => {
-        const token = h.client ?? h.worker;
-        const role: Role = h.client ? "client" : "worker";
-        const saveLink = needsLinkReminder(h);
-        const r = await fetch(`/api/milestones/${h.id}`, { headers: { "x-milestone-token": token ?? "" } }).catch(() => undefined);
-        if (!r?.ok) return { id: h.id, role, error: "Couldn't load" };
-        return { id: h.id, role, m: (await r.json()).milestone, saveLink };
-      }),
-    ).then(setRows);
-  }, []);
+  const rows = useHeldMilestones();
+  const wide = useWide();
+  const gridRows = useMemo(() => (rows ?? []).flatMap((r) => (r.m ? [portfolioRow(r.m, r.role, r.saveLink)] : [])), [rows]);
+  const failed = (rows ?? []).filter((r) => !r.m);
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-10 sm:py-14">
+    <main className="mx-auto max-w-6xl px-4 py-10 sm:py-14">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Your milestones</h1>
           <p className="mt-1 text-ink-2">Milestones you created or were invited to, in this browser.</p>
         </div>
         {rows && rows.length > 0 && (
-          <Link href="/timeline" className="text-sm text-ink underline">
-            See them on the timeline
-          </Link>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            <Link href="/timeline" className="text-ink underline">
+              See them on the timeline
+            </Link>
+            <Link href="/ledger" className="text-ink underline">
+              See every PayPal call
+            </Link>
+          </div>
         )}
       </div>
 
@@ -60,7 +69,26 @@ export default function Milestones() {
           </div>
         </section>
       )}
-      {rows && rows.length > 0 && (
+      {rows && rows.length > 0 && wide && (
+        <div className="mt-8">
+          {failed.length > 0 && (
+            <p className="mb-4 text-sm text-failed" role="status">
+              Couldn&apos;t load{" "}
+              {failed.map((r, i) => (
+                <span key={r.id}>
+                  {i > 0 && ", "}
+                  <Link href={`/milestones/${r.id}`} className="text-failed underline">
+                    milestone {i + 1}
+                  </Link>
+                </span>
+              ))}
+              . Open it to try again.
+            </p>
+          )}
+          <PortfolioGrid rows={gridRows} />
+        </div>
+      )}
+      {rows && rows.length > 0 && !wide && (
         <ul className="mt-8 divide-y divide-rule border-y border-rule">
           {rows.map(({ id, role, m, error, saveLink }) => {
             const status = m ? (STATUS[m.state] ?? { label: m.state, tone: "neutral" as const }) : undefined;

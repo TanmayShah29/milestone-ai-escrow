@@ -1,6 +1,7 @@
 import { db, tx } from "@/lib/db";
 import { hashTerms, type Terms } from "@/lib/contract/terms";
 import { createMilestone, type Milestone } from "@/lib/milestones/repo";
+import { requestIdFor, type MoneyAction } from "@/lib/money/claims";
 
 // Judge mode: a fresh three-milestone project, seeded straight into the database. Histories mirror the real
 // sandbox runs (and link to the real pull requests in TanmayShah29/milestone-demo); PayPal ids on the
@@ -37,6 +38,10 @@ const WORDCOUNT: Terms = {
 
 type History = [event: string, toState: string | null, at: number, paypalId?: string][];
 
+// Who did it, as the live flow records it: the client funds and signs, the worker submits, PayPal pays out.
+const ACTOR_FOR_EVENT: Record<string, string> = { "hold:authorized": "client", "terms:agreed": "client", "deliverable:submitted": "freelancer", "payout:succeeded": "paypal" };
+const CLAIM_FOR_EVENT: Record<string, MoneyAction> = { "hold:authorized": "create_order", "hold:captured": "capture", "payout:succeeded": "payout" };
+
 async function seed(opts: { title: string; brief: string; cents: number; created: number; due: number; terms: Terms; after?: string; history: History; set: Record<string, unknown>; review?: Record<string, unknown> }) {
   const { milestone, clientToken, workerToken } = await createMilestone({
     title: opts.title,
@@ -56,9 +61,21 @@ async function seed(opts: { title: string; brief: string; cents: number; created
     await c.query(`update milestones set ${keys.map((k, i) => `${k} = $${i + 2}`).join(", ")} where id = $1`, [m.id, ...keys.map((k) => cols[k])]);
     await c.query("delete from audit_log where milestone_id = $1", [m.id]);
     await c.query(
-      `insert into audit_log (milestone_id, actor, event, to_state, created_at, paypal_id) values ${events.map((_, i) => `($1, 'system', $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, $${i * 4 + 5})`).join(", ")}`,
-      [m.id, ...events.flatMap(([event, to, at, ref]) => [event, to, new Date(at), ref ?? null])],
+      `insert into audit_log (milestone_id, actor, event, to_state, created_at, paypal_id) values ${events.map((_, i) => `($1, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, $${i * 5 + 6})`).join(", ")}`,
+      [m.id, ...events.flatMap(([event, to, at, ref]) => [ACTOR_FOR_EVENT[event] ?? "system", event, to, new Date(at), ref ?? null])],
     );
+    // The claim rows the money engine would have written for each PayPal call in the history (attempt 1,
+    // succeeded), so the ledger's attempt / PayPal-Request-Id columns read the same as for a live milestone.
+    const claims = events.flatMap(([event, , at, ref]) => {
+      const action = CLAIM_FOR_EVENT[event];
+      return action && ref ? [[action, ref, at] as const] : [];
+    });
+    for (const [action, ref, at] of claims) {
+      await c.query(
+        "insert into money_actions (milestone_id, action, attempt, request_id, status, paypal_id, created_at, updated_at) values ($1, $2, 1, $3, 'succeeded', $4, $5, $5)",
+        [m.id, action, requestIdFor(m.id, action, 1), ref, new Date(at)],
+      );
+    }
     if (opts.review) {
       await c.query("insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, 'minimax/minimax-m3.1-flash:free')", [
         m.id,

@@ -291,8 +291,11 @@ Give the agent the milestone's **worker link** (`…/milestones/<id>?t=mwt_…`)
   against the APIMatic-generated PayPal TypeScript SDK. Every SDK fact in
   [`paypal-plan.md`](paypal-plan.md) came from its SDK map, not from memory
 - **[Bryntum Gantt](https://bryntum.com/products/gantt/)**: `/timeline`, where money drives the schedule.
-  The hold gates the work, the day-3 honor and day-29 expiry markers are shown, and dragging the due date
-  past the hold's life warns the client
+  Future phases are auto-scheduled, so dragging the work's end pushes review, the objection window and
+  payout; a finish-no-later-than constraint at the hold's limit refuses dates the PayPal hold can't cover
+- **[AG Grid](https://www.ag-grid.com/)** (Community, MIT): `/ledger`, every PayPal call each milestone made,
+  with the attempt and `PayPal-Request-Id` that make retries safe, totals for held / captured / fees /
+  paid out, filters and CSV export; and the `/milestones` portfolio, sorted by which hold expires first
 - **[Render](https://render.com)**: hosts the live app (free web service, auto-deploys from `main`)
 - OpenRouter free models via the Vercel AI SDK; MCP TypeScript SDK; Playwright for screenshots
 

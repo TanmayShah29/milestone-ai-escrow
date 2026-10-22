@@ -111,7 +111,7 @@ paid. The MCP server has **no** tools that fund, capture, release or refund. An 
 
 TypeScript, Next.js, React, Node.js, PostgreSQL (Neon), PayPal Orders v2 / Payments v2 / Payouts / Webhooks
 (sandbox), the APIMatic PayPal TypeScript SDK, APIMatic Context Plugin, OpenRouter, Vercel AI SDK, zod,
-Model Context Protocol (MCP) TypeScript SDK, GitHub Actions, Bryntum Gantt, Render, Tailwind CSS, Playwright,
+Model Context Protocol (MCP) TypeScript SDK, GitHub Actions, Bryntum Gantt, AG Grid, Render, Tailwind CSS, Playwright,
 Claude Code.
 
 ## Tools and models used, and how
@@ -122,7 +122,8 @@ Claude Code.
 | PayPal APIs (sandbox) | Orders v2 (AUTHORIZE), authorizations (capture, void, reauthorize), Payouts, webhook signature verification, dispute webhooks |
 | APIMatic Context Plugin + the APIMatic-generated PayPal TypeScript SDK | Used in Claude Code while building the PayPal integration. Every SDK signature, header and error arm in `paypal-plan.md` was looked up in the SDK map |
 | Claude Code (Anthropic) | Development assistant for writing code, tests, docs and audits. Not part of the running product |
-| Bryntum Gantt (trial) | The `/timeline` view: holds as dependencies, honor and expiry markers, drag to reschedule with a hold-expiry warning |
+| Bryntum Gantt (trial) | The `/timeline` view: auto-scheduled phases (dragging work pushes review, objection window and payout), a constraint at the hold's limit, honor and expiry bands |
+| AG Grid Community | `/ledger`: every PayPal call with its attempt and idempotency key, money totals, filters, CSV export. `/milestones`: a portfolio grid sorted by hold expiry |
 | Render | Hosting for the live app (free web service, auto-deploys from `main`) |
 | GitHub Actions | Runs the signed acceptance tests per criterion in the worker's repo |
 | Model Context Protocol | An MCP server so AI agents can take and deliver work, with no money tools |
@@ -140,7 +141,7 @@ Claude Code.
 | 1:30–1:55 | Fixed PR paid | CI jobs named with the fingerprint go green, then PASSED, the objection window, capture, payout SUCCESS (PR #1 or #3) | "The signed tests ran in CI. Fixed rules passed it. The code captured the hold and paid out minus the fee, on PayPal sandbox." |
 | 1:55–2:20 | Objection or timeline | Either: object, then a second review by a different model and the 72 h release. Or: the Bryntum timeline with the hold gate and the day-29 expiry, dragging past it to get the warning | "A client can object once. A different model re-checks the same commit. They can't park the money forever." / "Holds last 29 days, so the schedule follows the money." |
 | 2:20–2:40 | Threat model | README threat-model table, scrolled | "We wrote down how we'd attack it: early exits, assert patching, a forged contract. And what's still open: tests share a process with the code, and free models are flaky." |
-| 2:40–2:50 | Close | Landing page + credits line | "Milestone: money moves only on proof. Built on PayPal, with APIMatic, Bryntum and Render." |
+| 2:40–2:50 | Close | Landing page + credits line | "Milestone: money moves only on proof. Built on PayPal, with APIMatic, Bryntum, AG Grid and Render." |
 
 Recording notes: wake the Render service first (`/api/health`), and use pre-recorded CI runs (CI takes 1–2
 minutes). Say "sandbox" whenever money appears on screen. No copyrighted music. Turn off
