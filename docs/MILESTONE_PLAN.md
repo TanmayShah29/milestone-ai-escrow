@@ -107,7 +107,7 @@ bounties, agencies, agent-to-agent commerce" (scale).
 | AGREED → FUNDED | client approves the hold | create order (AUTHORIZE) + authorize |
 | FUNDED → CANCELLED | both cancel before submission | void authorization |
 | IN_REVIEW → CHANGES_REQUESTED | a must-have criterion fails | none (back to SUBMITTED on resubmit) |
-| IN_REVIEW → HUMAN_CHECK | a must is unclear or confidence < 0.8, injection detected, protected files edited or a harness escape | none (client decides; no deadline unless after an objection) |
+| IN_REVIEW → HUMAN_CHECK | a must is unclear or confidence < 0.8, injection detected, protected files edited or a harness escape | client decides; deadline = hold expiry − 3 days (72 h after entry if after an objection), then release, or void for tampering/injection |
 | HUMAN_CHECK → PASSED / CHANGES_REQUESTED | client approves / asks for changes (asking clears the objection) | none |
 | HUMAN_CHECK → PASSED (timeout) | post-objection human check undecided 72 h after it started (`human_check_at`) | none; then the normal capture + payout |
 | IN_REVIEW → PASSED | all musts pass and confidence ≥ 0.8 | none |

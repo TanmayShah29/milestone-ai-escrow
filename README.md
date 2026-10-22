@@ -69,10 +69,14 @@ review runs on the **same commit** with a **different model** (CI results are re
   decide by then, the money releases to the worker, because the work passed its first review and the
   client has had two chances. No model is involved; this is audited as `review:human_timeout`. The worst
   case after an objection is about 6 days of extra holding, well inside the 29-day hold.
-- A human check reached **without** an objection (for example, a PR that edits the workflow) has no
-  deadline: the money stays held until the client decides or cancels.
-- If the client asks for changes, or the second review fails, the objection is cleared, so a fixed
-  resubmission gets a normal window and one new objection.
+- A human check reached **without** an objection also has a deadline: 3 days before the PayPal hold
+  expires. If the client hasn't decided by then, fixed rules settle it: the payment releases to the worker,
+  unless the PR tampered with CI or tried to steer the reviewer, in which case the hold is voided back to
+  the client. A CI result that only couldn't be verified (say, GitHub was briefly unreachable) releases only
+  if every must-have passed; otherwise it waits.
+- After an objection, "Ask for changes" needs a reason the worker can read, and it counts as the client's
+  one objection: the fixed resubmission, once it passes, can't be objected to again. A failed second review
+  clears the objection, so the fixed resubmission gets a normal window.
 
 The objection window is `OBJECTION_WINDOW_SECONDS`. The live demo uses 2 minutes so judges can watch a
 release; a real deployment would use something like 48 hours.
@@ -150,7 +154,7 @@ milestone to a human rather than paying out.
 | **Early exit** (`process.exit(0)` so `node --test` reports green) | The base-branch harness (`run-tests.mjs`) decides from test events, not the exit code. A sentinel test registered after the signed file must pass last, and skipped or todo tests fail the run. `process.exit`, `/proc` reads and loader hooks in the diff are flagged for human check | See the residual below about sharing a process |
 | **Assert monkeypatching** (make `assert.equal` a no-op) | `node:assert` and `assert.strict` are frozen before the signed file and the worker's code load. Tests registered outside the signed file make the run fail | Same process (below) |
 | **Editing the workflow or tests in the PR** | `acceptance/` is overwritten with the signed tests. The helper scripts come from the base branch. Any change under `.github/` or `acceptance/` is flagged as tampering and sends the milestone to human check, never to an automatic pass. The workflow uses `pull_request` (not `pull_request_target`), so PR code never runs with write tokens or secrets | **The workflow YAML itself comes from the PR's merge commit** under `pull_request`. A PR that rewrites it can fake green jobs, and is caught only by the tampering flag (a person then decides) |
-| **Prompt injection** in code, comments or PR text | A deterministic regex scan, independent of the model, plus the model's own flag. Either one blocks automatic payment (human check, or changes requested if a must-have fails). The deliverable is framed as untrusted data | A novel phrasing could get past both. Tested criteria don't depend on the model at all |
+| **Prompt injection** in code, comments or PR text | A deterministic scan, independent of the model, after folding Unicode look-alikes and removing zero-width characters; invisible or bidirectional control characters are themselves flagged. Plus the model's own flag. Either one blocks automatic payment (human check, or changes requested if a must-have fails). The deliverable is framed as untrusted data | The scan only knows English phrasing; an instruction in another language, or a novel phrasing, reaches the model. That is why the model only judges criteria no test covers: tested criteria don't depend on the model at all |
 | **Client parks the money** (objects forever) | One objection per approval. A passing second review releases 72 h after the objection. A post-objection human check auto-releases 72 h after it starts (worst case about 6 days) | A client can still void the hold before any delivery, by design |
 | **Client acts as the worker** | Capability links: a creator's browser keeps the worker link **share-only** and never uses it to act. Signing and submitting require the worker token | There are no accounts. Whoever holds the worker link *is* the worker, and the client sees that link to hand it over. This is a UX guard, not identity |
 | **Token leakage** | `Referrer-Policy: no-referrer`. Tokens are stripped from the address bar after load. Only SHA-256 hashes of tokens and API keys are stored, compared in constant time, and never sent to a browser | Links shared over insecure channels are bearer secrets |
