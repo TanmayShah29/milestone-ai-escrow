@@ -23,7 +23,7 @@ export function ProofTrail({ audit }: { audit: AuditRow[] }) {
               {eventLabel(a.event)}
               {eventDetail(a.event, a.detail) && <span className="text-ink-2"> {eventDetail(a.event, a.detail)}</span>}
             </span>
-            {a.paypal_id &&
+            {a.paypal_id && !a.paypal_id.startsWith("WH-") && // a webhook event id proves nothing to a reader
               (/^https:\/\/github\.com\/.+\/pull\/(\d+)/.test(a.paypal_id) ? (
                 <a href={a.paypal_id} target="_blank" rel="noreferrer" className="col-start-2 text-xs text-ink underline sm:col-start-auto">
                   PR #{/\/pull\/(\d+)/.exec(a.paypal_id)![1]}

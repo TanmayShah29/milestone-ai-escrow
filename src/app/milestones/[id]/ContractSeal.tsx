@@ -15,7 +15,7 @@ export function ContractSeal({ m }: { m: MilestoneView }) {
       </div>
       <p className="mt-3 text-xs leading-relaxed text-ink-2">
         {sealed
-          ? "Drawn from the SHA-256 fingerprint of the terms both sides signed. The same fingerprint is on the PayPal order, so any change to the terms would break the seal."
+          ? "Drawn from the SHA-256 fingerprint of the terms both sides signed. Its first 12 characters are on the PayPal order, and CI runs only the terms with this exact fingerprint, so any change to the terms would break the seal."
           : "Drawn from the fingerprint of the current terms. It turns solid when both sides sign."}
       </p>
       {sealed && hash && (

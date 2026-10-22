@@ -153,7 +153,7 @@ export function moneyLine(m: MilestoneView): { headline: string; detail: string;
     case "RELEASED":
       return { headline: "Captured, paying the worker", detail: `${usd(m.captured_cents)} captured; ${usd(m.payout_cents)} is on its way to the worker.`, tone: "paid" };
     case "PAID_OUT":
-      return { headline: `Paid ${usd(m.payout_cents)} to the worker`, detail: `${usd(m.captured_cents)} captured, ${usd(m.fee_cents)} platform fee.`, tone: "paid" };
+      return { headline: `Paid ${usd(m.payout_cents)} to the worker`, detail: `${usd(m.captured_cents)} captured; ${usd((typeof m.paypal_fee_cents === "number" ? m.paypal_fee_cents : 0) + (typeof m.payout_fee_cents === "number" ? m.payout_fee_cents : 0))} PayPal fees, ${usd(m.fee_cents)} platform fee.`, tone: "paid" };
     case "DISPUTE":
       return { headline: "In a PayPal dispute", detail: `The client opened a dispute on the ${usd(m.captured_cents)} captured. PayPal decides it; nothing moves from here.`, tone: "failed" };
     case "PAYOUT_FAILED":
@@ -225,8 +225,21 @@ export function eventDetail(event: string, detail: Record<string, unknown> | nul
   return undefined;
 }
 
+// PayPal webhook events, in words. Unlisted ones fall back to the event name.
+const WEBHOOK_COPY: Record<string, string> = {
+  "PAYMENT.AUTHORIZATION.CREATED": "PayPal confirmed the hold",
+  "PAYMENT.AUTHORIZATION.VOIDED": "PayPal confirmed the hold was released",
+  "PAYMENT.CAPTURE.COMPLETED": "PayPal confirmed the capture",
+  "PAYMENT.CAPTURE.REFUNDED": "PayPal confirmed a refund",
+  "PAYMENT.PAYOUTS-ITEM.SUCCEEDED": "PayPal confirmed the worker's payout",
+  "PAYMENT.PAYOUTSBATCH.SUCCESS": "PayPal confirmed the payout batch",
+  "CHECKOUT.ORDER.APPROVED": "PayPal confirmed the client approved the hold",
+  "CUSTOMER.DISPUTE.CREATED": "PayPal reported a dispute",
+};
+
 export function eventLabel(event: string): string {
   if (EVENT_COPY[event]) return EVENT_COPY[event]!;
+  if (event.startsWith("webhook:") && WEBHOOK_COPY[event.slice(8)]) return WEBHOOK_COPY[event.slice(8)]!;
   if (event.startsWith("webhook:")) return `PayPal confirmed: ${event.slice(8).toLowerCase().replaceAll("_", " ").replaceAll(".", " ")}`;
   if (event.endsWith(":refused")) return `PayPal refused ${event.split(":")[0]!.replace("_", " ")}`;
   if (event.endsWith(":unknown")) return `Waiting on PayPal for ${event.split(":")[0]!.replace("_", " ")}`;
