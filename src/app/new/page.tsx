@@ -74,7 +74,8 @@ export default function NewMilestone() {
         <div className="grid gap-5 sm:grid-cols-2">
           <label className="block text-sm">
             <span className="font-medium">Budget (USD)</span>
-            <input required inputMode="decimal" pattern="\d+(\.\d{1,2})?" className={field} value={f.amount} onChange={set("amount")} placeholder="300.00" />
+            <span className="block text-ink-2">At least $10.00; PayPal&apos;s fees come out of it.</span>
+            <input required inputMode="decimal" pattern="\d+(\.\d{1,2})?" title="An amount in dollars, like 300.00" className={field} value={f.amount} onChange={set("amount")} placeholder="300.00" />
           </label>
           <label className="block text-sm">
             <span className="font-medium">Worker&apos;s PayPal email</span>

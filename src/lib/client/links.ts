@@ -106,3 +106,35 @@ export function linkFor(id: string): Held | undefined {
 export function workerShareToken(h: Held | undefined): string | undefined {
   return h?.shareWorker ?? h?.worker;
 }
+
+// Whether the client has dismissed "Save your client link" for a milestone. Only ids are stored here,
+// never tokens. Per-browser convenience: if storage is unavailable, the reminder simply shows again.
+const SAVED_KEY = "milestone:link-saved";
+
+function savedIds(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(SAVED_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Remember that the client saved (or chose to dismiss the reminder for) this milestone's link. */
+export function markLinkSaved(id: string): void {
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify([id, ...savedIds().filter((x) => x !== id)].slice(0, 200)));
+  } catch {
+    // storage unavailable (private window): the reminder shows again next time
+  }
+}
+
+/** A client link this browser holds that the client hasn't confirmed saving. Judge-mode demos never ask. */
+export function needsLinkReminder(h: Held | undefined): boolean {
+  return !!h?.client && !isDemo(h.id) && !savedIds().includes(h.id);
+}
+
+/** The full client link for a milestone this browser holds as the client (the only way back to it). */
+export function clientLinkUrl(origin: string, h: Held | undefined): string | undefined {
+  return h?.client ? `${origin}/milestones/${h.id}?t=${encodeURIComponent(h.client)}` : undefined;
+}

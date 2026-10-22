@@ -7,10 +7,11 @@ import type { ModelCall } from "@/lib/ai/client";
 import { InvariantViolation } from "@/lib/errors";
 import { getMilestone } from "@/lib/milestones/repo";
 import type { CheckRun, GitHub, PrFile, PullRequest } from "@/lib/review/github";
-import { decide, type Verdict } from "@/lib/review/policy";
+import { decide, humanTimeoutOutcome, isProceduralFlag, type Verdict } from "@/lib/review/policy";
 import { scanForInjection } from "@/lib/review/injection";
 import { acceptanceCheckName } from "@/lib/review/verifiers";
 import { humanCheckDeadline, humanDecision, objectionReleaseMs, objectToRelease, reviewMilestone, submitDeliverable, tick, tickAll, type ReviewDeps } from "@/lib/review/run";
+import { publicMilestone } from "@/lib/auth";
 
 beforeEach(resetDb);
 after(() => db().end());
@@ -32,6 +33,10 @@ function fakeGitHub(o: { body?: string; sha?: string; runs?: CheckRun[]; files?:
     async checkRuns() {
       calls.push("checks");
       return o.runs ?? [];
+    },
+    async workflowRun(_owner, _repo, id) {
+      // The trusted workflow on the PR head (see verifiers.ts: check runs are bound to it).
+      return { id, path: ".github/workflows/milestone.yml", event: "pull_request", headSha: o.sha ?? "abc1234" };
     },
     async comment(_o, _r, _n, body) {
       comments.push(body);
@@ -68,6 +73,21 @@ describe("decision policy (code, not the model)", () => {
     assert.equal(decide({ ...base, criteria: [c("C1", "pass"), c("C2", "fail")] }).decision, "CHANGES_REQUESTED");
     assert.equal(decide({ ...base, criteria: [c("C1", "pass"), c("C2", "pass", 0.6)] }).decision, "HUMAN_CHECK");
     assert.equal(decide({ ...base, criteria: [c("C1", "unclear", 0)] }).decision, "HUMAN_CHECK");
+  });
+
+  it("an undecided HUMAN_CHECK: tampering or injection voids, CI-binding flags release only if every must-have passed", () => {
+    const untrusted = "CI result for C1 not trusted: it came from .github/workflows/other.yml";
+    const tooBig = "the pull request changes 412 files; only the first 300 can be scanned";
+    assert.ok(isProceduralFlag(untrusted) && isProceduralFlag(tooBig));
+    assert.ok(!isProceduralFlag(".github/workflows/milestone.yml") && !isProceduralFlag("src/x.ts (process.exit)"));
+    assert.equal(humanTimeoutOutcome(null).outcome, "release");
+    assert.equal(humanTimeoutOutcome({ ...base, criteria: [c("C1", "unclear", 0.4)] }).outcome, "release");
+    assert.equal(humanTimeoutOutcome({ ...base, tampering: ["acceptance/c1.test.ts"] }).outcome, "void");
+    assert.equal(humanTimeoutOutcome({ ...base, tampering: ["src/x.ts (process.exit)", untrusted] }).outcome, "void");
+    assert.equal(humanTimeoutOutcome({ ...base, injection: { detected: true, quotes: ["x"] } }).outcome, "void");
+    assert.equal(humanTimeoutOutcome({ ...base, criteria: [c("C1", "pass"), c("C2", "pass", 0.9)], tampering: [tooBig] }).outcome, "release");
+    assert.equal(humanTimeoutOutcome({ ...base, criteria: [c("C1", "unclear", 0)], tampering: [untrusted] }).outcome, "wait");
+    assert.equal(humanTimeoutOutcome({ ...base, criteria: [], tampering: [tooBig] }).outcome, "wait");
   });
 
   it("injection or tampering never passes, even when everything else does", () => {
@@ -344,7 +364,7 @@ describe("objection: one second review on the same commit", () => {
     assert.deepEqual(rows, [{ actor: "system", from_state: "HUMAN_CHECK", to_state: "PASSED" }]);
   });
 
-  it("a HUMAN_CHECK without an objection never auto-releases", async () => {
+  it("a HUMAN_CHECK without an objection and no known hold expiry never auto-settles", async () => {
     const { id, body, c1 } = await submitted();
     const { gh } = fakeGitHub({ body, files: [{ filename: ".github/workflows/milestone.yml", status: "modified", additions: 1, deletions: 0, patch: "+x" }], runs: [run("contract", "success"), run(c1, "success")] });
     const m = await reviewMilestone(id, deps(gh));
@@ -357,11 +377,120 @@ describe("objection: one second review on the same commit", () => {
     assert.equal(stub.calls.length, 0);
   });
 
-  it("asking for changes on a post-objection HUMAN_CHECK clears the objection", async () => {
+  it("a HUMAN_CHECK without an objection releases to the worker 3 days before the hold expires, when nothing was flagged", async () => {
+    // A HUMAN_CHECK from low AI confidence: the latest verdict has no tampering and no injection flag.
+    const id = await seedMilestone({ state: "HUMAN_CHECK", repo: "acme/web", pr_url: PR_URL, paypal_order_id: "O1", paypal_authorization_id: "A1", authorized_cents: 30_000 });
+    const clean: Verdict = { criteria: [{ id: "C1", kind: "must", source: "ai", verdict: "unclear", confidence: 0.4, evidence: [] }], summary: "Unsure", feedbackForWorker: "", injection: { detected: false, quotes: [] }, tampering: [], model: "test/primary:free", headSha: "abc1234" };
+    await db().query("insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons) values ($1, 'abc1234', 'done', $2, 'HUMAN_CHECK', '[]')", [id, JSON.stringify(clean)]);
+    const { gh } = fakeGitHub();
+
+    const expires = new Date(Date.now() + 10 * 86_400_000);
+    await db().query("update milestones set authorization_expires_at = $2 where id = $1", [id, expires]);
+    const m = await getMilestone(id);
+    assert.equal(humanCheckDeadline(m)!.getTime(), expires.getTime() - 3 * 86_400_000);
+    assert.equal(publicMilestone(m).decide_by!.getTime(), expires.getTime() - 3 * 86_400_000);
+
+    // Before the deadline: nothing happens.
+    const early = releaseStub();
+    assert.equal((await tick(id, { github: gh, money: depsWith(early) })).state, "HUMAN_CHECK");
+    assert.deepEqual(await tickAll({ github: gh, money: depsWith(early) }), []);
+    assert.equal(early.calls.length, 0);
+
+    // The hold now expires in under 3 days, and the row hasn't changed in weeks: tickAll still picks it up.
+    await db().query("update milestones set authorization_expires_at = now() + interval '2 days', updated_at = now() - interval '20 days' where id = $1", [id]);
+    const late = releaseStub();
+    assert.deepEqual(await tickAll({ github: gh, money: depsWith(late) }), [{ id, state: "RELEASED" }]);
+    assert.equal((await getMilestone(id)).paypal_payout_batch_id, "B1");
+    const { rows } = await db().query<{ actor: string; to_state: string; detail: { outcome: string; afterObjection: boolean } }>(
+      "select actor, to_state, detail from audit_log where milestone_id = $1 and event = 'review:human_timeout'",
+      [id],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.actor, "system");
+    assert.equal(rows[0]!.to_state, "PASSED");
+    assert.equal(rows[0]!.detail.outcome, "release");
+    assert.equal(rows[0]!.detail.afterObjection, false);
+  });
+
+  it("at the deadline, work flagged for tampering is never paid: the hold is voided instead", async () => {
+    const { id, body, c1 } = await submitted();
+    const { gh } = fakeGitHub({ body, files: [{ filename: ".github/workflows/milestone.yml", status: "modified", additions: 1, deletions: 0, patch: "+x" }], runs: [run("contract", "success"), run(c1, "success")] });
+    assert.equal((await reviewMilestone(id, deps(gh))).state, "HUMAN_CHECK");
+    await db().query("update milestones set authorization_expires_at = now() + interval '1 day' where id = $1", [id]);
+
+    // The money flow's cancel voids the authorization; capture and payout must never be called.
+    const stub = stubFetch(({ url }) =>
+      url.pathname.endsWith("/void")
+        ? new Response(null, { status: 204 })
+        : url.pathname.includes("/authorizations/")
+          ? jsonResponse(200, { id: "A1", status: "VOIDED" })
+          : jsonResponse(500, { name: "UNEXPECTED" }),
+    );
+    const m = await tick(id, { github: gh, money: depsWith(stub) });
+    assert.equal(m.state, "CANCELLED");
+    assert.ok(stub.calls.some((c) => c.url.pathname === "/v2/payments/authorizations/A1/void"), "the hold was voided");
+    assert.ok(!stub.calls.some((c) => /capture|payouts/.test(c.url.pathname)), "nothing was captured or paid out");
+    const { rows } = await db().query<{ to_state: string; detail: { outcome: string; reasons: string[] } }>(
+      "select to_state, detail from audit_log where milestone_id = $1 and event = 'review:human_timeout'",
+      [id],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.to_state, "CANCELLED");
+    assert.equal(rows[0]!.detail.outcome, "void");
+    assert.ok(rows[0]!.detail.reasons.some((r) => /protected files/.test(r)));
+  });
+
+  it("at the deadline, an untrusted CI result on a must-have waits for the client: no money moves", async () => {
+    const id = await seedMilestone({ state: "HUMAN_CHECK", paypal_order_id: "O1", paypal_authorization_id: "A1", authorized_cents: 30_000, authorization_expires_at: new Date(Date.now() + 86_400_000) });
+    const v: Verdict = { criteria: [{ id: "C1", kind: "must", source: "test", verdict: "unclear", confidence: 0, evidence: [] }], summary: "", feedbackForWorker: "", injection: { detected: false, quotes: [] }, tampering: ["CI result for C1 not trusted: could not be verified"], model: null, headSha: "abc1234" };
+    await db().query("insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons) values ($1, 'abc1234', 'done', $2, 'HUMAN_CHECK', '[]')", [id, JSON.stringify(v)]);
+    const stub = stubFetch(() => jsonResponse(500, {}));
+    assert.equal((await tick(id, { github: fakeGitHub().gh, money: depsWith(stub) })).state, "HUMAN_CHECK");
+    assert.equal((await tick(id, { github: fakeGitHub().gh, money: depsWith(stub) })).state, "HUMAN_CHECK");
+    assert.equal(stub.calls.length, 0);
+    const { rows } = await db().query<{ detail: { outcome: string } }>("select detail from audit_log where milestone_id = $1 and event = 'review:human_timeout'", [id]);
+    assert.equal(rows.length, 1, "audited once, not on every tick");
+    assert.equal(rows[0]!.detail.outcome, "wait");
+  });
+
+  it("asking for changes after an objection needs a reason, and keeps the objection used up", async () => {
     const id = await seedMilestone({ state: "HUMAN_CHECK", contested_at: new Date(), human_check_at: new Date() });
-    const m = await humanDecision(id, false);
+    await assert.rejects(humanDecision(id, false), /say what needs to change/);
+    await assert.rejects(humanDecision(id, false, { reason: "   " }), /say what needs to change/);
+    assert.equal((await getMilestone(id)).state, "HUMAN_CHECK");
+
+    const m = await humanDecision(id, false, { reason: "The toggle resets on reload." });
     assert.equal(m.state, "CHANGES_REQUESTED");
+    assert.ok(m.contested_at, "the client's change request counts as their one objection");
+    assert.equal(m.changes_reason, "The toggle resets on reload.");
+    assert.equal(publicMilestone(m).changes_reason, "The toggle resets on reload.");
+
+    // The fixed resubmission passes: it can't be objected to again.
+    await db().query("update milestones set state = 'PASSED', release_after = now() + interval '1 hour' where id = $1", [id]);
+    await assert.rejects(objectToRelease(id), /already objected/);
+  });
+
+  it("a first change request takes an optional reason; reasons over 1,000 characters are refused", async () => {
+    const id = await seedMilestone({ state: "HUMAN_CHECK" });
+    await assert.rejects(humanDecision(id, false, { reason: "x".repeat(1001) }), InvariantViolation);
+    const m = await humanDecision(id, false, { reason: "Please add a test for the toggle." });
+    assert.equal(m.changes_reason, "Please add a test for the toggle.");
     assert.equal(m.contested_at, null);
+    const plain = await humanDecision(await seedMilestone({ state: "HUMAN_CHECK" }), false);
+    assert.equal(plain.changes_reason, null);
+  });
+
+  it("an objection stores its optional reason for the worker", async () => {
+    const id = await seedMilestone({ state: "PASSED", release_after: new Date(Date.now() + 60_000) });
+    await assert.rejects(objectToRelease(id, { reason: "y".repeat(1001) }), /under 1,000/);
+    const m = await objectToRelease(id, { reason: "  It breaks the settings page.  " });
+    assert.equal(m.state, "CONTESTED");
+    assert.equal(m.objection_reason, "It breaks the settings page.");
+    const pub = publicMilestone(m);
+    assert.equal(pub.objection_reason, "It breaks the settings page.");
+    assert.ok(!("client_token_hash" in pub));
+    const { rows } = await db().query("select detail from audit_log where milestone_id = $1 and event = 'release:objected'", [id]);
+    assert.deepEqual(rows, [{ detail: { reason: "It breaks the settings page." } }]);
   });
 
   it("can't object after the window closes", async () => {

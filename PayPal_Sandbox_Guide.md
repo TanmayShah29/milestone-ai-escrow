@@ -391,3 +391,21 @@ Spike on 2026-10-22 with app hackathon2. Re-run it with `./scripts/multiparty-ch
 - [VERIFIED 2026-10-22] `POST /v2/customer/partner-referrals` → 403 `NOT_AUTHORIZED`. The token has no partner or referenced-payouts scopes.
 - [DOCS] To unlock: PayPal Commerce Platform partner approval (through an account manager), sellers onboarded with the Partner Referrals API (consent + `payee.merchant_id`), and the `PayPal-Partner-Attribution-Id` header. Once that's in place, the seller owns disputes and chargebacks.
 - Result: **no-go before the Nov 6 freeze**. Keep the hold → capture → payout-minus-fee flow.
+
+## Fees and hold endings (Oct 22, H2)
+
+**Capture fee, read from the capture** [VERIFIED 2026-10-22]: $10.00 card hold (test Visa `4012888888881881`, `intent: AUTHORIZE` with `payment_source.card`) → order `95582849J8085434F`, authorization `6KE12769WV325522K` → capture `9CV70379A7925431L` (`final_capture: true`, `Prefer: return=representation`) came back COMPLETED with
+`seller_receivable_breakdown: { gross_amount: 10.00, paypal_fee: 0.75, net_amount: 9.25, exchange_rate: {} }`. `GET /v2/payments/captures/{id}` returns the same breakdown. So the sandbox **does** report the fee on a card capture; `src/lib/money/flow.ts` stores it as `paypal_fee_cents` and only estimates when it is missing.
+- $0.75 on $10 matches 2.59% + $0.49, below the 3.49% + $0.49 PayPal Checkout rate we use as the fallback estimate (so the fallback errs toward a smaller worker payout, never a larger one).
+- Refunded in full: refund `04D54727R95723718` COMPLETED, `seller_payable_breakdown.paypal_fee: 0.00`, `net_amount: 10.00`. PayPal **kept the $0.75 fee**: a full refund costs the platform the original fee.
+- In the SDK the breakdown is `CapturedPayment.sellerReceivableBreakdown?` / `OrdersCapture.sellerReceivableBreakdown?` with `paypalFee?: Money`: every member optional, so absence decodes as `undefined`, not an error (paypal-plan.md).
+
+**Published fees** [DOCS, paypal.com/us/business/paypal-business-fees, read Oct 22]:
+- PayPal Checkout: 3.49% + $0.49 (USD). Standard card payments: 2.99% + $0.49.
+- Payouts (US): 2% of the amount, **max fee $1.00** per payment; international 2%, max $20.00. The same table lists a **flat $0.25 per US payment "when using the Payouts API"**. Our env defaults (`PAYOUT_FEE_BPS=200`, `PAYOUT_FEE_CAP_CENTS=100`) model the 2%/$1 row; `PAYOUT_FEE_BPS=10000` + `PAYOUT_FEE_CAP_CENTS=25` models the flat $0.25. `PAYOUT_FEE_CAP_CENTS=` (empty) means no cap.
+- Uncaptured authorizations: $0.30 each (PayPal Online Payment Services row). No void fee listed.
+- The payout response also carries `payout_item_fee` per item [DOCS]; we don't read it yet (payout fee is an estimate deducted from the worker's share).
+
+**Hold endings** [DOCS, developer.paypal.com/api/rest/webhooks/event-names]:
+- `PAYMENT.AUTHORIZATION.VOIDED` (Payments v2) fires on a manual void **and** when an authorization is voided automatically at the end of its validity period. There is **no** `PAYMENT.AUTHORIZATION.EXPIRED` event. The SDK's `AuthorizationStatus` enum has no `EXPIRED` either; we treat a status of `EXPIRED` like `VOIDED` defensively.
+- Our webhook `2JC020923H9067634` is subscribed to `PAYMENT.AUTHORIZATION.VOIDED` (scripts/register-webhook.sh). The handler re-reads the stored authorization (`GET /v2/payments/authorizations/{id}`) and cancels a pre-capture milestone (`hold:ended` audit row). A void of an older authorization id (replaced by a reauthorization) changes nothing.

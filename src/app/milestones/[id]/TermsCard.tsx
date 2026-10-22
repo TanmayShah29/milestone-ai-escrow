@@ -1,9 +1,10 @@
 "use client";
 
-import { AlertTriangle, FlaskConical, Lightbulb, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, FlaskConical, Lightbulb, PenLine, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { GuillocheSeal } from "@/components/GuillocheSeal";
 import type { MilestoneView, Role } from "@/lib/client/states";
+import { NO_TESTED_MUST_WARNING, SUBJECTIVE_WARNING, termsWarnings } from "@/lib/contract/warnings";
 
 // The contract: criteria (compiled into tests where testable), editable by the client in DRAFT, sealed by
 // both signatures on the exact fingerprint shown. A tested criterion whose text was edited without a new
@@ -11,11 +12,35 @@ import type { MilestoneView, Role } from "@/lib/client/states";
 // switched to AI review. The same goes for a weak test (testWeak): the server ran it against an empty
 // implementation and it passed, or it couldn't load, so it wouldn't catch missing work.
 // The AI's edge-case suggestions sit beside the terms (never in the fingerprint) until the client adds
-// one as a criterion or dismisses it.
+// one as a criterion or dismisses it. The client can write or edit a test; the server checks it the same
+// way and labels it testBy "client", so the worker sees who wrote it. Terms saved since the policy existed
+// also fingerprint the platform fee and the objection window, shown under the heading.
 
-type Criterion = { id: string; text: string; kind: "must" | "nice"; check: "test" | "review"; test?: { path: string; code: string }; testStale?: true; testWeak?: true; weakReason?: string };
+type Criterion = {
+  id: string;
+  text: string;
+  kind: "must" | "nice";
+  check: "test" | "review";
+  test?: { path: string; code: string };
+  testStale?: true;
+  testWeak?: true;
+  weakReason?: string;
+  testBy?: "client";
+};
 type Suggestion = { text: string; why: string };
-type Terms = { criteria: Criterion[]; testCommand?: string; suggestions?: Suggestion[] };
+type Policy = { platformFeeBps: number; objectionWindowSeconds: number };
+type Terms = { criteria: Criterion[]; testCommand?: string; suggestions?: Suggestion[]; policy?: Policy };
+
+const DEFAULT_TEST_COMMAND = "node --test 'acceptance/*.test.ts'";
+const testTemplate = (id: string) =>
+  `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { myFunction } from '../src/my-file.ts';\n\ntest('${id}', () => {\n  // Replace with a real check, for example:\n  // assert.equal(myFunction('input'), 'expected output');\n});\n`;
+
+/** "Platform fee 5% · objection window 48 h" */
+function policyLine(p: Policy): string {
+  const s = p.objectionWindowSeconds;
+  const window = s >= 3600 && s % 3600 === 0 ? `${s / 3600} h` : s >= 60 ? `${Math.round(s / 60)} min` : `${s} s`;
+  return `Platform fee ${p.platformFeeBps / 100}% · objection window ${window}`;
+}
 export type Call = (action: string, body?: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
 
 const input = "w-full rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm text-ink placeholder:text-ink-3";
@@ -82,6 +107,21 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
   // Dismissing changes nothing in the contract, so it saves the stored terms and keeps any signatures.
   const dismiss = (s: Suggestion) => stored && run(`dismiss:${s.text}`, "edit-terms", { terms: { ...stored, suggestions: without(s) }, repo: String(m.repo ?? "") });
   const testIssue = (c: Criterion) => (c.testStale ? "Test out of date" : c.testWeak ? "Weak test" : undefined);
+  // The worker reads every test before signing, so the code is open by default until they have.
+  const workerToSign = role === "worker" && m.state === "DRAFT" && !!hash && m.worker_signed_hash !== hash;
+  const warnings = termsWarnings(draft?.criteria ?? [], String(m.verifier ?? "code_pr"));
+  const subjectiveById = new Map(warnings.subjective.map((w) => [w.id, w.words]));
+  // The client writes a test by hand: it starts as a template the server would flag as weak until filled in.
+  const writeTest = (i: number) => {
+    if (!draft) return;
+    const c = draft.criteria[i]!;
+    setDraft({
+      ...draft,
+      testCommand: draft.testCommand ?? DEFAULT_TEST_COMMAND,
+      criteria: draft.criteria.map((x, j) => (j === i ? { ...x, check: "test" as const, test: { path: `acceptance/${c.id.toLowerCase()}.test.ts`, code: testTemplate(c.id) } } : x)),
+    });
+    setDirty(true);
+  };
 
   return (
     <section aria-labelledby="terms-h" className="rounded-lg border border-rule bg-panel p-4 sm:p-5">
@@ -95,6 +135,7 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
               ? "What the deliverable must do. The AI reviews the text against each criterion."
               : "What the work must do. Testable criteria run as CI tests on the worker's pull request; the AI reviews only the rest."}
           </p>
+          {stored?.policy && <p className="mt-1 text-sm text-ink">{policyLine(stored.policy)}</p>}
 
           {editable && (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -144,6 +185,12 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
                   {testIssue(c) ? <AlertTriangle className="size-3.5" aria-hidden="true" /> : c.check === "test" ? <FlaskConical className="size-3.5" aria-hidden="true" /> : <Sparkles className="size-3.5" aria-hidden="true" />}
                   {testIssue(c) ?? (c.check === "test" ? "Checked by a CI test" : "Checked by AI review")}
                 </span>
+                {c.check === "test" && c.testBy === "client" && (
+                  <span className="inline-flex items-center gap-1 rounded bg-held-field px-1.5 py-0.5 text-xs font-medium text-held">
+                    <PenLine className="size-3.5" aria-hidden="true" />
+                    {role === "client" ? "Test written by you · not run before signing" : "Written by the client · not run before signing: read it"}
+                  </span>
+                )}
                 {editable && (
                   <button onClick={() => remove(i)} className="ml-auto inline-flex items-center gap-1 text-xs text-ink-2 hover:text-failed" aria-label={`Remove ${c.id}`}>
                     <Trash2 className="size-3.5" aria-hidden="true" />
@@ -155,6 +202,14 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
                 <textarea aria-label={`${c.id} requirement`} value={c.text} onChange={(e) => update(i, { text: e.target.value })} rows={2} className={input} />
               ) : (
                 <p className="text-ink">{c.text}</p>
+              )}
+              {subjectiveById.has(c.id) && (
+                <p className="flex items-start gap-1.5 text-xs text-held">
+                  <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    &ldquo;{subjectiveById.get(c.id)!.join("”, “")}&rdquo;: {SUBJECTIVE_WARNING}
+                  </span>
+                </p>
               )}
               {willGoStale(c) && <p className="text-xs text-held">The test below still checks the old text. Saving marks it out of date, and the terms can&apos;t be signed until it&apos;s regenerated or switched to AI review.</p>}
               {(c.testStale || c.testWeak) && (
@@ -183,16 +238,43 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
                 </div>
               )}
               {c.test && (
-                <details open={c.testStale || c.testWeak || willGoStale(c) || undefined}>
+                <details open={workerToSign || c.testStale || c.testWeak || willGoStale(c) || undefined}>
                   <summary className="cursor-pointer text-xs text-ink-2 hover:text-ink">
                     Test: <span className="font-mono">{c.test.path}</span>
                   </summary>
-                  <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-paper p-3 font-mono text-xs leading-relaxed text-ink">{c.test.code}</pre>
+                  {editable ? (
+                    <>
+                      <textarea
+                        aria-label={`${c.id} test code`}
+                        value={c.test.code}
+                        onChange={(e) => update(i, { test: { path: c.test!.path, code: e.target.value } })}
+                        rows={Math.min(16, Math.max(6, c.test.code.split("\n").length + 1))}
+                        spellCheck={false}
+                        className={`${input} mt-2 font-mono text-xs leading-relaxed`}
+                      />
+                      <p className="mt-1 text-xs text-ink-2">Saving runs your test once with the code missing. It has to fail there, or it can&apos;t be signed. The worker sees that you wrote it.</p>
+                    </>
+                  ) : (
+                    <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-paper p-3 font-mono text-xs leading-relaxed text-ink">{c.test.code}</pre>
+                  )}
                 </details>
+              )}
+              {editable && c.check === "review" && m.verifier !== "rubric_text" && (
+                <button onClick={() => writeTest(i)} className="inline-flex items-center gap-1 text-xs text-ink-2 hover:text-ink">
+                  <FlaskConical className="size-3.5" aria-hidden="true" />
+                  Write a test for it yourself
+                </button>
               )}
             </li>
           ))}
         </ol>
+      )}
+
+      {draft && warnings.noTestedMust && (
+        <p role="note" className="mt-3 flex items-start gap-1.5 rounded-md border border-held/40 bg-held-field p-3 text-xs text-ink">
+          <AlertTriangle className="mt-px size-3.5 shrink-0 text-held" aria-hidden="true" />
+          <span>{NO_TESTED_MUST_WARNING}</span>
+        </p>
       )}
 
       {draft && suggestions.length > 0 && (

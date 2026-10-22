@@ -94,6 +94,19 @@ describe("rescheduling", () => {
     assert.equal(phases(buildTimeline(m, [])).work!.dueLimit, new Date(expiry.getTime() - 3 * DAY).toISOString());
   });
 
+  it("a saved due date redraws the later phases where the Gantt's engine pushed them (review starts at the new due date)", async () => {
+    const held = new Date(Date.now() - DAY);
+    const id = await seedMilestone({ state: "FUNDED", authorization_expires_at: new Date(held.getTime() + 29 * DAY) });
+    const due = new Date(Date.now() + 12 * DAY);
+    const { milestone } = await setDueDate(id, due.toISOString());
+    const p = phases(buildTimeline(milestone, [{ event: "hold:authorized", to_state: "FUNDED", created_at: held }]));
+    assert.equal(p.work!.endDate, due.toISOString());
+    assert.equal(p.review!.startDate, due.toISOString());
+    assert.equal(p.payout!.startDate, p.window!.endDate);
+    assert.equal(p.work!.manuallyScheduled, false);
+    assert.equal(p.work!.constraintType, "finishnolaterthan");
+  });
+
   it("can't move the date into the past or after the work is submitted", async () => {
     const id = await seedMilestone({ state: "FUNDED" });
     await assert.rejects(setDueDate(id, new Date(Date.now() - DAY).toISOString()), InvariantViolation);

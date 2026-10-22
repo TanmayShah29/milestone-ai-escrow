@@ -21,8 +21,12 @@ export type MilestoneView = Record<string, unknown> & {
   payout_status?: string | null;
   release_after?: string | null;
   contested_at?: string | null;
-  /** Set only for a HUMAN_CHECK after an objection: undecided by then, the money releases to the worker. */
+  /** Set for a HUMAN_CHECK with a deadline (after an objection, or 3 days before the hold expires): undecided by then, fixed rules settle it. */
   decide_by?: string | null;
+  /** The client's reason for objecting, shown to the worker. */
+  objection_reason?: string | null;
+  /** The client's reason for asking for changes, shown to the worker. */
+  changes_reason?: string | null;
   human_check_at?: string | null;
   due_at?: string | null;
   paypal_authorization_id?: string | null;
@@ -108,17 +112,28 @@ export function holdExpiryWarning(m: MilestoneView): string | undefined {
 }
 
 /**
- * The post-objection decision deadline as words for each side, or undefined when there is none (a
- * HUMAN_CHECK reached without an objection waits for the client with no deadline).
+ * The HUMAN_CHECK decision deadline as words for each side, or undefined when there is none (no
+ * objection and no known hold expiry). `outcome` is what fixed rules do at the deadline: release to the
+ * worker, void the hold when the review flagged tampering or text aimed at the reviewer, or wait when the
+ * rules can't settle it (see humanTimeoutOutcome in src/lib/review/policy.ts).
  */
-export function decideByCopy(m: MilestoneView, role: Role): string | undefined {
+export function decideByCopy(m: MilestoneView, role: Role, outcome: "release" | "void" | "wait" = "release"): string | undefined {
   if (m.state !== "HUMAN_CHECK" || !m.decide_by) return undefined;
   const d = new Date(m.decide_by);
   if (Number.isNaN(d.getTime())) return undefined;
   const date = d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return role === "client"
-    ? `Decide by ${date}; after that the payment releases to the worker, because the work passed its first review.`
-    : `If the client doesn't decide by ${date}, you're paid.`;
+  if (outcome === "void") {
+    return role === "client"
+      ? `Decide by ${date}; after that the hold is released back to you and nothing is charged, because the review flagged this work.`
+      : `If the client doesn't decide by ${date}, the hold is released back to the client, because the review flagged this work.`;
+  }
+  if (outcome === "wait") {
+    return role === "client"
+      ? `Decide by ${date}. The rules can't settle this on their own; if you don't decide, the PayPal hold lapses and nothing is charged.`
+      : `The client needs to decide by ${date}. The rules can't settle this on their own; if the hold lapses, you aren't paid.`;
+  }
+  const why = m.contested_at ? "the work passed its first review" : "the PayPal hold would otherwise run out";
+  return role === "client" ? `Decide by ${date}; after that the payment releases to the worker, because ${why}.` : `If the client doesn't decide by ${date}, you're paid.`;
 }
 
 /** Where the money is right now, in one line. */
@@ -171,7 +186,7 @@ const EVENT_COPY: Record<string, string> = {
   "review:human_check": "Sent to the client to decide",
   "review:approved_by_client": "Client approved the work",
   "review:changes_by_client": "Client asked for changes",
-  "review:human_timeout": "Client didn't decide in 72 hours; releasing to the worker",
+  "review:human_timeout": "Client didn't decide in time; fixed rules settled it",
   "review:comment_failed": "Could not comment on the PR",
   "review:dev-pass": "Review marked passed (dev)",
   "release:objected": "Client objected; money stays held for a second review",
@@ -193,6 +208,14 @@ const asDay = (v: unknown) => {
 /** Extra words for an audit row, from its detail (e.g. "from Nov 2, 2026 to Nov 9, 2026"). */
 export function eventDetail(event: string, detail: Record<string, unknown> | null | undefined): string | undefined {
   if (!detail) return undefined;
+  if (event === "review:human_timeout") {
+    if (detail.outcome === "release") return "released to the worker";
+    if (detail.outcome === "void") return "hold released back to the client";
+    if (detail.outcome === "wait") return "the rules can't settle it; waiting for the client";
+  }
+  if ((event === "release:objected" || event === "review:changes_by_client") && typeof detail.reason === "string" && detail.reason) {
+    return `“${detail.reason.length > 140 ? `${detail.reason.slice(0, 140)}…` : detail.reason}”`;
+  }
   if (event === "schedule:due_changed") {
     const from = asDay(detail.from);
     const to = asDay(detail.to);

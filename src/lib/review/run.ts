@@ -4,10 +4,10 @@ import { db, withMilestoneLock } from "@/lib/db";
 import { stateLabel } from "@/lib/client/states";
 import { InvariantViolation } from "@/lib/errors";
 import { audit, getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
-import { defaultDeps, releaseFunds, syncMilestone, type Deps } from "@/lib/money/flow";
+import { cancelHold, defaultDeps, releaseFunds, syncMilestone, type Deps } from "@/lib/money/flow";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
-import { humanCheckDeadline, objectionReleaseMs, objectionWindowMs } from "./deadlines";
-import { decide, type Verdict } from "./policy";
+import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs } from "./deadlines";
+import { decide, humanTimeoutOutcome, type Verdict } from "./policy";
 import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifiers";
 
 // Deliver → review → decide → (objection window) → release. The verifier and the AI only produce a
@@ -23,6 +23,15 @@ export { humanCheckDeadline, objectionReleaseMs, objectionWindowMs };
 
 /** A second review the AI couldn't finish (busy, unreadable) is retried at most this often. */
 const SECOND_REVIEW_RETRY_MS = 5 * 60_000;
+
+/** The most a client's objection or change request reason may be. */
+export const REASON_MAX = 1000;
+
+function cleanReason(reason: string | undefined): string | null {
+  const r = reason?.trim() ?? "";
+  if (r.length > REASON_MAX) throw new InvariantViolation(`Keep the reason under ${REASON_MAX.toLocaleString("en-US")} characters.`);
+  return r || null;
+}
 
 /** The worker hands in the deliverable. A PR must be in the contract's repo and cite the signed terms. */
 export async function submitDeliverable(milestoneId: string, input: { prUrl?: string; text?: string }, deps: ReviewDeps = defaultReviewDeps()): Promise<Milestone> {
@@ -100,7 +109,8 @@ async function applyDecision(m: Milestone, verdict: Verdict, deps: ReviewDeps, f
       [m.id, key, JSON.stringify(verdict), decision, JSON.stringify(reasons), verdict.model],
     );
   }
-  const set = decision === "PASSED" ? { release_after: new Date(Date.now() + objectionWindowMs()) } : {};
+  // A failed review speaks for itself: drop any earlier client reason so the worker doesn't read a stale one.
+  const set = decision === "PASSED" ? { release_after: new Date(Date.now() + objectionWindowMs()) } : decision === "CHANGES_REQUESTED" ? { changes_reason: null } : {};
   const out = await transition(db(), m, decision, "system", set, {
     event: `review:${decision.toLowerCase()}`,
     detail: { reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, injection: verdict.injection.detected, tampering: verdict.tampering },
@@ -131,48 +141,71 @@ async function postComment(m: Milestone, v: Verdict, decision: string, reasons: 
   }
 }
 
-/** The client settles a HUMAN_CHECK. */
-export async function humanDecision(milestoneId: string, approve: boolean): Promise<Milestone> {
+/**
+ * The client settles a HUMAN_CHECK. Asking for changes takes a reason the worker reads (changes_reason).
+ * After an objection the reason is required, and asking for changes counts as the client's one objection:
+ * contested_at stays set, so the fixed resubmission, once it passes, can't be objected to again.
+ */
+export async function humanDecision(milestoneId: string, approve: boolean, opts: { reason?: string } = {}): Promise<Milestone> {
   return withMilestoneLock(milestoneId, async () => {
     const m = await getMilestone(milestoneId);
     if (m.state !== "HUMAN_CHECK") throw new InvariantViolation("There's nothing waiting for your decision right now.");
-    // Asking for changes clears contested_at (as a failed second review does), so a fixed resubmission
-    // gets a normal objection window and no decision deadline.
-    return approve
-      ? transition(db(), m, "PASSED", "client", { release_after: new Date(Date.now() + objectionWindowMs()) }, { event: "review:approved_by_client" })
-      : transition(db(), m, "CHANGES_REQUESTED", "client", { contested_at: null }, { event: "review:changes_by_client" });
+    if (approve) return transition(db(), m, "PASSED", "client", { release_after: new Date(Date.now() + objectionWindowMs()) }, { event: "review:approved_by_client" });
+    const reason = cleanReason(opts.reason);
+    if (m.contested_at && !reason) throw new InvariantViolation("You already objected once, so say what needs to change. The worker reads it before fixing the work.");
+    return transition(db(), m, "CHANGES_REQUESTED", "client", { changes_reason: reason }, { event: "review:changes_by_client", detail: { reason, afterObjection: !!m.contested_at } });
   });
 }
 
 /**
  * The client objects inside the window; the money stays held. An objection buys exactly one second
  * review of the same commit (see resolveObjection), so it can't park the money until the hold lapses.
+ * The optional reason is stored for the worker to read (objection_reason).
  */
-export async function objectToRelease(milestoneId: string): Promise<Milestone> {
+export async function objectToRelease(milestoneId: string, opts: { reason?: string } = {}): Promise<Milestone> {
   return withMilestoneLock(milestoneId, async () => {
     const m = await getMilestone(milestoneId);
     if (m.state !== "PASSED") throw new InvariantViolation("You can only object while approved work waits to be released.");
-    if (m.contested_at) throw new InvariantViolation("You already objected to this work, and the second review passed it.");
+    if (m.contested_at) throw new InvariantViolation("You already objected to this work once; there is one objection per milestone.");
     if (m.release_after && m.release_after.getTime() <= Date.now()) throw new InvariantViolation("The objection window has closed.");
+    const reason = cleanReason(opts.reason);
     // release_after now carries the date the money releases if the second review passes.
     const now = Date.now();
-    return transition(db(), m, "CONTESTED", "client", { contested_at: new Date(now), release_after: new Date(now + objectionReleaseMs()) }, { event: "release:objected" });
+    return transition(db(), m, "CONTESTED", "client", { contested_at: new Date(now), release_after: new Date(now + objectionReleaseMs()), objection_reason: reason }, { event: "release:objected", detail: { reason } });
   });
 }
 
 /**
- * The client didn't decide a post-objection HUMAN_CHECK in time: release to the worker. Fixed rule, no
- * model involved; PASSED with release_after = now, so tick's usual release path captures and pays out.
+ * The client didn't decide a HUMAN_CHECK by its deadline (humanCheckDeadline). Fixed rules, no model:
+ *  - the latest verdict flagged no tampering and no injection → PASSED with release_after = now, so tick's
+ *    usual release path captures and pays out;
+ *  - it flagged either → void the hold through the money flow's cancel (CANCELLED); nothing is charged;
+ *  - only procedural flags (untrusted CI, a PR too large to scan) and a must-have not confirmed → nothing
+ *    automatic: it waits for the client (audited once), and an expired hold ends it.
+ * See humanTimeoutOutcome in policy.ts.
  */
-export async function expireHumanCheck(milestoneId: string): Promise<Milestone> {
+export async function expireHumanCheck(milestoneId: string, deps: ReviewDeps = defaultReviewDeps()): Promise<Milestone> {
   return withMilestoneLock(milestoneId, async () => {
     const m = await getMilestone(milestoneId);
     const deadline = humanCheckDeadline(m);
     if (!deadline || deadline.getTime() > Date.now()) return m;
-    return transition(db(), m, "PASSED", "system", { release_after: new Date() }, {
-      event: "review:human_timeout",
-      detail: { reasons: [`the client didn't decide within 72 hours of the objection's second review; the work passed its first review`], deadline: deadline.toISOString() },
-    });
+    const { rows } = await db().query<{ verdict: Verdict }>(
+      "select verdict from reviews where milestone_id = $1 and status = 'done' and verdict is not null order by updated_at desc, id desc limit 1",
+      [m.id],
+    );
+    const { outcome, reasons } = humanTimeoutOutcome(rows[0]?.verdict);
+    const why = m.contested_at ? "within 72 hours of the objection's second review" : "3 days before the PayPal hold expires";
+    const detail = { outcome, reasons: [`the client didn't decide ${why}`, ...reasons], deadline: deadline.toISOString(), afterObjection: !!m.contested_at };
+    if (outcome === "release") return transition(db(), m, "PASSED", "system", { release_after: new Date() }, { event: "review:human_timeout", detail });
+    if (outcome === "wait") {
+      const { rows: seen } = await db().query("select 1 from audit_log where milestone_id = $1 and event = 'review:human_timeout' and created_at >= $2 limit 1", [m.id, m.human_check_at ?? m.updated_at]);
+      if (!seen[0]) await audit(db(), { milestoneId: m.id, actor: "system", event: "review:human_timeout", fromState: "HUMAN_CHECK", toState: "HUMAN_CHECK", detail });
+      return m;
+    }
+    // Void: the money flow owns the PayPal call, its idempotency key and the CANCELLED transition.
+    const out = await cancelHold(m.id, deps.money, { actor: "system" });
+    await audit(db(), { milestoneId: m.id, actor: "system", event: "review:human_timeout", fromState: "HUMAN_CHECK", toState: out.state, detail });
+    return out;
   });
 }
 
@@ -273,7 +306,7 @@ async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, 
   }
   // Pass: release at objection + 72 h, and keep contested_at so the client can't object a second time.
   // Fail: clear it, so a fixed resubmission gets a normal objection window again.
-  const set = decision === "PASSED" ? { release_after: releaseAt } : decision === "CHANGES_REQUESTED" ? { contested_at: null } : {};
+  const set = decision === "PASSED" ? { release_after: releaseAt } : decision === "CHANGES_REQUESTED" ? { contested_at: null, changes_reason: null } : {};
   const out = await transition(db(), m, decision, "system", set, {
     event: "review:second",
     detail: { decision, reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, firstModel, injection: verdict.injection.detected, tampering: verdict.tampering },
@@ -284,7 +317,7 @@ async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, 
 
 /**
  * Move a milestone forward without a human: review once CI is done, run the second review after an
- * objection, release a post-objection HUMAN_CHECK the client left undecided for 72 h, release once the
+ * objection, settle a HUMAN_CHECK the client left undecided past its deadline, release once the
  * objection window (or the 72 h after an objection) has passed, and sync payouts. Safe to call often
  * (page polling, a cron ping): every step is idempotent.
  */
@@ -292,7 +325,7 @@ export async function tick(milestoneId: string, deps: ReviewDeps = defaultReview
   let m = await getMilestone(milestoneId);
   if (m.state === "SUBMITTED" || m.state === "IN_REVIEW") m = await reviewMilestone(m.id, deps);
   if (m.state === "CONTESTED") m = await resolveObjection(m.id, deps);
-  if (m.state === "HUMAN_CHECK" && m.contested_at) m = await expireHumanCheck(m.id);
+  if (m.state === "HUMAN_CHECK") m = await expireHumanCheck(m.id, deps);
   if (m.state === "PASSED" && m.release_after && m.release_after.getTime() <= Date.now()) m = await releaseFunds(m.id, deps.money);
   if (m.state === "RELEASED") m = await syncMilestone(m.id, deps.money);
   return m;
@@ -302,15 +335,32 @@ export async function tickAll(deps: ReviewDeps = defaultReviewDeps()): Promise<{
   const { rows } = await db().query<{ id: string }>(
     `select id from milestones
      where (state in ('SUBMITTED','IN_REVIEW','PASSED','CONTESTED','RELEASED') and updated_at > now() - interval '7 days')
-        -- A post-objection HUMAN_CHECK whose decision deadline has passed, however long ago.
-        or (state = 'HUMAN_CHECK' and contested_at is not null and human_check_at <= now() - make_interval(secs => $1))
-     order by updated_at limit 10`,
-    [objectionReleaseMs() / 1000],
+        -- A HUMAN_CHECK whose decision deadline has passed, however long ago (see humanCheckDeadline).
+        or (state = 'HUMAN_CHECK' and contested_at is not null and coalesce(human_check_at, updated_at) <= now() - make_interval(secs => $1))
+        or (state = 'HUMAN_CHECK' and contested_at is null and authorization_expires_at <= now() + make_interval(secs => $2))
+     -- Overdue HUMAN_CHECKs that wait for the client go last, so they never crowd out other work.
+     order by (state = 'HUMAN_CHECK'), updated_at limit 10`,
+    [objectionReleaseMs() / 1000, HOLD_DECIDE_MARGIN_MS / 1000],
   );
   const out = [];
   for (const { id } of rows) {
     try {
       out.push({ id, state: (await tick(id, deps)).state });
+    } catch (err) {
+      out.push({ id, error: String(err).slice(0, 200) });
+    }
+  }
+  // Holds past their expiry that were never captured: re-read PayPal so the milestone moves to CANCELLED
+  // even if the VOIDED webhook was missed (syncMilestone's endHoldIfGone). One authorization read each.
+  const { rows: lapsed } = await db().query<{ id: string }>(
+    `select id from milestones
+     where state in ('FUNDED','SUBMITTED','IN_REVIEW','CHANGES_REQUESTED','HUMAN_CHECK','PASSED','CONTESTED')
+       and paypal_authorization_id is not null and paypal_capture_id is null and authorization_expires_at <= now()
+     order by authorization_expires_at limit 5`,
+  );
+  for (const { id } of lapsed) {
+    try {
+      out.push({ id, state: (await syncMilestone(id, deps.money)).state });
     } catch (err) {
       out.push({ id, error: String(err).slice(0, 200) });
     }

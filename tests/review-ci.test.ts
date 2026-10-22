@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Terms } from "@/lib/contract/terms";
 import type { Milestone } from "@/lib/milestones/repo";
-import type { CheckRun, GitHub, PrFile } from "@/lib/review/github";
+import { GitHubError, githubClient, type CheckRun, type GitHub, type PrFile, type WorkflowRun } from "@/lib/review/github";
 import { decide } from "@/lib/review/policy";
 import { acceptanceCheckName, citedTerms, harnessEscapes, termsLineProblem, verifyCodePr } from "@/lib/review/verifiers";
 
@@ -31,12 +31,20 @@ const run = (name: string, conclusion: string | null, o: Partial<CheckRun> = {})
   ...o,
 });
 
-function fakeGitHub(body: string, runs: CheckRun[], files: PrFile[] = [{ filename: "src/slugify.ts", status: "added", additions: 1, deletions: 0, patch: "+export const slugify = (s: string) => s;" }]) {
+const milestoneWorkflow: WorkflowRun = { id: 1, path: ".github/workflows/milestone.yml", event: "pull_request", headSha: SHA };
+type Fake = { workflow?: (id: number) => Promise<WorkflowRun>; changedFiles?: number };
+
+function fakeGitHub(
+  body: string,
+  runs: CheckRun[],
+  files: PrFile[] = [{ filename: "src/slugify.ts", status: "added", additions: 1, deletions: 0, patch: "+export const slugify = (s: string) => s;" }],
+  o: Fake = {},
+) {
   const calls: string[] = [];
   const gh: GitHub = {
     async pr(owner, repo, n) {
       calls.push("pr");
-      return { number: n, title: "Add slugify", body, state: "open", merged: false, headSha: SHA, baseRepo: `${owner}/${repo}`, htmlUrl: PR_URL };
+      return { number: n, title: "Add slugify", body, state: "open", merged: false, headSha: SHA, baseRepo: `${owner}/${repo}`, htmlUrl: PR_URL, changedFiles: o.changedFiles ?? files.length };
     },
     async files() {
       calls.push("files");
@@ -46,13 +54,17 @@ function fakeGitHub(body: string, runs: CheckRun[], files: PrFile[] = [{ filenam
       calls.push("checks");
       return runs;
     },
+    async workflowRun(_owner, _repo, id) {
+      calls.push(`workflow ${id}`);
+      return o.workflow ? o.workflow(id) : { ...milestoneWorkflow, id };
+    },
     async comment() {},
   };
   return { gh, calls };
 }
 
-async function verdictFor(body: string, runs: CheckRun[], files?: PrFile[]) {
-  const { gh, calls } = fakeGitHub(body, runs, files);
+async function verdictFor(body: string, runs: CheckRun[], files?: PrFile[], o?: Fake) {
+  const { gh, calls } = fakeGitHub(body, runs, files, o);
   const r = await verifyCodePr(milestone, terms, { github: gh });
   return { r, calls, decision: r.status === "done" ? decide(r.verdict).decision : "PENDING" };
 }
@@ -74,8 +86,9 @@ describe("code_pr verifier: which CI results count", () => {
   const body = `Adds slugify.\n\nMilestone-Terms: ${SIGNED}`;
 
   it("passes on a green GitHub Actions run of the signed contract", async () => {
-    const { decision } = await verdictFor(body, [run("contract", "success"), run(acceptanceCheckName("C1", SIGNED), "success")]);
+    const { decision, calls } = await verdictFor(body, [run("contract", "success"), run(acceptanceCheckName("C1", SIGNED), "success")]);
     assert.equal(decision, "PASSED");
+    assert.deepEqual(calls, ["pr", "checks", "workflow 1", "files"]);
   });
 
   it("a forged contract listed first in the description is blocked before CI is even read", async () => {
@@ -118,6 +131,87 @@ describe("code_pr verifier: which CI results count", () => {
     const old = new Date(Date.now() - 30 * 60_000).toISOString();
     const { decision } = await verdictFor(body, [run("contract", "success", { startedAt: old }), run(acceptanceCheckName("C1", FORGED), "success", { startedAt: old })]);
     assert.equal(decision, "HUMAN_CHECK");
+  });
+});
+
+describe("code_pr verifier: the check run must come from the milestone workflow", () => {
+  const body = `Milestone-Terms: ${SIGNED}`;
+  const green = [run("contract", "success"), run(acceptanceCheckName("C1", SIGNED), "success")];
+  const withWorkflow = (w: Partial<WorkflowRun>) => verdictFor(body, green, undefined, { workflow: async (id) => ({ ...milestoneWorkflow, id, ...w }) });
+  const untrusted = (r: Awaited<ReturnType<typeof verdictFor>>, why: RegExp) => {
+    assert.equal(r.decision, "HUMAN_CHECK");
+    assert.ok(r.r.status === "done");
+    assert.equal(r.r.verdict.criteria[0]!.verdict, "unclear");
+    assert.ok(r.r.verdict.tampering.some((t) => why.test(t)), r.r.verdict.tampering.join("; "));
+  };
+
+  it("a green run with the right name from another workflow file is not trusted", async () => {
+    untrusted(await withWorkflow({ path: ".github/workflows/forge.yml" }), /came from \.github\/workflows\/forge\.yml/);
+  });
+
+  it("a run triggered by pull_request_target (or anything but pull_request) is not trusted", async () => {
+    untrusted(await withWorkflow({ event: "pull_request_target" }), /triggered by pull_request_target/);
+    untrusted(await withWorkflow({ event: "workflow_dispatch" }), /triggered by workflow_dispatch/);
+  });
+
+  it("a workflow run for another commit is not trusted", async () => {
+    untrusted(await withWorkflow({ headSha: "0ther" }), /different commit/);
+  });
+
+  it("a check run with no workflow run behind it is not trusted", async () => {
+    untrusted(await verdictFor(body, [run("contract", "success"), run(acceptanceCheckName("C1", SIGNED), "success", { workflowRunId: null })]), /isn't linked/);
+  });
+
+  it("a forged red run can't fail the worker either: a person decides", async () => {
+    const r = await verdictFor(body, [run(acceptanceCheckName("C1", SIGNED), "failure")], undefined, { workflow: async (id) => ({ ...milestoneWorkflow, id, path: ".github/workflows/forge.yml" }) });
+    untrusted(r, /forge\.yml/);
+  });
+
+  it("when the workflow run can't be read (403 with and without the token) it goes to a person, never passes", async () => {
+    untrusted(
+      await verdictFor(body, green, undefined, {
+        workflow: async () => {
+          throw new GitHubError(403, "GitHub 403");
+        },
+      }),
+      /could not be read \(GitHub 403\)/,
+    );
+  });
+
+  it("each workflow run is read once per review", async () => {
+    const terms2: Terms = { criteria: [terms.criteria[0]!, { ...terms.criteria[0]!, id: "C2" }] };
+    const { gh, calls } = fakeGitHub(body, [...green, run(acceptanceCheckName("C2", SIGNED), "success")]);
+    const r = await verifyCodePr(milestone, terms2, { github: gh });
+    assert.ok(r.status === "done" && decide(r.verdict).decision === "PASSED");
+    assert.equal(calls.filter((c) => c.startsWith("workflow")).length, 1);
+  });
+
+  it("the client retries without the token on 403 and reads the fields it needs", async () => {
+    const seen: (string | undefined)[] = [];
+    const fake = (async (_url: string, init: RequestInit) => {
+      const auth = (init.headers as Record<string, string>).authorization;
+      seen.push(auth);
+      if (auth) return new Response("{}", { status: 403 });
+      return Response.json({ id: 9, path: ".github/workflows/milestone.yml", event: "pull_request", head_sha: SHA, name: "milestone" });
+    }) as unknown as typeof fetch;
+    const w = await githubClient(fake, "tok").workflowRun("acme", "web", 9);
+    assert.deepEqual(w, { id: 9, path: ".github/workflows/milestone.yml", event: "pull_request", headSha: SHA });
+    assert.deepEqual(seen, ["Bearer tok", undefined]);
+    const fail = (async () => new Response("{}", { status: 403 })) as unknown as typeof fetch;
+    await assert.rejects(githubClient(fail, "tok").workflowRun("acme", "web", 9), (e: unknown) => e instanceof GitHubError && e.status === 403);
+  });
+});
+
+describe("code_pr verifier: very large pull requests", () => {
+  it("more than 300 changed files goes to a person (the file scan stops at 300)", async () => {
+    const r = await verdictFor(`Milestone-Terms: ${SIGNED}`, [run("contract", "success"), run(acceptanceCheckName("C1", SIGNED), "success")], undefined, { changedFiles: 301 });
+    assert.equal(r.decision, "HUMAN_CHECK");
+    assert.ok(r.r.status === "done" && r.r.verdict.tampering.some((t) => /301 files/.test(t)));
+  });
+
+  it("exactly 300 is still reviewed normally", async () => {
+    const r = await verdictFor(`Milestone-Terms: ${SIGNED}`, [run("contract", "success"), run(acceptanceCheckName("C1", SIGNED), "success")], undefined, { changedFiles: 300 });
+    assert.equal(r.decision, "PASSED");
   });
 });
 

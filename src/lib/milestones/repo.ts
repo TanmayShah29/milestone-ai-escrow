@@ -43,6 +43,11 @@ export type Milestone = {
   release_after: Date | null;
   contested_at: Date | null;
   human_check_at: Date | null;
+  objection_reason: string | null;
+  changes_reason: string | null;
+  paypal_fee_cents: number | null;
+  payout_fee_cents: number | null;
+  hold_ended_at: Date | null;
   due_at: Date;
   after_milestone_id: string | null;
   client_token_hash: string | null;

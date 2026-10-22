@@ -39,8 +39,9 @@ All take one flat request object; every POST gets an SDK-minted `Idempotency-Key
 | createOrder | `client.orders.createOrder(req: Orders.CreateOrderRequest)` | `POST /v2/checkout/orders` | `Order` | `id`, `status === "CREATED"`, `links[rel=="payer-action" \|\| rel=="approve"].href` |
 | getOrder | `client.orders.getOrder(req: Orders.GetOrderRequest)` | `GET /v2/checkout/orders/{id}` | `Order` | `status`, `purchaseUnits[0].payments.authorizations[]`, `.captures[]` |
 | authorizeOrder | `client.orders.authorizeOrder(req: Orders.AuthorizeOrderRequest)` | `POST /v2/checkout/orders/{id}/authorize` | `OrderAuthorizeResponse` | `purchaseUnits[0].payments.authorizations[0].{id,status,amount,expirationTime}` |
-| getAuthorizedPayment | `client.payments.getAuthorizedPayment(req: Payments.GetAuthorizedPaymentRequest)` | `GET /v2/payments/authorizations/{authorization_id}` | `PaymentAuthorization` | `status`, `expirationTime` |
-| captureAuthorizedPayment | `client.payments.captureAuthorizedPayment(req: Payments.CaptureAuthorizedPaymentRequest)` | `POST /v2/payments/authorizations/{authorization_id}/capture` | `CapturedPayment` | `id`, `status`, `amount` |
+| getAuthorizedPayment | `client.payments.getAuthorizedPayment(req: Payments.GetAuthorizedPaymentRequest)` | `GET /v2/payments/authorizations/{authorization_id}` | `PaymentAuthorization` | `status`, `expirationTime`. Also read by `syncMilestone` for every pre-capture hold state: `VOIDED` (or `EXPIRED`, see below) ends the hold → CANCELLED |
+| captureAuthorizedPayment | `client.payments.captureAuthorizedPayment(req: Payments.CaptureAuthorizedPaymentRequest)` | `POST /v2/payments/authorizations/{authorization_id}/capture` | `CapturedPayment` | `id`, `status`, `amount`, `sellerReceivableBreakdown?.paypalFee?` (fee, below) |
+| getCapturedPayment | `client.payments.getCapturedPayment(req: Payments.GetCapturedPaymentRequest)` | `GET /v2/payments/captures/{capture_id}` | `CapturedPayment` | `status`; `sellerReceivableBreakdown?.paypalFee?` re-read while the payout hasn't been sent |
 | voidPayment | `client.payments.voidPayment(req: Payments.VoidPaymentRequest)` | `POST /v2/payments/authorizations/{authorization_id}/void` | `PaymentAuthorization` | `status === "VOIDED"` |
 | reauthorizePayment | `client.payments.reauthorizePayment(req: Payments.ReauthorizePaymentRequest)` | `POST /v2/payments/authorizations/{authorization_id}/reauthorize` | `PaymentAuthorization` | `id` (a NEW authorization id), `expirationTime` |
 
@@ -71,6 +72,10 @@ Response mode: throw-based (`await`) everywhere; none of these resolve to `undef
   purchaseUnits: [{ amount: { currencyCode: "USD", value }, customId: milestoneId, description }],
   applicationContext: { returnUrl, cancelUrl, shippingPreference: "NO_SHIPPING" } }
 ```
+**Fee members (Oct 22, H2).** `CapturedPayment.sellerReceivableBreakdown?: SellerReceivableBreakdown` (`src/models/captured-payment.ts`, wire `seller_receivable_breakdown`), and the same optional member on `OrdersCapture` (`src/models/orders-capture.ts`, used by the getOrder re-read: `purchaseUnits[0].payments.captures[0]`). `SellerReceivableBreakdown` (`src/models/seller-receivable-breakdown.ts`): `grossAmount: Money` (required), `paypalFee?: Money` (`paypal_fee`), `paypalFeeInReceivableCurrency?`, `netAmount?: Money` (`net_amount`), `receivableAmount?`, `exchangeRate?`, `platformFees?`. `Money` = `{ currencyCode: string; value: string }`. Every member we use is **optional**, so absence is not an error (the SDK decodes it as `undefined`): when `paypalFee` is absent or not USD, the fee is estimated (3.49% + $0.49, PayPal US checkout rate [DOCS]) and the audit row says `paypalFeeSource: "estimated"`.
+
+`AuthorizationStatus` has no `EXPIRED` member in the SDK (open enum, so an unknown string still decodes). PayPal docs: an authorization that reaches the end of its validity is **voided** and fires `PAYMENT.AUTHORIZATION.VOIDED`; there is no `PAYMENT.AUTHORIZATION.EXPIRED` event [DOCS]. We treat `"EXPIRED"` like `VOIDED` defensively.
+
 Enums (open, `as const`): `CheckoutPaymentIntent` {CAPTURE, AUTHORIZE}; `OrderStatus` {CREATED, SAVED, APPROVED, VOIDED, COMPLETED, PAYER_ACTION_REQUIRED}; `AuthorizationStatus` {CREATED, CAPTURED, DENIED, PARTIALLY_CAPTURED, VOIDED, PENDING}; `CaptureStatus` {COMPLETED, DECLINED, PARTIALLY_REFUNDED, PENDING, REFUNDED, FAILED}; shipping preference {GET_FROM_FILE, NO_SHIPPING, SET_PROVIDED_ADDRESS}.
 
 `Error` model (`src/models/error.ts`) is imported as `type Error as PaypalApiErrorBody`: `name`, `message`, `debugId` required; `details?: { issue; description?; field? }[]`.
@@ -141,7 +146,8 @@ A re-read that itself fails leaves the claim `unknown`; the milestone shows "Pay
 | --- | --- | --- | --- |
 | The order / authorization / capture id passed to a write is the one stored on **this** milestone, never a caller-supplied id | `milestones` row (money rule 4) | route handlers take only `milestoneId`; `flow.ts` loads ids from the row | "authorizeHold › a return token that isn't this milestone's order is rejected with no PayPal call" |
 | Capture amount ≤ authorized amount (money rule 3) | `milestones.authorized_cents` | `flow.ts` `releaseFunds` before the claim | "releaseFunds › refuses to capture above the authorized amount, before any call" |
-| Payout = captured − fee | `milestones.captured_cents`, `PLATFORM_FEE_BPS` | `src/lib/money/amounts.ts` `payoutCents` | `tests/amounts.test.ts` |
+| Payout = captured − PayPal fee − payout fee − platform fee, never negative, never above captured (money rule 3) | `captured_cents`; PayPal fee from the capture's `seller_receivable_breakdown.paypal_fee` (else estimated 3.49% + 49¢); payout fee `PAYOUT_FEE_BPS` (200) capped by `PAYOUT_FEE_CAP_CENTS` (100); `PLATFORM_FEE_BPS` | `src/lib/money/amounts.ts` `splitCapture` (stored as `paypal_fee_cents`, `payout_fee_cents`, `fee_cents`, `payout_cents` in the capture's record step) | `tests/amounts.test.ts` exact-cent cases; `tests/flow.test.ts` "releaseFunds › pays out captured minus the actual PayPal fee, payout fee and platform fee" |
+| A hold that ended at PayPal (VOIDED/EXPIRED) cancels the milestone only before any capture | `getAuthorizedPayment.status` | `flow.ts` `endHoldIfGone` (sync + `PAYMENT.AUTHORIZATION.VOIDED` webhook), never when `paypal_capture_id` is set | `tests/flow.test.ts` "syncMilestone › a voided hold moves a funded milestone to CANCELLED once"; `tests/webhooks.test.ts` "PAYMENT.AUTHORIZATION.VOIDED cancels a pre-capture milestone" |
 | Each write is only legal from its source state | `src/lib/milestones/states.ts` transition table | `flow.ts` before the claim | "cancelHold › is refused once work is submitted, with no PayPal call" |
 | Funding only covers terms both sides signed, unchanged | `milestones.criteria` + `criteria_hash` + both signed hashes | `assertTermsAgreed` in `createHoldLocked`, before the claim | "contract terms › funding refuses terms that changed after signing, before any PayPal call" |
 
@@ -188,6 +194,7 @@ Applies to every op above (all use data from the milestone row). One mapper, `to
 ## Assumptions & Blockers
 
 - Minor: platform fee defaults to 5% (`PLATFORM_FEE_BPS=500`), overridable by env.
+- Minor (H2, Oct 22): payout fee is an estimate, deducted from the worker's share: `PAYOUT_FEE_BPS` (200) of the amount before the payout fee, capped at `PAYOUT_FEE_CAP_CENTS` (100 = PayPal's US cap). PayPal's US fee page also lists a flat $0.25 per US payout sent through the Payouts API [DOCS]; set `PAYOUT_FEE_BPS=10000` + `PAYOUT_FEE_CAP_CENTS=25` to model that instead.
 - Minor: objection window, AI review and webhooks are later steps. Until then a dev-only route (`ALLOW_DEV_ACTIONS=1`) moves SUBMITTED → PASSED so the release can be tested.
 - No blockers.
 

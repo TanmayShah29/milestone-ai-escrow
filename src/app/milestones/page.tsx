@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { MoneyTracker, StatusPill } from "@/components/MoneyTracker";
-import { heldLinks } from "@/lib/client/links";
+import { heldLinks, needsLinkReminder } from "@/lib/client/links";
 import { STATUS, cancelledAt, usd, type MilestoneView, type Role } from "@/lib/client/states";
 
 // The milestones this browser holds links for (there are no accounts: links are the keys).
 
-type Row = { id: string; role: Role; m?: MilestoneView; error?: string };
+type Row = { id: string; role: Role; m?: MilestoneView; error?: string; saveLink?: boolean };
 
 export default function Milestones() {
   const [rows, setRows] = useState<Row[]>();
@@ -18,9 +18,10 @@ export default function Milestones() {
       held.map(async (h): Promise<Row> => {
         const token = h.client ?? h.worker;
         const role: Role = h.client ? "client" : "worker";
+        const saveLink = needsLinkReminder(h);
         const r = await fetch(`/api/milestones/${h.id}`, { headers: { "x-milestone-token": token ?? "" } }).catch(() => undefined);
         if (!r?.ok) return { id: h.id, role, error: "Couldn't load" };
-        return { id: h.id, role, m: (await r.json()).milestone };
+        return { id: h.id, role, m: (await r.json()).milestone, saveLink };
       }),
     ).then(setRows);
   }, []);
@@ -61,7 +62,7 @@ export default function Milestones() {
       )}
       {rows && rows.length > 0 && (
         <ul className="mt-8 divide-y divide-rule border-y border-rule">
-          {rows.map(({ id, role, m, error }) => {
+          {rows.map(({ id, role, m, error, saveLink }) => {
             const status = m ? (STATUS[m.state] ?? { label: m.state, tone: "neutral" as const }) : undefined;
             return (
               <li key={id}>
@@ -71,6 +72,7 @@ export default function Milestones() {
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-2">
                       {status && <StatusPill label={status.label} tone={status.tone} />}
                       <span className="capitalize">You: {role}</span>
+                      {saveLink && <span className="rounded bg-held-field px-1.5 py-0.5 text-xs font-medium text-held">Save your link</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-5">

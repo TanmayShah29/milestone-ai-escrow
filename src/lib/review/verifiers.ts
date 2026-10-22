@@ -2,8 +2,8 @@ import { z } from "zod";
 import { generateJson, type ModelCall } from "@/lib/ai/client";
 import type { Criterion, Terms } from "@/lib/contract/terms";
 import type { Milestone } from "@/lib/milestones/repo";
-import type { CheckRun, GitHub, PrFile, PullRequest } from "./github";
-import { parsePrUrl } from "./github";
+import type { CheckRun, GitHub, PrFile, PullRequest, WorkflowRun } from "./github";
+import { GitHubError, parsePrUrl } from "./github";
 import { addedLines, scanForInjection } from "./injection";
 import type { CriterionVerdict, Verdict } from "./policy";
 
@@ -19,6 +19,8 @@ export type VerifierResult = { status: "pending"; reason: string; headSha: strin
 const PROTECTED = /^(\.github\/|acceptance\/|\.base\/)/;
 const MAX_DIFF_CHARS = 60_000;
 const CI_TIMEOUT_MS = 20 * 60_000;
+/** The PR file list API returns at most 300 files; beyond that the protected-file scan can't see everything. */
+const MAX_SCANNED_FILES = 300;
 
 // ---------------------------------------------------------------------------------------------
 // Which contract the PR and CI used. CI loads the contract named by the `Milestone-Terms:` line in the
@@ -41,6 +43,33 @@ export function termsLineProblem(body: string, signedHash: string | null): strin
   if (count === 0) return "the pull request description has no Milestone-Terms line";
   if (count > 1) return "the pull request description has more than one Milestone-Terms line";
   if (!signedHash || hash !== signedHash) return "the pull request description cites terms other than the signed ones";
+  return undefined;
+}
+
+// The app check alone isn't enough: any workflow in the repo with checks: write runs as github-actions and
+// could create a green run with the expected name. So each run we rely on must belong to an Actions run of
+// the milestone workflow, triggered by the PR, on the PR's head commit. (On pull_request GitHub uses the
+// PR's own copy of the workflow file; editing .github/ is flagged as tampering, so that copy is trusted only
+// when untouched.)
+export const CI_WORKFLOW = ".github/workflows/milestone.yml";
+const CI_WORKFLOW_PATH = /^\.github\/workflows\/milestone\.yml(@refs\/\S+)?$/;
+
+type WorkflowLookup = Map<number, Promise<WorkflowRun | { error: string }>>;
+
+/** Why a check run can't be trusted as the milestone workflow's result, or undefined when it can. */
+async function ciBindingProblem(github: GitHub, owner: string, repo: string, run: CheckRun, headSha: string, cache: WorkflowLookup): Promise<string | undefined> {
+  const id = run.workflowRunId;
+  if (!id) return "it isn't linked to a GitHub Actions workflow run";
+  let lookup = cache.get(id);
+  if (!lookup) {
+    lookup = github.workflowRun(owner, repo, id).catch((e: unknown) => ({ error: e instanceof GitHubError ? `GitHub ${e.status}` : "network error" }));
+    cache.set(id, lookup);
+  }
+  const w = await lookup;
+  if ("error" in w) return `its workflow run ${id} could not be read (${w.error})`;
+  if (!CI_WORKFLOW_PATH.test(w.path)) return `it came from ${w.path || "an unknown workflow"}, not ${CI_WORKFLOW}`;
+  if (w.event !== "pull_request") return `its workflow run was triggered by ${w.event || "an unknown event"}, not pull_request`;
+  if (w.headSha !== headSha) return "its workflow run is for a different commit";
   return undefined;
 }
 
@@ -151,6 +180,8 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
   const runs = (await deps.github.checkRuns(ref.owner, ref.repo, pr.headSha)).filter((r) => r.app === CI_APP && r.headSha === pr.headSha);
   const contractJob = latest(runs.filter((r) => r.name === "contract"));
   const testVerdicts: CriterionVerdict[] = [];
+  const untrusted: string[] = []; // CI results that couldn't be tied to the milestone workflow
+  const workflowRuns: WorkflowLookup = new Map();
   for (const c of tested) {
     const run = latest(runs.filter((r) => r.name === acceptanceCheckName(c.id, hash)));
     if (!run && contractJob?.status === "completed" && contractJob.conclusion !== "success") {
@@ -165,13 +196,29 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
       testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: ["CI did not run the signed tests within 20 minutes"] });
       continue;
     }
+    // A result we can't tie to the milestone workflow counts neither way (a forged failure mustn't block
+    // the worker either), and a person decides.
+    const binding = await ciBindingProblem(deps.github, ref.owner, ref.repo, run, pr.headSha, workflowRuns);
+    if (binding) {
+      untrusted.push(`CI result for ${c.id} not trusted: ${binding}`);
+      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: [`CI result not trusted: ${binding} (${run.url})`] });
+      continue;
+    }
     const verdict = run.conclusion === "success" ? "pass" : run.conclusion === "failure" ? "fail" : "unclear";
     testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict, confidence: verdict === "unclear" ? 0 : 1, evidence: [`CI ${run.conclusion}: ${run.url}`] });
   }
 
   // Everything below runs once per commit, after CI is final.
   const files = await deps.github.files(ref.owner, ref.repo, ref.number);
-  const tampering = [...files.filter((f) => PROTECTED.test(f.filename)).map((f) => f.filename), ...harnessEscapes(files)];
+  // Past 300 files the scan below is incomplete, so a person looks (changedFiles is GitHub's own count).
+  const changed = Math.max(pr.changedFiles ?? 0, files.length);
+  const tooBig = changed > MAX_SCANNED_FILES || (pr.changedFiles === undefined && files.length >= MAX_SCANNED_FILES);
+  const tampering = [
+    ...files.filter((f) => PROTECTED.test(f.filename)).map((f) => f.filename),
+    ...harnessEscapes(files),
+    ...(tooBig ? [`the pull request changes ${pr.changedFiles ?? `${files.length}+`} files; only the first ${MAX_SCANNED_FILES} can be scanned`] : []),
+    ...untrusted,
+  ];
   const written = [pr.title, pr.body, ...files.map((f) => addedLines(f.patch ?? ""))].join("\n");
   const quotes = scanForInjection(written);
 

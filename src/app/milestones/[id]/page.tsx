@@ -1,10 +1,11 @@
 "use client";
 
+import { Check, Copy, Mail, X } from "lucide-react";
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { DemoTour } from "@/components/DemoTour";
 import { MoneyTracker, StatusPill } from "@/components/MoneyTracker";
-import { discardLink, linkFor, rememberLink, workerShareToken } from "@/lib/client/links";
+import { clientLinkUrl, discardLink, linkFor, markLinkSaved, needsLinkReminder, rememberLink, workerShareToken } from "@/lib/client/links";
 import { STATUS, cancelledAt, usd, type MilestoneView, type Role } from "@/lib/client/states";
 import { ContractSeal } from "./ContractSeal";
 import { MoneyPanel } from "./MoneyPanel";
@@ -35,6 +36,60 @@ function LinkCard({ title, children }: { title: string; children: React.ReactNod
   );
 }
 
+/**
+ * There are no accounts: a client who closes the tab without their link has lost the milestone. Shown to
+ * the client until they dismiss it. The link is rendered here and in the mailto only, never sent anywhere.
+ */
+function SaveClientLink({ link, title, onDismiss }: { link: string; title: string; onDismiss: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+    } catch {
+      setCopied(false); // clipboard blocked: the link is selectable below
+    }
+  };
+  const mail = `mailto:?subject=${encodeURIComponent(`Your client link for "${title}"`)}&body=${encodeURIComponent(
+    `This is your client link for the milestone "${title}". It's the only way back to it, so keep it safe: anyone with it can act as the client.\n\n${link}\n`,
+  )}`;
+  return (
+    <section aria-labelledby="save-link-h" className="mb-5 rounded-lg border border-held/50 bg-held-field p-4 text-sm text-ink">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 id="save-link-h" className="font-semibold">
+            Save your client link
+          </h2>
+          <p className="mt-1">It&apos;s the only way back to this milestone. Anyone with it can act as the client, so keep it private.</p>
+        </div>
+        <button type="button" onClick={onDismiss} aria-label="Dismiss: I've saved my link" className="-m-1 rounded p-1 text-ink-2 hover:text-ink">
+          <X className="size-4" aria-hidden="true" />
+        </button>
+      </div>
+      <input
+        readOnly
+        value={link}
+        aria-label="Your client link"
+        onFocus={(e) => e.currentTarget.select()}
+        className="mt-3 w-full rounded-md border border-rule-strong bg-panel px-3 py-2 font-mono text-xs text-ink"
+      />
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={copy} className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 font-medium text-accent-ink">
+          {copied ? <Check className="size-4" aria-hidden="true" /> : <Copy className="size-4" aria-hidden="true" />}
+          {copied ? "Copied" : "Copy link"}
+        </button>
+        <a href={mail} className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-panel px-3 py-1.5 text-ink no-underline hover:bg-paper">
+          <Mail className="size-4" aria-hidden="true" />
+          Email it to yourself
+        </a>
+        <button type="button" onClick={onDismiss} className="rounded-md px-3 py-1.5 text-ink-2 hover:text-ink">
+          I&apos;ve saved it
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export default function MilestonePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [data, setData] = useState<Data>();
@@ -43,6 +98,8 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   const [tokens, setTokens] = useState<{ client?: string; worker?: string }>({});
   // The worker link a client holds only to hand over (never to act as the worker).
   const [shareToken, setShareToken] = useState<string>();
+  // The client's own link, shown until they confirm they saved it (see SaveClientLink).
+  const [saveLink, setSaveLink] = useState<string>();
   const [ready, setReady] = useState(false);
   const [denied, setDenied] = useState(false);
   const token = as ? tokens[as] : undefined;
@@ -59,6 +116,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
     const held = linkFor(id);
     setTokens({ client: held?.client, worker: held?.worker });
     setShareToken(workerShareToken(held));
+    setSaveLink(needsLinkReminder(held) ? clientLinkUrl(window.location.origin, held) : undefined);
     setAs(held?.client ? "client" : held?.worker ? "worker" : undefined);
     const err = q.get("error");
     if (err) setMsg(err);
@@ -180,6 +238,17 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
       <div className="py-5">
         <MoneyTracker state={m.state} cancelledAt={m.state === "CANCELLED" ? cancelledAt(m) : undefined} />
       </div>
+
+      {saveLink && (
+        <SaveClientLink
+          link={saveLink}
+          title={m.title}
+          onDismiss={() => {
+            markLinkSaved(id);
+            setSaveLink(undefined);
+          }}
+        />
+      )}
 
       {msg && (
         <p role="status" className="mb-4 rounded-md border border-held/40 bg-held-field p-3 text-sm text-ink">

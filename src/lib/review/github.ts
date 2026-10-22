@@ -5,10 +5,22 @@ export type GitHub = {
   pr(owner: string, repo: string, n: number): Promise<PullRequest>;
   files(owner: string, repo: string, n: number): Promise<PrFile[]>;
   checkRuns(owner: string, repo: string, sha: string): Promise<CheckRun[]>;
+  workflowRun(owner: string, repo: string, id: number): Promise<WorkflowRun>;
   comment(owner: string, repo: string, n: number, body: string): Promise<void>;
 };
 
-export type PullRequest = { number: number; title: string; body: string; state: string; merged: boolean; headSha: string; baseRepo: string; htmlUrl: string };
+export type PullRequest = {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  merged: boolean;
+  headSha: string;
+  baseRepo: string;
+  htmlUrl: string;
+  /** GitHub's `changed_files`. The file list API stops at 300 files, so larger PRs can't be fully scanned. */
+  changedFiles?: number;
+};
 export type PrFile = { filename: string; status: string; additions: number; deletions: number; patch?: string };
 export type CheckRun = {
   name: string;
@@ -22,6 +34,15 @@ export type CheckRun = {
   /** The Actions workflow run the job belongs to, read from its details URL, when there is one. */
   workflowRunId: number | null;
 };
+
+/**
+ * The Actions run a check run belongs to. Fields read from GET /repos/{o}/{r}/actions/runs/{id}, checked
+ * against TanmayShah29/milestone-demo on Oct 22, 2026 (also readable without a token on a public repo):
+ *   path      ".github/workflows/milestone.yml"   (the workflow file, repo-relative)
+ *   event     "pull_request"
+ *   head_sha  the PR head commit (the same sha the check runs are listed under, not the merge commit)
+ */
+export type WorkflowRun = { id: number; path: string; event: string; headSha: string };
 
 export class GitHubError extends Error {
   constructor(
@@ -42,19 +63,37 @@ export function parsePrUrl(url: string): { owner: string; repo: string; number: 
 }
 
 export function githubClient(fetchImpl: typeof fetch = fetch, token = process.env.GITHUB_TOKEN): GitHub {
-  const headers: Record<string, string> = { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "milestone-escrow" };
-  if (token) headers.authorization = `Bearer ${token}`;
-  const get = async <T>(path: string): Promise<T> => {
-    const res = await fetchImpl(`https://api.github.com${path}`, { headers, signal: AbortSignal.timeout(20_000) });
+  const anonymous: Record<string, string> = { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "milestone-escrow" };
+  const headers: Record<string, string> = token ? { ...anonymous, authorization: `Bearer ${token}` } : anonymous;
+  const get = async <T>(path: string, auth = true): Promise<T> => {
+    const res = await fetchImpl(`https://api.github.com${path}`, { headers: auth ? headers : anonymous, signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new GitHubError(res.status, `GitHub ${res.status} for ${path}`, repoOf(path));
     return (await res.json()) as T;
   };
   return {
     async pr(owner, repo, n) {
-      const p = await get<{ number: number; title: string; body: string | null; state: string; merged: boolean; head: { sha: string }; base: { repo: { full_name: string } }; html_url: string }>(
-        `/repos/${owner}/${repo}/pulls/${n}`,
-      );
-      return { number: p.number, title: p.title, body: p.body ?? "", state: p.state, merged: p.merged, headSha: p.head.sha, baseRepo: p.base.repo.full_name, htmlUrl: p.html_url };
+      const p = await get<{
+        number: number;
+        title: string;
+        body: string | null;
+        state: string;
+        merged: boolean;
+        head: { sha: string };
+        base: { repo: { full_name: string } };
+        html_url: string;
+        changed_files: number;
+      }>(`/repos/${owner}/${repo}/pulls/${n}`);
+      return {
+        number: p.number,
+        title: p.title,
+        body: p.body ?? "",
+        state: p.state,
+        merged: p.merged,
+        headSha: p.head.sha,
+        baseRepo: p.base.repo.full_name,
+        htmlUrl: p.html_url,
+        changedFiles: p.changed_files,
+      };
     },
     async files(owner, repo, n) {
       const out: PrFile[] = [];
@@ -79,6 +118,20 @@ export function githubClient(fetchImpl: typeof fetch = fetch, token = process.en
         headSha: c.head_sha,
         workflowRunId: Number(/\/actions\/runs\/(\d+)/.exec(c.details_url ?? "")?.[1]) || null,
       }));
+    },
+    async workflowRun(owner, repo, id) {
+      // A fine-grained token without the Actions permission gets 403/404 here; a public repo's runs are
+      // readable without auth (60 req/h), so try that before giving up.
+      const path = `/repos/${owner}/${repo}/actions/runs/${id}`;
+      type Raw = { id: number; path: string; event: string; head_sha: string };
+      let w: Raw;
+      try {
+        w = await get<Raw>(path);
+      } catch (e) {
+        if (!(token && e instanceof GitHubError && [401, 403, 404].includes(e.status))) throw e;
+        w = await get<Raw>(path, false);
+      }
+      return { id: w.id, path: w.path, event: w.event, headSha: w.head_sha };
     },
     async comment(owner, repo, n, body) {
       if (!token) return; // posting needs a token with pull-requests: write on the repo

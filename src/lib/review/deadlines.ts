@@ -13,12 +13,22 @@ export function objectionReleaseMs(): number {
   return (Number.isFinite(s) && s >= 0 ? s : 259_200) * 1000;
 }
 
+/** A HUMAN_CHECK reached without an objection is decided this long before the PayPal hold expires (3 days). */
+export const HOLD_DECIDE_MARGIN_MS = 3 * 86_400_000;
+
 /**
- * After an objection, a HUMAN_CHECK has a deadline: the client decides within 72 h of entering it, or the
- * money releases to the worker (the work passed its first review and the client had two chances).
- * A HUMAN_CHECK reached without an objection has no deadline: null.
+ * When an undecided HUMAN_CHECK is settled by fixed rules (tick → expireHumanCheck), or null for none.
+ *  - After an objection (contested_at set): 72 h after entering it. The work passed its first review and
+ *    the client had two chances.
+ *  - Without an objection: 3 days before the PayPal hold expires, so the money is never stranded by a
+ *    lapsed hold. With no known hold expiry, there is no deadline.
  */
-export function humanCheckDeadline(m: Pick<Milestone, "state" | "contested_at" | "human_check_at" | "updated_at">): Date | null {
-  if (m.state !== "HUMAN_CHECK" || !m.contested_at) return null;
-  return new Date((m.human_check_at ?? m.updated_at).getTime() + objectionReleaseMs());
+export function humanCheckDeadline(
+  m: Pick<Milestone, "state" | "contested_at" | "human_check_at" | "updated_at" | "authorization_expires_at">,
+): Date | null {
+  if (m.state !== "HUMAN_CHECK") return null;
+  if (m.contested_at) return new Date(new Date(m.human_check_at ?? m.updated_at).getTime() + objectionReleaseMs());
+  if (!m.authorization_expires_at) return null;
+  const expires = new Date(m.authorization_expires_at).getTime();
+  return Number.isFinite(expires) ? new Date(expires - HOLD_DECIDE_MARGIN_MS) : null;
 }

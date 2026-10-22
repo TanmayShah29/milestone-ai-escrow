@@ -88,6 +88,10 @@ export async function handleWebhookEvent(e: WebhookEvent, deps: Deps = defaultDe
       // The client approved but may have closed the tab before PayPal redirected back: authorize here too.
       if (m.state === "AGREED" && refs.orderId && refs.orderId === m.paypal_order_id) await authorizeHold(m.id, refs.orderId, deps);
     } else if (t.startsWith("PAYMENT.AUTHORIZATION.") || t.startsWith("PAYMENT.CAPTURE.") || t.startsWith("PAYMENT.PAYOUTS")) {
+      // PAYMENT.AUTHORIZATION.VOIDED (a void, or PayPal ending the hold at the end of its validity; PayPal
+      // sends no EXPIRED event) lands here too: the sync re-reads the stored authorization and, if it is
+      // VOIDED or EXPIRED and nothing was captured, cancels the milestone (flow.ts endHoldIfGone). A void of
+      // an older authorization id (replaced by a reauthorization) re-reads the current one and changes nothing.
       await syncMilestone(m.id, deps);
     } else if (t.startsWith("CUSTOMER.DISPUTE.") && refs.disputeId) {
       await recordDispute(m.id, e, refs.disputeId);

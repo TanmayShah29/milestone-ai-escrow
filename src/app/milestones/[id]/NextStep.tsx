@@ -3,6 +3,7 @@
 import { Check, Copy, CreditCard, Hourglass, Loader2, Wallet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { decideByCopy, holdExpiryWarning, usd, type MilestoneView, type Role } from "@/lib/client/states";
+import { humanTimeoutOutcome } from "@/lib/review/policy";
 import { HoldWarning } from "./MoneyPanel";
 import type { Call } from "./TermsCard";
 import type { Review } from "./VerdictTable";
@@ -102,12 +103,48 @@ function FieldError({ id, text }: { id: string; text?: string }) {
   );
 }
 
+const REASON_MAX = 1000; // same limit as the server (src/lib/review/run.ts)
+
+/** A reason the worker will read: optional for an objection or a first change request, required after an objection. */
+function ReasonField({ id, label, value, onChange, required, error }: { id: string; label: string; value: string; onChange: (v: string) => void; required: boolean; error?: string }) {
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="block text-sm font-medium text-ink">
+        {label} <span className="font-normal text-ink-2">{required ? "(required; the worker reads this)" : "(optional; the worker reads this)"}</span>
+      </label>
+      <textarea
+        id={id}
+        rows={3}
+        maxLength={REASON_MAX}
+        className="w-full rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm aria-[invalid=true]:border-failed"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-required={required}
+        {...(error ? { "aria-invalid": true, "aria-describedby": `${id}-error` } : {})}
+      />
+      <FieldError id={`${id}-error`} text={error} />
+    </div>
+  );
+}
+
+/** The client's own words, shown to the worker. */
+function ClientReason({ text }: { text?: unknown }) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  return (
+    <blockquote className="rounded-md border border-rule bg-paper px-3 py-2 text-sm text-ink">
+      <span className="font-medium">The client&apos;s reason:</span> <span className="whitespace-pre-wrap">{text}</span>
+    </blockquote>
+  );
+}
+
 export function NextStep(props: { m: MilestoneView; role: Role; review: Review | null; call: Call; workerLink?: string }) {
   const { m, role, review, call, workerLink } = props;
   const [busy, setBusy] = useState<string>();
   const [prUrl, setPrUrl] = useState(String(m.pr_url ?? ""));
   const [text, setText] = useState("");
   const [submitError, setSubmitError] = useState<string>();
+  const [reason, setReason] = useState("");
+  const [reasonError, setReasonError] = useState<string>();
   const holdWarning = role === "client" ? holdExpiryWarning(m) : undefined;
   const releaseAt = m.release_after ? new Date(m.release_after).getTime() : 0;
   const now = useNow(m.state === "PASSED");
@@ -121,7 +158,31 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
   const contestedAt = m.contested_at ? new Date(m.contested_at).getTime() : 0;
   const decidedAfterObjection = m.state === "PASSED" && !!contestedAt && !!m.human_check_at && new Date(m.human_check_at).getTime() >= contestedAt;
   const secondReviewPassed = m.state === "PASSED" && !!contestedAt && !decidedAfterObjection;
-  const decideBy = decideByCopy(m, role);
+  // What fixed rules do if the client leaves a HUMAN_CHECK undecided: the same rule the server applies.
+  const timeout = humanTimeoutOutcome(review?.verdict);
+  const decideBy = decideByCopy(m, role, timeout.outcome);
+  // After an objection, asking for changes needs a reason: it is the client's one objection.
+  const reasonRequired = m.state === "HUMAN_CHECK" && !!contestedAt;
+  const withReason = async (label: string, action: string) => {
+    const r = reason.trim();
+    if (reasonRequired && label === "changes" && !r) {
+      setReasonError("Say what needs to change. You already objected once, so this is your one request for changes.");
+      return;
+    }
+    setReasonError(undefined);
+    const res = await act(label, action, r ? { reason: r } : {});
+    if (!res.ok) setReasonError(res.error ?? "That didn't go through. Try again.");
+    else setReason("");
+  };
+  const cancelButton = (
+    <CancelHold
+      amount={usd(m.authorized_cents ?? m.amount_cents)}
+      busy={!!busy}
+      onConfirm={async () => {
+        await act("cancel", "cancel");
+      }}
+    />
+  );
 
   const act = async (label: string, action: string, body: Record<string, unknown> = {}) => {
     setBusy(label);
@@ -200,9 +261,11 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
     case "CHANGES_REQUESTED":
       if (role === "worker") {
         title = m.state === "CHANGES_REQUESTED" ? "Fix and resubmit" : `${usd(m.authorized_cents ?? m.amount_cents)} is held. Deliver the work.`;
+        const fix = m.state === "CHANGES_REQUESTED" ? <ClientReason text={m.changes_reason} /> : null;
         body =
           m.verifier === "rubric_text" ? (
             <div className="space-y-3">
+              {fix}
               <textarea
                 rows={6}
                 className="w-full rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm aria-[invalid=true]:border-failed"
@@ -222,6 +285,7 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
             </div>
           ) : (
             <div className="space-y-3">
+              {fix}
               <p className="text-sm text-ink-2">
                 Open a pull request in <span className="font-mono">{String(m.repo ?? "the repository")}</span>{due ? ` by ${due}` : ""}, with this line in its description so CI runs the signed tests:
               </p>
@@ -251,15 +315,7 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
         body = (
           <div className="space-y-3">
             <Waiting>{m.state === "CHANGES_REQUESTED" ? "The work didn't pass. The money stays held while the worker fixes it." : `The money is held and the worker has been told to start${due ? `; due ${due}` : ""}.`}</Waiting>
-            {m.state === "FUNDED" && (
-              <CancelHold
-                amount={usd(m.authorized_cents ?? m.amount_cents)}
-                busy={!!busy}
-                onConfirm={async () => {
-                  await act("cancel", "cancel");
-                }}
-              />
-            )}
+            {cancelButton}
           </div>
         );
       }
@@ -276,19 +332,37 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
           <div className="space-y-3">
             <p className="text-sm text-ink-2">The rules couldn&apos;t decide on their own ({review?.reasons?.join("; ") ?? "see the verdict"}). Read the verdict below, then:</p>
             {decideBy && <p className="text-sm font-medium text-ink">{decideBy}</p>}
+            <ReasonField
+              id="changes-reason"
+              label="What needs to change"
+              value={reason}
+              onChange={(v) => {
+                setReason(v);
+                setReasonError(undefined);
+              }}
+              required={reasonRequired}
+              error={reasonError}
+            />
             <div className="flex flex-wrap gap-2">
               <button className={primary} disabled={!!busy} onClick={() => act("approve", "approve")}>
                 {spin("approve")}Approve the work
               </button>
-              <button className={secondary} disabled={!!busy} onClick={() => act("changes", "request-changes")}>
+              <button className={secondary} disabled={!!busy} onClick={() => withReason("changes", "request-changes")}>
                 {spin("changes")}Ask for changes
               </button>
             </div>
+            {/* After an objection the money flow refuses a cancel: approve or ask for changes instead. */}
+            {!contestedAt && cancelButton}
           </div>
         );
       } else {
         title = "Waiting for the client's decision";
-        body = <Waiting>The rules sent this to the client to decide. The money stays held meanwhile.{decideBy && ` ${decideBy}`}</Waiting>;
+        body = (
+          <div className="space-y-3">
+            <Waiting>The rules sent this to the client to decide. The money stays held meanwhile.{decideBy && ` ${decideBy}`}</Waiting>
+            {contestedAt > 0 && <ClientReason text={m.objection_reason} />}
+          </div>
+        );
       }
       break;
     case "PASSED": {
@@ -330,9 +404,22 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
         role === "client" ? (
           <div className="space-y-3">
             <p className="text-sm text-ink-2">Every must-have passed. Unless you object before the window closes, the money is captured and the worker is paid automatically.</p>
+            {left > 0 && (
+              <ReasonField
+                id="objection-reason"
+                label="Why you object"
+                value={reason}
+                onChange={(v) => {
+                  setReason(v);
+                  setReasonError(undefined);
+                }}
+                required={false}
+                error={reasonError}
+              />
+            )}
             <div className="flex flex-wrap gap-2">
               {left > 0 && (
-                <button className={secondary} disabled={!!busy} onClick={() => act("object", "object")}>
+                <button className={secondary} disabled={!!busy} onClick={() => withReason("object", "object")}>
                   {spin("object")}Object and keep the money held
                 </button>
               )}
@@ -364,7 +451,12 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
         body = <p className="text-sm text-ink-2">A second review runs on the same commit; if it passes, payment releases on {releaseDate}. The money stays held meanwhile.</p>;
       } else {
         title = "The client objected";
-        body = <Waiting>A second review runs; if it passes, you&apos;re paid on {releaseDate}.</Waiting>;
+        body = (
+          <div className="space-y-3">
+            <Waiting>A second review runs; if it passes, you&apos;re paid on {releaseDate}.</Waiting>
+            <ClientReason text={m.objection_reason} />
+          </div>
+        );
       }
       break;
     case "CANCELLED":

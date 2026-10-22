@@ -9,14 +9,17 @@ import { dirname, join, posix, relative, resolve, sep } from "node:path";
 // whose exports are functions that do nothing) and must (a) load and (b) fail. A test that passes
 // against nothing checks nothing; one that can't load can never pass.
 //
-// This runs AI-generated test code, never worker code, and never on a PR. The child process gets:
+// This runs acceptance-test code the AI wrote for the terms (client-written tests get staticCheckTests below),
+// never worker code, and never on a PR. The child process gets:
 // PATH as its only env var (no secrets), a fresh temp dir as cwd, Node's permission model (reads and
 // writes only inside that dir, no child processes, workers or native addons), no eval/new Function,
 // a 128 MB heap, network calls stubbed out, and a hard 10 s kill. Node calls its permission model a
-// seat belt, not a sandbox for hostile code. That fits: the code comes from our model, prompted with a
-// client's brief framed as data, so it is semi-trusted. The check catches honest mistakes (no-op or
-// always-true asserts, syntax errors); a test written to fool it (say, one that fails only without a
-// CI env var) is for the people signing to spot, as before.
+// seat belt, not a sandbox for hostile code. AI-written code is semi-trusted (our model, prompted with
+// the brief framed as data). Client-written code is less so: anyone can create a milestone. What limits
+// the damage is the above: no secrets in the env, no files outside a throwaway dir, no subprocesses, and
+// a short time and memory budget (the network stub is a JS patch, so treat it as a courtesy). The check
+// catches honest mistakes (no-op or always-true asserts, syntax errors); a test written to fool it (say,
+// one that fails only without a CI env var) is for the people signing to spot, as before.
 
 export type TestProblem = { kind: "weak" | "broken"; reason: string };
 export type TestToCheck = { id: string; path: string; code: string };
@@ -256,4 +259,54 @@ export const checkTests: TestChecker = async (tests) => {
   };
   await Promise.all([worker(), worker(), worker(), worker()]);
   return out;
+};
+
+// ---------------------------------------------------------------------------------------------
+// Client-written tests are never run here: anyone can create a milestone, and Node can't fully block
+// network access for code it runs. They get a static check instead (the user's choice, Oct 22) and are
+// labelled "written by the client, not run before signing", so the worker reads them; CI still runs them.
+
+// The clause can't cross a quote or semicolon, so it never swallows an earlier import statement.
+const RELATIVE_IMPORT = /^[ \t]*import\s+(?:type\s+)?([^'";]*?)\s+from\s+(['"])(\.{1,2}\/[^'"]+)\2/gm;
+
+/** Local names bound by the test's relative imports (`{ a as b }` → b, default and `* as ns` too). */
+function localBindings(code: string): string[] {
+  const out: string[] = [];
+  for (const m of code.matchAll(RELATIVE_IMPORT)) {
+    const clause = m[1]!;
+    const ns = /\*\s+as\s+([A-Za-z_$][\w$]*)/.exec(clause);
+    if (ns) out.push(ns[1]!);
+    const braces = /\{([^}]*)\}/.exec(clause);
+    if (braces)
+      for (const part of braces[1]!.split(",")) {
+        const p = part.trim().replace(/^type\s+/, "");
+        const local = p.split(/\s+as\s+/).pop()?.trim();
+        if (local && IDENT.test(local)) out.push(local);
+      }
+    const def = /^([A-Za-z_$][\w$]*)/.exec(clause.trim());
+    if (def && def[1] !== "type") out.push(def[1]!);
+  }
+  return out;
+}
+
+/** Static check for a test nobody runs before signing: it must call the test runner, assert something,
+ * and use code it imports from the worker's repo. Catches empty templates and always-true tests. */
+export const staticCheckTests: TestChecker = async (tests) => {
+  const problems = new Map<string, TestProblem>();
+  for (const t of tests) {
+    const bare = t.code.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    const body = bare.replace(RELATIVE_IMPORT, "");
+    const bindings = localBindings(bare);
+    const reason = !/\b(test|it)\s*\(/.test(body)
+      ? "it never calls test() or it(), so nothing runs"
+      : !/\b(assert(\.\w+)?|expect)\s*\(/.test(body)
+        ? "it never asserts anything, so it can't fail"
+        : !bindings.length
+          ? "it doesn't import the code it should check (a relative import such as ../src/file.ts)"
+          : !bindings.some((b) => new RegExp(`\\b${b.replace(/\$/g, "\\$")}\\b`).test(body))
+            ? "it imports the code under test but never uses it"
+            : undefined;
+    if (reason) problems.set(t.id, { kind: "weak", reason });
+  }
+  return problems;
 };

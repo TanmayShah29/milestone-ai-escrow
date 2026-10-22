@@ -21,8 +21,8 @@ function ref(milestone: string): Ref {
   const m = /milestones\/([0-9a-f-]{36})(?:\?t=([\w-]+))?/i.exec(milestone);
   if (m?.[2]) return { id: m[1]!, token: m[2] };
   const id = m?.[1] ?? milestone.trim();
-  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("pass the milestone link you were given (it ends with ?t=...)");
-  if (!API_KEY) throw new Error("a bare milestone id needs MILESTONE_API_KEY; otherwise pass the full milestone link");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Pass the milestone link you were given (it ends with ?t=...).");
+  if (!API_KEY) throw new Error("This link is missing its ?t= token. Paste the full worker link.");
   return { id, token: API_KEY };
 }
 
@@ -37,6 +37,10 @@ async function call(method: "GET" | "POST", path: string, token?: string, body?:
   if (!res.ok) throw new Error(String(json.error ?? `HTTP ${res.status}`));
   return json;
 }
+
+const WRONG_FINGERPRINT = "That fingerprint doesn't match these terms. Call get_milestone and use its fingerprint.";
+/** The link argument every worker tool takes. */
+const milestoneArg = z.string().describe("The milestone link you were given (…/milestones/<id>?t=<token>), or an id when using a platform API key");
 
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] });
 const fail = (err: unknown) => ({ content: [{ type: "text" as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true });
@@ -76,7 +80,7 @@ server.registerTool(
   {
     title: "Read a milestone",
     description: "The brief, amount, repository, signed terms (criteria with their acceptance tests), state, and how to deliver.",
-    inputSchema: { milestone: z.string().describe("The milestone link you were given (…/milestones/<id>?t=<token>), or an id when using a platform API key") },
+    inputSchema: { milestone: milestoneArg },
     annotations: { readOnlyHint: true },
   },
   async ({ milestone }) => {
@@ -95,12 +99,21 @@ server.registerTool(
   {
     title: "Accept the terms",
     description: "Sign the terms you read. You must pass the fingerprint from get_milestone; if the terms changed since, signing is refused and you should read them again.",
-    inputSchema: { milestone: z.string(), fingerprint: z.string().regex(/^[0-9a-f]{64}$/).describe("criteria fingerprint from get_milestone") },
+    inputSchema: {
+      milestone: milestoneArg,
+      fingerprint: z.string().regex(/^[0-9a-f]{64}$/, WRONG_FINGERPRINT).describe("The `fingerprint` field from get_milestone (64 hex characters)"),
+    },
   },
   async ({ milestone, fingerprint }) => {
     try {
       const r = ref(milestone);
-      const b = await call("POST", `/api/milestones/${r.id}/sign-terms`, r.token, { hash: fingerprint });
+      // Compare first so a stale or mistyped fingerprint gets a message that says what to do.
+      const current = (await call("GET", `/api/milestones/${r.id}`, r.token)).milestone as M;
+      if (current.criteria_hash !== fingerprint) throw new Error(WRONG_FINGERPRINT);
+      const b = await call("POST", `/api/milestones/${r.id}/sign-terms`, r.token, { hash: fingerprint }).catch((e: unknown) => {
+        // The terms changed between the read above and the signature.
+        throw e instanceof Error && /terms changed since/i.test(e.message) ? new Error(WRONG_FINGERPRINT) : e;
+      });
       const m = b.milestone as M;
       return text({ state: m.state, note: m.state === "AGREED" ? "Both sides signed. Wait for the client to fund the PayPal hold (state FUNDED) before starting." : "Signed. Waiting for the other side." });
     } catch (e) {
@@ -114,7 +127,11 @@ server.registerTool(
   {
     title: "Submit the deliverable",
     description: "Submit a GitHub pull request URL (code milestones) or the deliverable text (text milestones). Allowed once the milestone is FUNDED, or after CHANGES_REQUESTED.",
-    inputSchema: { milestone: z.string(), pr_url: z.string().url().optional(), text: z.string().optional() },
+    inputSchema: {
+      milestone: milestoneArg,
+      pr_url: z.string().url().optional().describe("Code milestones: the pull request URL (https://github.com/<owner>/<repo>/pull/<n>)"),
+      text: z.string().optional().describe("Text milestones: the full deliverable text"),
+    },
   },
   async ({ milestone, pr_url, text: deliverable }) => {
     try {
@@ -132,7 +149,7 @@ server.registerTool(
   {
     title: "Check the verdict and payout",
     description: "Moves the milestone forward if possible (review once CI finishes, release once the objection window passes) and returns the state, the per-criterion verdict, feedback, and the payout.",
-    inputSchema: { milestone: z.string() },
+    inputSchema: { milestone: milestoneArg },
   },
   async ({ milestone }) => {
     try {
@@ -168,11 +185,11 @@ if (API_KEY) {
       title: "Create a milestone (platform)",
       description: "Open a milestone for a worker. Returns the worker link to hand to the person or agent doing the work. Funding stays with the client.",
       inputSchema: {
-        title: z.string().min(3).max(200),
-        brief: z.string().max(5000),
-        amount_usd: z.string().regex(/^\d+(\.\d{1,2})?$/),
-        worker_paypal_email: z.string().email(),
-        repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/).optional(),
+        title: z.string().min(3).max(200).describe("Short name of the work"),
+        brief: z.string().max(5000).describe("What the client wants done; the AI drafts the criteria and tests from it"),
+        amount_usd: z.string().regex(/^\d+(\.\d{1,2})?$/).describe('Amount in US dollars, e.g. "300.00"'),
+        worker_paypal_email: z.string().email().describe("The PayPal email the worker is paid to"),
+        repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/).optional().describe('GitHub repository "owner/repo" for code work; when given, terms are drafted right away'),
       },
     },
     async ({ title, brief, amount_usd, worker_paypal_email, repo }) => {
@@ -192,7 +209,11 @@ if (API_KEY) {
     {
       title: "Draft terms with AI (platform)",
       description: "Have the AI draft acceptance criteria and tests from the brief.",
-      inputSchema: { milestone_id: z.string(), repo: z.string().optional(), stack: z.string().optional() },
+      inputSchema: {
+        milestone_id: z.string().describe("The id returned by create_milestone"),
+        repo: z.string().optional().describe('GitHub repository "owner/repo" the work happens in'),
+        stack: z.string().optional().describe('Language and test setup, e.g. "TypeScript, node:test"'),
+      },
     },
     async ({ milestone_id, repo, stack }) => {
       try {

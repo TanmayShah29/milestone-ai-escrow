@@ -169,7 +169,7 @@ describe("authorizeHold", () => {
 describe("releaseFunds", () => {
   const funded = { state: "PASSED", paypal_order_id: "ORDER1", paypal_authorization_id: "AUTH1", authorized_cents: 30_000 };
 
-  it("captures the agreed amount, then pays out captured minus fee", async () => {
+  it("captures the agreed amount, then pays out captured minus the PayPal fee (estimated when absent), payout fee and platform fee", async () => {
     const id = await seedMilestone(funded);
     const stub = stubFetch(({ url }) => {
       if (url.pathname === "/v2/payments/authorizations/AUTH1/capture") return jsonResponse(201, { id: "CAP1", status: "COMPLETED", amount: { currency_code: "USD", value: "300.00" } });
@@ -180,13 +180,16 @@ describe("releaseFunds", () => {
 
     assert.equal(m.state, "RELEASED");
     assert.equal(m.paypal_capture_id, "CAP1");
+    // No seller_receivable_breakdown in the capture: PayPal fee estimated at 3.49% + 49¢ = $10.96.
+    assert.equal(m.paypal_fee_cents, 1_096);
     assert.equal(m.fee_cents, 1_500);
-    assert.equal(m.payout_cents, 28_500);
+    assert.equal(m.payout_fee_cents, 100); // 2% of $274.04, capped at $1.00
+    assert.equal(m.payout_cents, 27_304);
     assert.equal(m.paypal_payout_batch_id, "BATCH1");
     const capture = JSON.parse(stub.calls[0]!.body!);
     assert.deepEqual(capture, { amount: { currency_code: "USD", value: "300.00" }, final_capture: true });
     const payout = JSON.parse(stub.calls[1]!.body!);
-    assert.equal(payout.items[0].amount.value, "285.00");
+    assert.equal(payout.items[0].amount.value, "273.04");
     assert.equal(payout.sender_batch_header.sender_batch_id, `ms_${id}_payout_1`);
     assert.equal(stub.calls[1]!.request.headers.get("paypal-request-id"), `ms_${id}_payout_1`);
   });

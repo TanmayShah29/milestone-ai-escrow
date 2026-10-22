@@ -87,9 +87,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
       case "approve":
         return done(await humanDecision(id, true));
       case "request-changes":
-        return done(await humanDecision(id, false));
+        return done(await humanDecision(id, false, { reason: str(body.reason) }));
       case "object":
-        return done(await objectToRelease(id));
+        return done(await objectToRelease(id, { reason: str(body.reason) }));
       case "dev-pass":
         // Stand-in for the verifier + decision policy (build step 2).
         if (!devActionsAllowed()) return json(404, { error: "not found" });

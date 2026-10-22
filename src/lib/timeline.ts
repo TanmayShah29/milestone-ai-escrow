@@ -1,9 +1,13 @@
 import type { Milestone } from "@/lib/milestones/repo";
 
 // Builds the Gantt view of a milestone: its phases as tasks, the money gates between them as
-// finish-to-start dependencies, and the hold's lifetime (day-3 honor period, day-29 expiry) as indicators.
+// dependencies, and the hold's lifetime (day-3 honor period, day-29 expiry) as indicators and bands.
 // Planned dates make the bars readable at project scale; what actually happened (from the audit log)
 // sets status, progress and the tooltip. Pure: no DB or network, so it is unit-tested directly.
+// Scheduling: a phase that already ended (it has a real timestamp) is pinned (`manuallyScheduled`); a
+// future phase is auto-scheduled by Bryntum's engine, so moving the Work bar's end pushes Review, the
+// objection window and the payout along the dependencies. Work carries the hold's cap as a
+// "finish no later than" constraint (Bryntum's name for "must finish on or before").
 
 // "unfunded": the PayPal hold has not been placed yet (nothing is held, so it is never shown as active).
 export type PhaseStatus = "done" | "active" | "blocked" | "failed" | "todo" | "unfunded";
@@ -13,7 +17,7 @@ export type TimelineTask = {
   name: string;
   startDate: string;
   endDate: string;
-  manuallyScheduled: true;
+  manuallyScheduled: boolean;
   percentDone: number;
   cls: string;
   iconCls: string;
@@ -30,11 +34,15 @@ export type TimelineTask = {
   holdWarn?: boolean; // the work is due after the hold expires
   dueLimit?: string; // work: the latest due date the PayPal hold allows (see latestDueAt)
   canReschedule?: boolean; // work: the due date can still be moved (the API accepts it in this state)
+  constraintType?: "finishnolaterthan"; // work: Bryntum's "must finish on or before", at dueLimit
+  constraintDate?: string;
+  holdExpiring?: boolean; // hold: live and within 3 days of its expiry (drawn red)
   milestoneId: string;
   phase?: string;
 };
 
-export type TimelineDependency = { id: string; fromTask: string; toTask: string; type: 2; cls?: string };
+// Bryntum dependency types: 0 start-to-start, 2 finish-to-start. `active: false` draws a link without scheduling by it.
+export type TimelineDependency = { id: string; fromTask: string; toTask: string; type: 0 | 2; cls?: string; active?: boolean };
 export type Timeline = { tasks: TimelineTask[]; dependencies: TimelineDependency[]; warnings: string[] };
 
 type AuditRow = { event: string; to_state: string | null; created_at: Date | string };
@@ -68,6 +76,8 @@ export function objectionMs(): number {
 // margin to review, wait out the objection window and capture before the hold expires.
 export const HOLD_VALID_DAYS = 29;
 export const DUE_MARGIN_DAYS = 3;
+/** A live hold this close to its expiry is drawn red (it must be captured or it lapses). */
+export const HOLD_EXPIRING_DAYS = 3;
 
 const capDate = (x: number) => new Date(x).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
@@ -137,12 +147,22 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
 
   const fmt = (x?: number) => (x ? new Date(x).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "not yet");
   const editableDue = !submitted && canMoveDueDate(s);
+  // Future phases (no real end yet) follow the engine while the milestone is live; ended ones stay put.
+  const live = !cancelled && s !== "PAID_OUT";
+  const auto: Record<keyof typeof status, boolean> = {
+    terms: false, // PayPal's and the parties' clocks: never moved by the schedule
+    hold: false,
+    work: live && !submitted,
+    review: live && !(decided && submitted),
+    window: live && !released,
+    payout: live && !paid,
+  };
   const phase = (key: keyof typeof status, name: string, start: number, end: number, note: string, extra: Partial<TimelineTask> = {}): TimelineTask => ({
     id: `${m.id}:${key}`,
     name,
     startDate: iso(start),
     endDate: iso(end),
-    manuallyScheduled: true,
+    manuallyScheduled: !auto[key],
     percentDone: status[key] === "done" ? 100 : status[key] === "active" ? 50 : 0,
     cls: `ms-phase ms-${status[key]}`,
     iconCls: status[key] === "blocked" || status[key] === "unfunded" ? "fa fa-lock" : ICON[key]!,
@@ -161,19 +181,25 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
   const warning = holdWarning(m);
   // Honor-period and expiry markers only matter while the hold is live (not after capture or void).
   const holdLive = !!held && !released && !cancelled;
-  const holdMarks = holdLive ? { ...(honorEnd ? { honorEnd: iso(honorEnd) } : {}), ...(expiry ? { holdExpiry: iso(expiry) } : {}), holdWarn: !!warning } : {};
+  const holdExpiring = holdLive && !!expiry && expiry - now <= HOLD_EXPIRING_DAYS * DAY;
+  const holdMarks = holdLive ? { ...(honorEnd ? { honorEnd: iso(honorEnd) } : {}), ...(expiry ? { holdExpiry: iso(expiry) } : {}), holdWarn: !!warning, holdExpiring } : {};
+  // The cap becomes an engine constraint only when the current plan meets it (a row already past it is
+  // flagged by holdWarning instead; a constraint it already breaks would raise a conflict on load).
+  const limit = editableDue ? latestDueAt(m, now) : undefined;
+  const constrain = auto.work && limit && workEnd <= limit.getTime();
 
   const children: TimelineTask[] = [
     phase("terms", "Terms signed", termsStart, termsEnd, `Fingerprint ${m.criteria_hash?.slice(0, 12) ?? "pending"} · agreed ${fmt(agreed)}`),
     phase("hold", held ? `PayPal hold ${money(m.authorized_cents ?? m.amount_cents)}` : `PayPal hold (not funded) ${money(m.amount_cents)}`, holdStart, holdEnd, `${held ? "" : "Not funded yet: the client approves the hold on PayPal · "}Authorization ${m.paypal_authorization_id ?? "not yet"} · held ${fmt(held)} · expires ${fmt(expiry)}${warning ? ` · ${warning}` : ""}`, {
       ...holdMarks,
-      ...(warning && holdLive ? { eventColor: "orange", cls: "ms-phase ms-warn" } : {}),
+      ...(holdExpiring ? { eventColor: "red", cls: "ms-phase ms-expiring" } : warning && holdLive ? { eventColor: "orange", cls: "ms-phase ms-warn" } : {}),
     }),
     phase("work", "Work", workStart, workEnd, `Due ${fmt(due)} · submitted ${fmt(submitted)}${m.pr_url ? ` · ${m.pr_url}` : ""}`, {
       deadlineDate: iso(due),
       resizable: editableDue ? "end" : false,
       canReschedule: editableDue,
-      ...(editableDue ? { dueLimit: latestDueAt(m, now).toISOString() } : {}),
+      ...(limit ? { dueLimit: limit.toISOString() } : {}),
+      ...(constrain ? { constraintType: "finishnolaterthan" as const, constraintDate: limit.toISOString() } : {}),
     }),
     phase("review", "Review (CI + AI, fixed rules)", reviewStart, reviewEnd, `Decision ${fmt(decided)} · state ${s}`),
     phase("window", "Objection window", windowStart, windowEnd, `Release after ${fmt(t(m.release_after))}`),
@@ -186,7 +212,8 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
     name: `${m.title} · ${money(m.amount_cents)}`,
     startDate: iso(termsStart),
     endDate: iso(Math.max(payoutEnd, holdEnd)),
-    manuallyScheduled: true,
+    // A pinned parent ignores its children; while any phase can move, the parent rolls them up instead.
+    manuallyScheduled: !Object.values(auto).some(Boolean),
     percentDone: Math.round((children.filter((c) => c.status === "done").length / children.length) * 100),
     cls: `ms-milestone ${allDone ? "ms-done" : cancelled ? "ms-failed" : ""}`,
     iconCls: "fa fa-flag",
@@ -205,12 +232,15 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
     id: `${m.id}:dep:${chain[i]}-${k}`,
     fromTask: `${m.id}:${chain[i]}`,
     toTask: `${m.id}:${k}`,
-    type: 2,
+    // The hold bar spans the hold's whole life, so it gates the work's start (start-to-start): work begins
+    // when the money is held, not when the hold ends. Every other gate is finish-to-start.
+    type: k === "work" ? 0 : 2,
     cls: status[chain[i]!] === "done" ? "ms-dep-open" : "ms-dep-gate",
   }));
   if (m.after_milestone_id) {
-    // Payment tranche: this milestone's work waits on the previous milestone's payout.
-    dependencies.push({ id: `${m.id}:dep:after`, fromTask: `${m.after_milestone_id}:payout`, toTask: `${m.id}:work`, type: 2, cls: "ms-dep-tranche" });
+    // Payment tranche: this milestone's work waits on the previous milestone's payout. Drawn, not
+    // scheduled by: each milestone's dates are planned (and capped) against its own hold on the server.
+    dependencies.push({ id: `${m.id}:dep:after`, fromTask: `${m.after_milestone_id}:payout`, toTask: `${m.id}:work`, type: 2, cls: "ms-dep-tranche", active: false });
   }
 
   return { tasks: [parent], dependencies, warnings: warning ? [warning] : [] };

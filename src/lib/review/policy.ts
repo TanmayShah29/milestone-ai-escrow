@@ -40,9 +40,46 @@ export function decide(v: Verdict): { decision: Decision; reasons: string[] } {
   return { decision: "PASSED", reasons: ["every must-have criterion passed"] };
 }
 
-function flags(v: Verdict): string[] {
+/**
+ * Entries in `tampering` that send work to a person without being tampering: a CI result that couldn't
+ * be tied to the milestone workflow (verifiers.ts: "CI result for C1 not trusted: …", which a transient
+ * GitHub error can also cause), or a PR too large to scan fully ("the pull request changes N files; …").
+ * Anything else (a protected path, a harness escape, or any entry this doesn't recognise) is tampering.
+ */
+export function isProceduralFlag(entry: string): boolean {
+  return /^CI result for \S+ not trusted: /.test(entry) || /^the pull request changes \S+ files; only the first \d+ can be scanned$/.test(entry);
+}
+
+export type TimeoutOutcome = "release" | "void" | "wait";
+
+/**
+ * What fixed rules do with a HUMAN_CHECK the client leaves undecided past its deadline:
+ *  - tampering (protected files, harness escapes) or text aimed at the reviewer → "void": the hold goes
+ *    back to the client; such work is never paid by default;
+ *  - only procedural flags (untrusted CI, a PR too large to scan) → "release" if every must-have still
+ *    passed with full confidence, otherwise "wait" (nothing automatic; the client must decide);
+ *  - no flags (low confidence, an unfinished second review) → "release" to the worker.
+ * No verdict on record counts as unflagged.
+ */
+type TimeoutInput = Pick<Verdict, "tampering" | "injection"> & { criteria: (Pick<CriterionVerdict, "verdict" | "confidence"> & { kind: string })[] };
+
+export function humanTimeoutOutcome(v: TimeoutInput | null | undefined): { outcome: TimeoutOutcome; reasons: string[] } {
+  const tampering = (v?.tampering ?? []).filter((t) => !isProceduralFlag(t));
+  const procedural = (v?.tampering ?? []).filter(isProceduralFlag);
+  if (tampering.length || v?.injection?.detected) return { outcome: "void", reasons: flags({ tampering, injection: v?.injection ?? { detected: false, quotes: [] } }) };
+  if (procedural.length) {
+    const musts = (v?.criteria ?? []).filter((c) => c.kind === "must");
+    const allPassed = musts.length > 0 && musts.every((c) => c.verdict === "pass" && c.confidence >= CONFIDENCE_FLOOR);
+    return allPassed
+      ? { outcome: "release", reasons: ["every must-have passed; the review was held only for a check it couldn't complete", ...procedural] }
+      : { outcome: "wait", reasons: ["the rules can't settle this on their own: a must-have wasn't confirmed and a check couldn't be completed", ...procedural] };
+  }
+  return { outcome: "release", reasons: ["the review flagged no tampering or text aimed at the reviewer"] };
+}
+
+function flags(v: Pick<Verdict, "tampering" | "injection">): string[] {
   const out: string[] = [];
-  if (v.tampering.length) out.push(`PR changes protected files: ${v.tampering.join(", ")}`);
-  if (v.injection.detected) out.push("PR contains text aimed at the AI reviewer");
+  if (v.tampering?.length) out.push(`PR changes protected files: ${v.tampering.join(", ")}`);
+  if (v.injection?.detected) out.push("PR contains text aimed at the AI reviewer");
   return out;
 }

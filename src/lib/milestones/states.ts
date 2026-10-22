@@ -19,18 +19,21 @@ export const STATES = [
 
 export type MilestoneState = (typeof STATES)[number];
 
+// CANCELLED from every pre-capture hold state: the client may void from FUNDED, CHANGES_REQUESTED and
+// HUMAN_CHECK (flow.ts cancelHold checks which), and a hold PayPal voided or expired ends the milestone
+// from any of them (flow.ts endHoldIfGone). Never after a capture.
 const TRANSITIONS: Record<MilestoneState, readonly MilestoneState[]> = {
   DRAFT: ["AGREED", "CANCELLED"],
   AGREED: ["FUNDED", "CANCELLED"],
   FUNDED: ["SUBMITTED", "CANCELLED"],
-  SUBMITTED: ["IN_REVIEW", "PASSED"], // PASSED directly only via the dev route until the reviewer exists
-  IN_REVIEW: ["CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED"],
-  CHANGES_REQUESTED: ["SUBMITTED"],
-  HUMAN_CHECK: ["PASSED", "CHANGES_REQUESTED"],
-  PASSED: ["RELEASED", "CONTESTED"],
+  SUBMITTED: ["IN_REVIEW", "PASSED", "CANCELLED"], // PASSED directly only via the dev route until the reviewer exists
+  IN_REVIEW: ["CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CANCELLED"],
+  CHANGES_REQUESTED: ["SUBMITTED", "CANCELLED"],
+  HUMAN_CHECK: ["PASSED", "CHANGES_REQUESTED", "CANCELLED"],
+  PASSED: ["RELEASED", "CONTESTED", "CANCELLED"],
   // One second review on the same commit: pass → back to PASSED with release_after = objection + 72 h
   // (releaseFunds only runs from PASSED); fail → CHANGES_REQUESTED; no usable verdict in 72 h → HUMAN_CHECK.
-  CONTESTED: ["PASSED", "CHANGES_REQUESTED", "HUMAN_CHECK"],
+  CONTESTED: ["PASSED", "CHANGES_REQUESTED", "HUMAN_CHECK", "CANCELLED"],
   RELEASED: ["PAID_OUT", "PAYOUT_FAILED", "DISPUTE"], // a PayPal dispute can only open on captured money
   PAID_OUT: ["DISPUTE"],
   PAYOUT_FAILED: [],

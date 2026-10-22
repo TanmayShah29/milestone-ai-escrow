@@ -1,7 +1,7 @@
 import { platformFrom, publicMilestone, Unauthorized } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { json, toHttp } from "@/lib/http";
-import { valueToCents } from "@/lib/money/amounts";
+import { MIN_AMOUNT_CENTS, valueToCents } from "@/lib/money/amounts";
 import { createMilestone, type Milestone } from "@/lib/milestones/repo";
 import { HOUR, hit, ipKey, tooMany, waitText } from "@/lib/ratelimit";
 import { dueCapMessage, latestDueAt } from "@/lib/timeline";
@@ -45,7 +45,8 @@ export async function POST(req: Request) {
     }
     if (!title || title.length > 200) return json(400, { error: "Give the milestone a title (200 characters at most)." });
     if (!EMAIL.test(freelancerEmail)) return json(400, { error: "Enter the worker's PayPal email address." });
-    if (amountCents <= 0 || amountCents > 1_000_000) return json(400, { error: "The amount must be between $0.01 and $10,000.00." });
+    if (amountCents < MIN_AMOUNT_CENTS) return json(400, { error: "The smallest milestone is $10.00. Below that, PayPal's fees take most of the payment." });
+    if (amountCents > 1_000_000) return json(400, { error: "The largest milestone is $10,000.00." });
     const dueAt = typeof b.dueDate === "string" && b.dueDate ? new Date(b.dueDate) : undefined;
     if (dueAt && (Number.isNaN(dueAt.getTime()) || dueAt.getTime() < Date.now())) return json(400, { error: "Pick a due date in the future." });
     const dueLimit = latestDueAt({ created_at: new Date(), authorization_expires_at: null });

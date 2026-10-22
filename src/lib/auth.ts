@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { db } from "@/lib/db";
 import type { Milestone } from "@/lib/milestones/repo";
+import { feeSchedule } from "@/lib/money/amounts";
 import { humanCheckDeadline } from "@/lib/review/deadlines";
 
 // Who may do what. A milestone has a client link and a worker link (capability tokens); a platform
@@ -60,10 +61,14 @@ export function requireRole(role: Role, ...allowed: Role[]): void {
   if (!allowed.includes(role)) throw new Forbidden(`Only the ${allowed.join(" or ")} can do that.`);
 }
 
-/** Never send token hashes to a browser. Adds decide_by: the post-objection HUMAN_CHECK deadline, or null. */
+/**
+ * Never send token hashes to a browser. Adds decide_by: when an undecided HUMAN_CHECK is settled by fixed
+ * rules (after an objection, or before the hold expires without one), or null. The client's reasons
+ * (objection_reason, changes_reason) are always included, so the worker can read them.
+ */
 export function publicMilestone(m: Milestone) {
   const { client_token_hash: _c, worker_token_hash: _w, ...rest } = m;
   void _c;
   void _w;
-  return { ...rest, decide_by: humanCheckDeadline(m) };
+  return { ...rest, objection_reason: m.objection_reason ?? null, changes_reason: m.changes_reason ?? null, decide_by: humanCheckDeadline(m), fee_schedule: feeSchedule() };
 }

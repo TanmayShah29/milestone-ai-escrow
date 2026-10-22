@@ -1,4 +1,4 @@
-import { CheckoutPaymentIntent, OrderApplicationContextShippingPreference, type Order, type PaypalClient } from "paypal";
+import { CheckoutPaymentIntent, OrderApplicationContextShippingPreference, type Order, type PaypalClient, type SellerReceivableBreakdown } from "paypal";
 import type { PoolClient } from "pg";
 import { db, tx, withMilestoneLock } from "@/lib/db";
 import { audit, getMilestone, transition, updateFields, type Actor, type Milestone } from "@/lib/milestones/repo";
@@ -6,11 +6,11 @@ import { assertTransition, type MilestoneState } from "@/lib/milestones/states";
 import { PaypalFailure, classify } from "@/lib/paypal/errors";
 import { paypal } from "@/lib/paypal/client";
 import { createPayout, getPayout } from "@/lib/paypal/payouts";
-import { centsToValue, splitCapture, valueToCents } from "./amounts";
+import { centsToValue, estimatePaypalFee, scheduleFor, splitCapture, valueToCents } from "./amounts";
 import { assertTermsAgreed } from "@/lib/contract/terms";
 import { stateLabel } from "@/lib/client/states";
 import { InProgress, InvariantViolation, OutcomeUnknown } from "@/lib/errors";
-import { claimAction, isStalePending, settleClaim, unknownClaims, type Claim, type MoneyAction } from "./claims";
+import { claimAction, isStalePending, liveClaim, settleClaim, unknownClaims, type Claim, type MoneyAction } from "./claims";
 
 // The only code that moves money (money rule 1). Every write follows paypal-plan.md 1b.1:
 // claim → PayPal call (with the claim's PayPal-Request-Id) → record the result, and on an unknown
@@ -307,7 +307,30 @@ async function authorizeHoldLocked(milestoneId: string, returnedOrderId: string,
 // ---------------------------------------------------------------------------------------------
 // 13–14. Release: capture the hold, then pay the freelancer.
 
-type CaptureInfo = { captureId: string; status: string; cents: number };
+// paypalFeeCents: PayPal's fee from the capture's seller_receivable_breakdown.paypal_fee (optional in the
+// SDK model, and the sandbox may omit it); null when absent, and the record step estimates it.
+type CaptureInfo = { captureId: string; status: string; cents: number; paypalFeeCents: number | null };
+
+function paypalFeeOf(b: SellerReceivableBreakdown | undefined): number | null {
+  const fee = b?.paypalFee;
+  if (!fee || fee.currencyCode !== "USD") return null;
+  try {
+    return valueToCents(fee.value);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The worker's split for a capture, with the fee's source for the audit row. The platform fee is the one
+ * both sides signed (the terms' policy.platformFeeBps); PLATFORM_FEE_BPS only for older contracts.
+ */
+function splitFor(m: Pick<Milestone, "criteria">, capturedCents: number, paypalFeeCents: number | null) {
+  const source = paypalFeeCents == null ? "estimated" : "paypal";
+  const schedule = scheduleFor(m.criteria);
+  const split = splitCapture(capturedCents, paypalFeeCents ?? estimatePaypalFee(capturedCents), schedule);
+  return { split: { ...split, platformBps: schedule.platformBps }, source, set: { paypal_fee_cents: split.paypalFeeCents, payout_fee_cents: split.payoutFeeCents, fee_cents: split.feeCents, payout_cents: split.payoutCents } };
+}
 
 async function releaseFundsLocked(milestoneId: string, deps: Deps, opts: { mock?: string }): Promise<Milestone> {
   let m = await getMilestone(milestoneId);
@@ -331,24 +354,23 @@ async function releaseFundsLocked(milestoneId: string, deps: Deps, opts: { mock?
           body: { amount: { currencyCode: "USD", value: centsToValue(captureCents) }, finalCapture: true },
         });
         if (!c.id || !c.amount) throw new PaypalFailure("unknown", "capture returned no id or amount");
-        return { captureId: c.id, status: c.status ?? "UNKNOWN", cents: valueToCents(c.amount.value) };
+        return { captureId: c.id, status: c.status ?? "UNKNOWN", cents: valueToCents(c.amount.value), paypalFeeCents: paypalFeeOf(c.sellerReceivableBreakdown) };
       },
       reread: async () => {
         const cap = (await deps.paypal.orders.getOrder({ id: orderId })).purchaseUnits?.[0]?.payments?.captures?.[0];
-        if (cap?.id && cap.amount) return { captureId: cap.id, status: cap.status ?? "UNKNOWN", cents: valueToCents(cap.amount.value) };
+        if (cap?.id && cap.amount) return { captureId: cap.id, status: cap.status ?? "UNKNOWN", cents: valueToCents(cap.amount.value), paypalFeeCents: paypalFeeOf(cap.sellerReceivableBreakdown) };
         const auth = await deps.paypal.payments.getAuthorizedPayment({ authorizationId });
         return auth.status === "CREATED" ? NOT_DONE : undefined; // hold untouched: PayPal didn't capture
       },
       paypalId: (c) => c.captureId,
       record: (c, cap) => {
-        const { feeCents, payoutCents } = splitCapture(cap.cents);
+        const { split, source, set } = splitFor(cur, cap.cents, cap.paypalFeeCents);
         return transition(c, cur, "RELEASED", "system", {
           paypal_capture_id: cap.captureId,
           capture_status: cap.status,
           captured_cents: cap.cents,
-          fee_cents: feeCents,
-          payout_cents: payoutCents,
-        }, { paypalId: cap.captureId, event: "hold:captured", detail: { status: cap.status, cents: cap.cents, feeCents, payoutCents } });
+          ...set,
+        }, { paypalId: cap.captureId, event: "hold:captured", detail: { status: cap.status, cents: cap.cents, ...split, paypalFeeSource: source } });
       },
     });
   }
@@ -383,22 +405,38 @@ async function payoutFreelancer(m: Milestone, deps: Deps): Promise<Milestone> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Cancel before submission: void the hold.
+// Cancel: void the hold. The client may cancel before submission (FUNDED), after the checks asked for
+// changes (CHANGES_REQUESTED), or instead of deciding a HUMAN_CHECK, but not a HUMAN_CHECK that follows
+// an objection: that one releases to the worker if the client doesn't decide (review/run.ts), and a
+// cancel would let the client walk away from work that passed the checks.
+
+// The decision policy (review/run.ts) may also void as "system", e.g. when a HUMAN_CHECK deadline passes on
+// a verdict that found tampering: from any pre-capture hold state, with no client-only guard. Every money
+// rule still applies (the claim and its PayPal-Request-Id, the lock, no void after a capture).
+export const CANCEL_STATES: MilestoneState[] = ["FUNDED", "CHANGES_REQUESTED", "HUMAN_CHECK"];
+
+export type CancelOpts = { actor?: "client" | "system" };
 
 type VoidInfo = { authorizationId: string; status: string };
 
-async function cancelHoldLocked(milestoneId: string, deps: Deps): Promise<Milestone> {
+async function cancelHoldLocked(milestoneId: string, deps: Deps, opts: CancelOpts): Promise<Milestone> {
   const m = await getMilestone(milestoneId);
+  const actor = opts.actor ?? "client";
   if (m.state === "DRAFT" || (m.state === "AGREED" && !m.paypal_authorization_id)) {
     // No hold exists yet; an unapproved order simply expires.
     return transition(db(), m, "CANCELLED", "client");
   }
-  requireState(m, "FUNDED");
+  if (actor === "system") requireState(m, ...HOLD_STATES);
+  else requireState(m, ...CANCEL_STATES);
+  if (actor === "client" && m.state === "HUMAN_CHECK" && m.contested_at) {
+    throw new InvariantViolation("This work passed the checks and you objected, so it can't be cancelled now. Approve it or ask for changes before the deadline.");
+  }
+  if (m.paypal_capture_id) throw new InvariantViolation("This money was already captured, so the hold can't be released.");
   if (!m.paypal_authorization_id) throw new InvariantViolation("This milestone has no PayPal hold to release.");
   const authorizationId = m.paypal_authorization_id;
   return runWrite<VoidInfo>(m, {
     action: "void",
-    actor: "client",
+    actor,
     call: async (requestId) => {
       const a = await deps.paypal.payments.voidPayment({ authorizationId, payPalRequestId: requestId, prefer: PREFER });
       return { authorizationId, status: a.status ?? "VOIDED" };
@@ -409,7 +447,7 @@ async function cancelHoldLocked(milestoneId: string, deps: Deps): Promise<Milest
       return a.status === "CREATED" ? NOT_DONE : undefined;
     },
     paypalId: (v) => v.authorizationId,
-    record: (c, v) => transition(c, m, "CANCELLED", "client", {}, { paypalId: v.authorizationId, event: "hold:voided", detail: { status: v.status } }),
+    record: (c, v) => transition(c, m, "CANCELLED", actor, { hold_ended_at: new Date() }, { paypalId: v.authorizationId, event: "hold:voided", detail: { status: v.status, from: m.state } }),
   });
 }
 
@@ -458,11 +496,30 @@ async function refreshHoldLocked(milestoneId: string, deps: Deps): Promise<Miles
 // Sync: settle unknown outcomes, pay out once a pending capture completes, and mark PAID_OUT.
 // Webhooks (build step 3) will call the same paths.
 
+// A hold PayPal ended without a capture: voided (by us, on PayPal's side, or automatically when the
+// authorization reached the end of its validity: PayPal sends PAYMENT.AUTHORIZATION.VOIDED for that) or
+// reported EXPIRED (not in the SDK's enum; treated the same, defensively). Cancels the milestone from any
+// pre-capture state. Never once a capture exists or a capture is claimed (its outcome settles first).
+const HOLD_ENDED_STATUSES = new Set(["VOIDED", "EXPIRED"]);
+
+async function endHoldIfGone(m: Milestone, deps: Deps): Promise<Milestone> {
+  if (!HOLD_STATES.includes(m.state) || !m.paypal_authorization_id || m.paypal_capture_id) return m;
+  if (await liveClaim(db(), m.id, "capture")) return m;
+  const authorizationId = m.paypal_authorization_id;
+  const a = await deps.paypal.payments.getAuthorizedPayment({ authorizationId }).catch((e) => {
+    throw classify(e);
+  });
+  const status = a.status ?? "UNKNOWN";
+  if (!HOLD_ENDED_STATUSES.has(status)) return m;
+  return transition(db(), m, "CANCELLED", "paypal", { hold_ended_at: new Date() }, { paypalId: authorizationId, event: "hold:ended", detail: { status, from: m.state } });
+}
+
 async function syncMilestoneLocked(milestoneId: string, deps: Deps): Promise<Milestone> {
   let m = await getMilestone(milestoneId);
   for (const claim of await unknownClaims(db(), m.id)) {
     m = await resumeAction(m, claim, deps);
   }
+  m = await endHoldIfGone(m, deps);
   if (m.state === "RELEASED" && m.paypal_capture_id && m.capture_status !== "COMPLETED") {
     const cap = await deps.paypal.payments.getCapturedPayment({ captureId: m.paypal_capture_id }).catch((e) => {
       throw classify(e);
@@ -470,6 +527,14 @@ async function syncMilestoneLocked(milestoneId: string, deps: Deps): Promise<Mil
     if (cap.status && cap.status !== m.capture_status) {
       m = await updateFields(db(), m.id, { capture_status: cap.status });
       await audit(db(), { milestoneId: m.id, actor: "paypal", event: "capture:status", paypalId: m.paypal_capture_id, detail: { status: cap.status } });
+    }
+    // A pending capture may report its fee only once it completes. Re-split while no payout is claimed
+    // (a claimed payout's amount is fixed: its replay must send the same body).
+    const paypalFeeCents = paypalFeeOf(cap.sellerReceivableBreakdown);
+    if (paypalFeeCents != null && paypalFeeCents !== m.paypal_fee_cents && m.captured_cents != null && !(await liveClaim(db(), m.id, "payout"))) {
+      const { split, set } = splitFor(m, m.captured_cents, paypalFeeCents);
+      m = await updateFields(db(), m.id, set);
+      await audit(db(), { milestoneId: m.id, actor: "paypal", event: "capture:fee", paypalId: m.paypal_capture_id, detail: { ...split, paypalFeeSource: "paypal" } });
     }
   }
   if (m.state === "RELEASED" && m.capture_status === "COMPLETED" && !m.paypal_payout_batch_id) {
@@ -506,7 +571,7 @@ function resumeAction(m: Milestone, claim: Claim, deps: Deps): Promise<Milestone
   if (claim.action === "create_order") return createHold(m.id, deps);
   if (claim.action === "authorize") return authorizeHold(m.id, m.paypal_order_id ?? "", deps);
   if (claim.action === "capture" || claim.action === "payout") return releaseFunds(m.id, deps);
-  if (claim.action === "void") return cancelHold(m.id, deps);
+  if (claim.action === "void") return cancelHold(m.id, deps, { actor: "system" }); // settles the claim whoever started it
   return refreshHold(m.id, deps); // reauthorize_<n>: n is unchanged until the result is recorded
 }
 
@@ -516,6 +581,6 @@ export const fundWithTestCard = (id: string, deps: Deps = defaultDeps(), opts: {
 export const authorizeHold = (id: string, orderId: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}) =>
   withMilestoneLock(id, () => authorizeHoldLocked(id, orderId, deps, opts));
 export const releaseFunds = (id: string, deps: Deps = defaultDeps(), opts: { mock?: string } = {}) => withMilestoneLock(id, () => releaseFundsLocked(id, deps, opts));
-export const cancelHold = (id: string, deps: Deps = defaultDeps()) => withMilestoneLock(id, () => cancelHoldLocked(id, deps));
+export const cancelHold = (id: string, deps: Deps = defaultDeps(), opts: CancelOpts = {}) => withMilestoneLock(id, () => cancelHoldLocked(id, deps, opts));
 export const refreshHold = (id: string, deps: Deps = defaultDeps()) => withMilestoneLock(id, () => refreshHoldLocked(id, deps));
 export const syncMilestone = (id: string, deps: Deps = defaultDeps()) => withMilestoneLock(id, () => syncMilestoneLocked(id, deps));

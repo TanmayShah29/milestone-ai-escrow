@@ -96,6 +96,43 @@ html:root[data-theme="dark"]:not(.b-nothing) {
   font-size: 1.2em;
 }
 
+/* A live hold about to lapse (within 3 days of its expiry). */
+.b-gantt-task.ms-expiring {
+  outline: 2px solid var(--failed);
+  outline-offset: 1px;
+}
+
+/* Hold bands behind a milestone's phase rows (GanttView holdBands, drawn by the Indicators feature). They
+   are decoration: no pointer events, so the bars stay grabbable and the bars' own tooltips win. The honor
+   period reads as a firmer tint than the rest of the hold's life; the expiry is a 2px rule in --held
+   (≥5:1 on panel in both themes), --failed when the hold is about to lapse. */
+.b-gantt .b-indicator.ms-band,
+.b-gantt .b-indicator.ms-band-expiry {
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 0;
+}
+.b-gantt .b-indicator.ms-band-honor {
+  background: var(--held-field);
+}
+.b-gantt .b-indicator.ms-band-hold {
+  background: color-mix(in oklab, var(--held-field) 40%, transparent);
+}
+.b-gantt .b-indicator.ms-band-expiry {
+  width: 2px !important;
+  margin-inline-start: -1px;
+  background: var(--held);
+}
+.b-gantt .b-indicator.ms-band-expiry.ms-band-danger {
+  background: var(--failed);
+}
+
+/* Drag preview: the pushed bars slide with the Work bar's end (GanttView); the links are redrawn on drop,
+   so they fade while they point at the old positions. */
+.b-gantt.ms-previewing .b-sch-dependency {
+  opacity: 0.25;
+}
+
 /* Phone: the grid is narrowed to the names (GanttView); tighten the tree so the names stay readable. */
 @media (max-width: 639px) {
   .b-gantt {

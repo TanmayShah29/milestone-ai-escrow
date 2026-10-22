@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { AiBusy, AiUnreadable, generateJson, type ModelCall } from "@/lib/ai/client";
-import { checkTests, type TestChecker } from "@/lib/contract/testcheck";
+import { checkTests, staticCheckTests, type TestChecker } from "@/lib/contract/testcheck";
 import { db, withMilestoneLock } from "@/lib/db";
 import { audit, getMilestone, transition, updateFields, type Milestone } from "@/lib/milestones/repo";
 import { InvariantViolation } from "@/lib/errors";
+import { feeBps } from "@/lib/money/amounts";
+import { objectionWindowMs } from "@/lib/review/deadlines";
 
 // The contract both sides sign: acceptance criteria, compiled into tests where they can be checked by
 // code, fingerprinted by a SHA-256 hash over everything that matters. The AI drafts it; people edit and
@@ -30,11 +32,27 @@ export const criterionSchema = z.object({
   // (see testcheck.ts): it wouldn't catch missing work. Part of the hash; signing is refused while set.
   testWeak: z.literal(true).optional(),
   weakReason: z.string().max(300).optional(),
+  // Set by the server (never trusted from input) when the client wrote or changed this test, so the
+  // worker knows it wasn't AI-written. Part of the hash; absent for AI-written tests, so hashes of terms
+  // saved before this label existed don't change.
+  testBy: z.literal("client").optional(),
 });
+
+/**
+ * The deal's money and time rules, written by the server whenever terms are saved (never trusted from
+ * input), so the fingerprint covers them: the platform fee and how long the client has to object after a
+ * pass. Terms saved before this existed have no policy, and hash exactly as before.
+ */
+export const policySchema = z.object({
+  platformFeeBps: z.number().int().min(0).max(10_000),
+  objectionWindowSeconds: z.number().int().min(0),
+});
+export type Policy = z.infer<typeof policySchema>;
 
 const termsObject = z.object({
   criteria: z.array(criterionSchema).min(1).max(8),
   testCommand: z.string().trim().max(200).optional(),
+  policy: policySchema.optional(),
 });
 
 function refineTerms(t: z.infer<typeof termsObject>, ctx: z.RefinementCtx) {
@@ -126,6 +144,17 @@ export function contractDocument(m: Pick<Milestone, "id" | "title" | "amount_cen
     repo: m.repo ?? null,
     criteria: terms.criteria,
     testCommand: terms.testCommand ?? null,
+    // Left out (not null) when absent, so contracts signed before the policy existed keep their hash.
+    ...(terms.policy ? { policy: terms.policy } : {}),
+  };
+}
+
+/** The policy in force now, for terms being saved now. */
+// The due date is not part of it: the client may still move it after signing (see setDueDate), within the hold.
+export function currentPolicy(): Policy {
+  return {
+    platformFeeBps: feeBps(),
+    objectionWindowSeconds: Math.round(objectionWindowMs() / 1000),
   };
 }
 
@@ -175,20 +204,28 @@ export function signBlocker(terms: Terms): string | undefined {
  * its text changed and its test code didn't, and stays stale until its test code changes or it stops
  * being checked by a test. A weak test stays weak on the same terms. Whatever flag the input carried is
  * ignored. A criterion switched to AI review drops its test: CI runs every test present, so a leftover one
- * would still decide it.
+ * would still decide it. A test whose code is new or changed is the client's (testBy), and editTerms
+ * checks it; unchanged code keeps its author.
  */
 export function markStale(prev: Terms | undefined, next: Terms): Terms {
   const before = new Map((prev?.criteria ?? []).map((c) => [c.id, c]));
   return {
     ...next,
+    policy: prev?.policy, // server-written (saveTerms); whatever the input carried is ignored
     // Undefined keys are left out of both the stored JSON and the hash (see canonical).
     criteria: next.criteria.map((input) => {
-      const c: Criterion = { ...input, testStale: undefined, testWeak: undefined, weakReason: undefined, ...(input.check === "review" ? { test: undefined } : {}) };
+      const c: Criterion = { ...input, testStale: undefined, testWeak: undefined, weakReason: undefined, testBy: undefined, ...(input.check === "review" ? { test: undefined } : {}) };
       const p = before.get(c.id);
       const sameCode = !!p?.test && !!c.test && p.test.code === c.test.code;
       const stale = c.check === "test" && sameCode && (p!.text !== c.text || !!p!.testStale);
       const weak = c.check === "test" && sameCode && !!p!.testWeak;
-      return { ...c, ...(stale ? { testStale: true as const } : {}), ...(weak ? { testWeak: true as const, weakReason: p!.weakReason } : {}) };
+      const byClient = c.check === "test" && !!c.test && (sameCode ? p!.testBy === "client" : true);
+      return {
+        ...c,
+        ...(stale ? { testStale: true as const } : {}),
+        ...(weak ? { testWeak: true as const, weakReason: p!.weakReason } : {}),
+        ...(byClient ? { testBy: "client" as const } : {}),
+      };
     }),
   };
 }
@@ -269,7 +306,7 @@ async function regenerateStale(m: Milestone, current: Terms, meta: { repo: strin
   const criteria = current.criteria.map((c) => {
     const code = c.testStale || c.testWeak ? fresh.get(c.id) : undefined;
     if (!code || !c.test) return c;
-    return { ...c, testStale: undefined, testWeak: undefined, weakReason: undefined, test: { path: c.test.path, code } };
+    return { ...c, testStale: undefined, testWeak: undefined, weakReason: undefined, testBy: undefined, test: { path: c.test.path, code } };
   });
   const rewritten = criteria.filter((c, i) => c !== current.criteria[i]).map((c) => c.id);
   if (!rewritten.length) throw new InvariantViolation("the AI didn't return any of the tests; try again, or switch those criteria to AI review");
@@ -304,7 +341,7 @@ async function makeTestsBite(m: Milestone, terms: Terms, ids: string[], stack: s
     try {
       const { value } = await generateJson({ purpose: "fix_tests", system: FIX_SYSTEM, prompt, schema: regenSchema, maxOutputTokens: 6000, ...(call ? { call } : {}) });
       const fresh = new Map(value.tests.filter((t) => problems.has(t.id)).map((t) => [t.id, t.code]));
-      criteria = criteria.map((c) => (fresh.has(c.id) && c.test ? { ...c, test: { path: c.test.path, code: fresh.get(c.id)! } } : c));
+      criteria = criteria.map((c) => (fresh.has(c.id) && c.test ? { ...c, testBy: undefined, test: { path: c.test.path, code: fresh.get(c.id)! } } : c));
       const recheck = await check(toCheck(criteria.filter((c) => fresh.has(c.id))));
       problems = new Map([...[...problems].filter(([id]) => !fresh.has(id)), ...recheck]);
     } catch (err) {
@@ -322,8 +359,12 @@ async function makeTestsBite(m: Milestone, terms: Terms, ids: string[], stack: s
 
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 
-/** Client edits (terms and, optionally, the repository). Any change clears both signatures. */
-export async function editTerms(milestoneId: string, raw: unknown, opts: { repo?: string } = {}): Promise<Milestone> {
+/**
+ * Client edits (terms and, optionally, the repository). Any change clears both signatures. A test the
+ * client wrote or changed runs against an empty implementation like an AI-written one (testcheck.ts, no
+ * AI call): one that wouldn't catch missing work is flagged testWeak, which blocks signing.
+ */
+export async function editTerms(milestoneId: string, raw: unknown, opts: { repo?: string; check?: TestChecker } = {}): Promise<Milestone> {
   const parsed = termsSchema.safeParse(raw);
   if (!parsed.success) throw new InvariantViolation(`terms are not valid: ${parsed.error.issues[0]?.message ?? "invalid"}`);
   const repo = opts.repo?.trim();
@@ -331,7 +372,8 @@ export async function editTerms(milestoneId: string, raw: unknown, opts: { repo?
   return withMilestoneLock(milestoneId, async () => {
     const m = await getMilestone(milestoneId);
     if (m.state !== "DRAFT") throw new InvariantViolation("terms are locked once both sides agree");
-    const terms = markStale(storedTerms(m), parsed.data);
+    const prev = storedTerms(m);
+    const terms = await checkClientTests(prev, markStale(prev, parsed.data), opts.check ?? staticCheckTests);
     const nextRepo = repo === undefined ? m.repo : repo || null;
     // Suggestions the client still has (they add or dismiss them); new ones can't be slipped in this way.
     const kept = (raw as { suggestions?: unknown }).suggestions;
@@ -345,12 +387,28 @@ export async function editTerms(milestoneId: string, raw: unknown, opts: { repo?
   });
 }
 
+/** Check the tests whose code this edit added or changed (statically: client code is never run here). */
+async function checkClientTests(prev: Terms | undefined, terms: Terms, check: TestChecker): Promise<Terms> {
+  const before = new Map((prev?.criteria ?? []).map((c) => [c.id, c.test?.code]));
+  const changed = terms.criteria.filter((c) => c.check === "test" && c.test && before.get(c.id) !== c.test.code);
+  if (!changed.length) return terms;
+  const problems = await check(changed.map((c) => ({ id: c.id, path: c.test!.path, code: c.test!.code })));
+  return {
+    ...terms,
+    criteria: terms.criteria.map((c) => {
+      const p = problems.get(c.id);
+      return p ? { ...c, testWeak: true as const, weakReason: p.reason.slice(0, 300) } : c;
+    }),
+  };
+}
+
 /** The stored JSON: the terms, plus the suggestions (which the hash never covers: see contractDocument). */
 function withSuggestions(terms: Terms, suggestions: Suggestion[]) {
   return suggestions.length ? { ...terms, suggestions } : terms;
 }
 
-async function saveTerms(m: Milestone, terms: Terms, meta: { repo: string | null; stack: string | null; model: string | null; actor: "ai" | "client"; suggestions: Suggestion[] }): Promise<Milestone> {
+async function saveTerms(m: Milestone, saved: Terms, meta: { repo: string | null; stack: string | null; model: string | null; actor: "ai" | "client"; suggestions: Suggestion[] }): Promise<Milestone> {
+  const terms: Terms = { ...saved, policy: currentPolicy() };
   const withRepo = { ...m, repo: meta.repo };
   const hash = hashTerms(withRepo, terms);
   const out = await updateFields(db(), m.id, {
@@ -366,11 +424,12 @@ async function saveTerms(m: Milestone, terms: Terms, meta: { repo: string | null
   });
   const stale = staleCriteria(terms).map((c) => c.id);
   const weak = weakCriteria(terms).map((c) => c.id);
+  const byClient = terms.criteria.filter((c) => c.testBy === "client").map((c) => c.id);
   await audit(db(), {
     milestoneId: m.id,
     actor: meta.actor,
     event: meta.actor === "ai" ? "terms:drafted" : "terms:edited",
-    detail: { hash, model: meta.model, criteria: terms.criteria.length, ...(stale.length ? { staleTests: stale } : {}), ...(weak.length ? { weakTests: weak } : {}) },
+    detail: { hash, model: meta.model, criteria: terms.criteria.length, ...(stale.length ? { staleTests: stale } : {}), ...(weak.length ? { weakTests: weak } : {}), ...(byClient.length ? { clientTests: byClient } : {}) },
   });
   return out;
 }

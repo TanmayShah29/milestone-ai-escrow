@@ -140,7 +140,10 @@ describe("access control", () => {
     assert.equal((await call(milestone.id, "edit-terms")).status, 401);
     assert.equal((await callWith("edit-terms", workerToken, { terms: sampleTerms })).status, 403); // only the client writes terms
     assert.equal((await callWith("edit-terms", "mct_forged", { terms: sampleTerms })).status, 403);
-    const edited = await callWith("edit-terms", clientToken, { terms: sampleTerms });
+    // The client's own test is checked on save (contract/terms.ts): sampleTerms' no-op would be flagged weak.
+    const bites = "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { theme } from '../src/theme.ts';\ntest('c1', () => { assert.equal(theme(), 'dark'); });";
+    const signable = { ...sampleTerms, criteria: sampleTerms.criteria.map((c) => (c.test ? { ...c, test: { ...c.test, code: bites } } : c)) };
+    const edited = await callWith("edit-terms", clientToken, { terms: signable });
     assert.equal(edited.status, 200);
     const hash = (await edited.json()).milestone.criteria_hash;
     assert.equal((await call(milestone.id, "cancel", workerToken)).status, 403); // only the client cancels
