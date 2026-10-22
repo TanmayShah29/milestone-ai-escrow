@@ -32,6 +32,8 @@ export function toHttp(err: unknown): NextResponse {
     console.warn("paypal refused", status, issue, debugId);
     if (status === 401 || status === 403) return json(502, { error: "PayPal rejected our credentials" });
     if (status === 429) return json(503, { error: "PayPal is busy right now. Try again in a minute." });
+    if (issue === "PAYER_CANNOT_PAY")
+      return json(422, { error: "PayPal's sandbox declined this test card. Click fund again to try another test card, or fund with a PayPal login.", issue, debugId });
     if (status && status >= 400 && status < 500) return json(status, { error: reason ?? "PayPal rejected the request", issue, debugId });
     return json(502, { error: "PayPal had a problem. Try again.", debugId });
   }

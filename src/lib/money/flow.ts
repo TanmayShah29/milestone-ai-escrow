@@ -180,13 +180,22 @@ async function createHoldLocked(milestoneId: string, deps: Deps, opts: { mock?: 
 // authorized hold directly, with no buyer login (verified Oct 21). The judge-friendly path. It shares the
 // create_order claim with the wallet path, so a milestone can never be funded twice.
 
-const SANDBOX_TEST_CARD = {
-  name: "Milestone Demo Client",
-  number: "4005519200000004", // PayPal's published sandbox test Visa; sandbox-only (client.ts refuses live)
-  expiry: "2030-12",
-  securityCode: "123",
-  billingAddress: { addressLine1: "1 Main St", adminArea2: "San Jose", adminArea1: "CA", postalCode: "95131", countryCode: "US" },
-};
+// PayPal's published sandbox test Visas; sandbox-only (client.ts refuses live). The sandbox's risk checks
+// start refusing a number that is used heavily (PAYER_CANNOT_PAY on ...0004, verified Oct 22), so each
+// attempt uses the next card. The card comes from the claim's attempt number, so a re-read with the same
+// PayPal-Request-Id always sends the same body.
+const SANDBOX_TEST_CARD_NUMBERS = ["4012888888881881", "4111111111111111", "4005519200000004"];
+
+function sandboxTestCard(requestId: string) {
+  const attempt = Number(requestId.split("_").pop()) || 1;
+  return {
+    name: "Milestone Demo Client",
+    number: SANDBOX_TEST_CARD_NUMBERS[(attempt - 1) % SANDBOX_TEST_CARD_NUMBERS.length]!,
+    expiry: "2030-12",
+    securityCode: "123",
+    billingAddress: { addressLine1: "1 Main St", adminArea2: "San Jose", adminArea1: "CA", postalCode: "95131", countryCode: "US" },
+  };
+}
 
 type CardHold = { orderId: string; auth: AuthInfo };
 
@@ -203,7 +212,7 @@ async function fundWithTestCardLocked(milestoneId: string, deps: Deps, opts: { m
       body: {
         intent: CheckoutPaymentIntent.Authorize,
         purchaseUnits: [{ amount: { currencyCode: "USD", value: centsToValue(m.amount_cents) }, customId: m.id, description: `${m.title.slice(0, 100)} · terms ${m.criteria_hash!.slice(0, 12)}` }],
-        paymentSource: { card: SANDBOX_TEST_CARD },
+        paymentSource: { card: sandboxTestCard(requestId) },
       },
     });
     const auth = readAuthorization(o.purchaseUnits);
