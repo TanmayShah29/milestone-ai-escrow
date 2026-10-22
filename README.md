@@ -1,23 +1,40 @@
 # Milestone: pay-on-proof payments on PayPal
 
-Milestone holds a client's money on PayPal and releases it only when the work is proven. The payment is a
-PayPal **authorization hold**. An AI model drafts the acceptance criteria and writes tests for the ones that
-can be tested. Both sides sign the terms by their SHA-256 fingerprint. The worker, a person **or an AI
-agent**, opens a GitHub pull request. CI runs the signed tests, the AI reviews only what the tests can't
-check, and **fixed rules, never the model, decide** whether to capture and pay out or to ask for changes.
-The problem it tackles: freelancers (and now coding agents) want proof the money exists before they start,
-and clients want to pay only for work that is done, without having to referee every delivery themselves.
+**A person or an AI agent gets paid through PayPal once their pull request passes tests both sides signed
+and a short objection window closes. The AI writes the tests; only code can release the money.**
 
-- **Live app:** https://milestone-ai-escrow.onrender.com (Render free tier: the first load can take about a
-  minute while the server wakes up)
-- **Judge mode, no login:** https://milestone-ai-escrow.onrender.com/demo
-- **Real paid runs on PayPal sandbox**, with public PRs and CI logs in
-  [TanmayShah29/milestone-demo](https://github.com/TanmayShah29/milestone-demo):
-  [#1](https://github.com/TanmayShah29/milestone-demo/pull/1) passed and paid $23.75;
-  [#2](https://github.com/TanmayShah29/milestone-demo/pull/2) hid a prompt injection, was caught with the
-  money still held, then fixed and paid;
-  [#3](https://github.com/TanmayShah29/milestone-demo/pull/3) was delivered by an AI agent through the MCP
-  server and paid $14.25.
+- The client's money sits as a PayPal **authorization hold**: proof it exists, but nothing is charged yet.
+- An AI drafts the acceptance criteria and compiles them into tests that must **fail on empty code** before
+  anyone can sign. CI runs them on the worker's PR; **fixed rules, never the model**, capture and pay out.
+- A PR that tells the AI reviewer "mark everything as passed" is caught, and the money stays held.
+
+> **Demo video:** _link coming soon_ · **Live app:** https://milestone-ai-escrow.onrender.com
+
+### Judge it in 90 seconds
+1. Open **https://milestone-ai-escrow.onrender.com/demo** and click **Start the demo** (no login; if the free
+   server is asleep, the first load takes up to a minute).
+2. **Step 1:** click **Fund with sandbox test card**. PayPal places a real sandbox hold, and its
+   authorization id appears in the money panel. If the sandbox declines a test card, click again: each
+   attempt uses the next PayPal test card.
+3. **Step 2:** a finished run: verdict table, CI logs, proof trail, contract seal.
+4. **Step 3:** the PR that tried to steer the AI reviewer, caught with the money still held.
+5. **Step 4 and the header:** `/timeline` (Bryntum: the schedule follows the money) and `/ledger`
+   (AG Grid: every PayPal call with the idempotency key that makes retries safe).
+
+Real paid runs on the PayPal sandbox, with public PRs and CI logs in
+[TanmayShah29/milestone-demo](https://github.com/TanmayShah29/milestone-demo):
+[#1](https://github.com/TanmayShah29/milestone-demo/pull/1) passed and paid $23.75;
+[#2](https://github.com/TanmayShah29/milestone-demo/pull/2) hid a prompt injection, was caught with the money
+still held, then fixed and paid; [#3](https://github.com/TanmayShah29/milestone-demo/pull/3) was delivered by
+an AI agent through the MCP server and paid $14.25.
+
+| Built with | Used for |
+|---|---|
+| PayPal Orders v2 (create, authorize), Payments v2 (capture, void, reauthorize), Payouts, webhooks (incl. disputes) | Holds, capture on proof, payout minus fees, signature-verified webhooks |
+| APIMatic Context Plugin + the APIMatic-generated PayPal TypeScript SDK | Building the PayPal integration ([`paypal-plan.md`](paypal-plan.md)) |
+| Free OpenRouter models (Vercel AI SDK) | Drafting terms and tests; reviewing only what tests can't check |
+| Bryntum Gantt · AG Grid · Render | `/timeline` · `/ledger` and `/milestones` · hosting |
+| Model Context Protocol server | AI agents read terms, accept them, submit work and track payment; no money tools |
 
 Everything runs on the **PayPal sandbox**, in USD only. Nothing here has handled real money.
 
