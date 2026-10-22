@@ -161,7 +161,7 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
           <p className="text-ink-2">The AI turns your brief into criteria and writes a test for each one code can check. You can edit everything before signing.</p>
           <button disabled={!!busy} onClick={() => run("draft", "draft-terms", { repo, stack })} className="mt-3 inline-flex items-center gap-2 rounded-md bg-accent px-3 py-2 font-medium text-accent-ink disabled:opacity-50">
             <Sparkles className="size-4" aria-hidden="true" />
-            {busy === "draft" ? "Drafting… (about 20 seconds)" : "Draft the terms with AI"}
+            {busy === "draft" ? "Drafting… (up to a minute)" : "Draft the terms with AI"}
           </button>
         </div>
       )}

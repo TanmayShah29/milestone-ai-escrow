@@ -30,7 +30,7 @@ export default function NewMilestone() {
     const id = b.milestone.id as string;
     // This browser is the client's: the worker token is kept only to show as the link to send them.
     rememberLink({ id, title: b.milestone.title, client: b.clientToken, shareWorker: b.workerToken });
-    setBusy("Drafting your terms with AI… (about 20 seconds)");
+    setBusy("Drafting your terms with AI… (up to a minute on the free models)");
     const d = await fetch(`/api/milestones/${id}/draft-terms`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-milestone-token": b.clientToken },

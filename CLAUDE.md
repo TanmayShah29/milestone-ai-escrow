@@ -19,7 +19,15 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - Render MCP is connected: workspace "Tanmay's workspace" (`tea-dbbntvgn74is73daou00`). No services yet as of Oct 20. $50 hackathon credit applied: keep to a small web service + small Postgres
 - Next.js + TypeScript (app router), Postgres, deployed on **Render** (web service + Render Workflows for agent jobs)
 - AI: **free models on OpenRouter** through the Vercel AI SDK with the OpenRouter provider. The model is an env setting (`AI_MODEL`), never hard-coded. Key is in `.env` as `OPENROUTER_API_KEY`
-  - Tested Oct 20: `AI_MODEL=minimax/minimax-m3.1-flash:free` (fast, 1M context, valid JSON). `AI_MODEL_FALLBACK=nvidia/nemotron-3.5-super-vl:free` (a reasoning model: set max_tokens to 1500 or more, or the content comes back empty). `AI_MODEL_FALLBACK_2=google/gemma-4-31b-it:free` (often 429s from a shared upstream pool). `nvidia/nemotron-3-super-120b-a12b:free` is broken (provider 404)
+  - **Current, set on Render Oct 22:**
+    - `AI_MODEL=dots-studio/dots-3-note-preview:free`: about 30 s for a JSON draft, structured outputs. A live draft took 58 s.
+    - `AI_MODEL_FALLBACK=nvidia/nemotron-3.5-super-vl:free`: a reasoning model; give it max_tokens ≥ 1500.
+    - `AI_MODEL_FALLBACK_2=nvidia/nemotron-3.5-lightning:free`: about 70 s; a reasoning model that needs a large token budget.
+  - **No longer usable (Oct 22):**
+    - `minimax/minimax-m3.1-flash:free` was removed from OpenRouter.
+    - `google/gemma-4-*:free` often returns 429.
+    - `nvidia/nemotron-3-super-120b-a12b:free` returns provider 404.
+  - Reasoning models return empty content when max_tokens is small (2000 was not enough).
   - The AI client must fall through primary, then fallback, then fallback 2 on 404, 429 or 5xx. Check with `./scripts/ai-check.sh`
   - Free limit: 20 requests/min and **50/day** (1,000/day once $10 of credit has ever been bought). Keep a review to **1–2 calls**: pass the diff, files and CI status in the prompt, then one structured-output call. Don't build multi-step tool loops
   - Cache verdicts in the DB, and never re-review the same commit. Handle 429s with a clear "AI busy, retry" state, not a crash
