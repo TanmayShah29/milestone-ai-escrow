@@ -80,7 +80,8 @@ describe("decision policy (code, not the model)", () => {
     const tooBig = "the pull request changes 412 files; only the first 300 can be scanned";
     assert.ok(isProceduralFlag(untrusted) && isProceduralFlag(tooBig));
     assert.ok(!isProceduralFlag(".github/workflows/milestone.yml") && !isProceduralFlag("src/x.ts (process.exit)"));
-    assert.equal(humanTimeoutOutcome(null).outcome, "release");
+    assert.equal(humanTimeoutOutcome(null).outcome, "wait", "no verdict on record: money never moves on missing evidence");
+    assert.equal(humanTimeoutOutcome({} as Verdict).outcome, "wait", "a malformed verdict fails closed");
     assert.equal(humanTimeoutOutcome({ ...base, criteria: [c("C1", "unclear", 0.4)] }).outcome, "release");
     assert.equal(humanTimeoutOutcome({ ...base, tampering: ["acceptance/c1.test.ts"] }).outcome, "void");
     assert.equal(humanTimeoutOutcome({ ...base, tampering: ["src/x.ts (process.exit)", untrusted] }).outcome, "void");
