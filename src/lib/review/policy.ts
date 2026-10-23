@@ -59,11 +59,14 @@ export type TimeoutOutcome = "release" | "void" | "wait";
  *  - only procedural flags (untrusted CI, a PR too large to scan) → "release" if every must-have still
  *    passed with full confidence, otherwise "wait" (nothing automatic; the client must decide);
  *  - no flags (low confidence, an unfinished second review) → "release" to the worker.
- * No verdict on record counts as unflagged.
+ * No verdict on record, or one that isn't shaped like a verdict, → "wait": money never moves on missing evidence.
  */
 type TimeoutInput = Pick<Verdict, "tampering" | "injection"> & { criteria: (Pick<CriterionVerdict, "verdict" | "confidence"> & { kind: string })[] };
 
 export function humanTimeoutOutcome(v: TimeoutInput | null | undefined): { outcome: TimeoutOutcome; reasons: string[] } {
+  if (!v || !Array.isArray(v.tampering) || !Array.isArray(v.criteria) || typeof v.injection?.detected !== "boolean") {
+    return { outcome: "wait", reasons: ["there is no usable review verdict on record, so the rules can't settle this on their own"] };
+  }
   const tampering = (v?.tampering ?? []).filter((t) => !isProceduralFlag(t));
   const procedural = (v?.tampering ?? []).filter(isProceduralFlag);
   if (tampering.length || v?.injection?.detected) return { outcome: "void", reasons: flags({ tampering, injection: v?.injection ?? { detected: false, quotes: [] } }) };

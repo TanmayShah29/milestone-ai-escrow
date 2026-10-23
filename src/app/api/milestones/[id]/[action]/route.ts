@@ -1,11 +1,10 @@
 import { platformFrom, publicMilestone, requireRole, roleOn, type Role } from "@/lib/auth";
-import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
 import { cancelHold, createHold, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
 import { draftTerms, editTerms, signTerms } from "@/lib/contract/terms";
 import { setDueDate } from "@/lib/schedule";
 import { humanDecision, objectToRelease, submitDeliverable, tick } from "@/lib/review/run";
-import { getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
+import { getMilestone, type Milestone } from "@/lib/milestones/repo";
 import { DAY, HOUR, hit, ipKey, tooMany, waitText, type Rule } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
@@ -28,7 +27,6 @@ const ALLOWED: Record<string, Role[]> = {
   release: ["client"],
   "refresh-hold": ["client"],
   schedule: ["client"],
-  "dev-pass": ["client"],
   sync: ["client", "worker"],
 };
 
@@ -62,8 +60,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
     const mock = devActionsAllowed() && typeof body.mock === "string" ? body.mock : undefined;
     const opts = mock ? { mock } : {};
     const done = (m: Milestone, extra: Record<string, unknown> = {}) => json(200, { milestone: publicMilestone(m), ...extra });
-    // Non-money transitions take the same per-milestone lock as the money flow.
-    const locked = (fn: (m: Milestone) => Promise<Milestone>) => withMilestoneLock(id, async () => fn(await getMilestone(id)));
 
     switch (action) {
       case "draft-terms": {
@@ -90,10 +86,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
         return done(await humanDecision(id, false, { reason: str(body.reason) }));
       case "object":
         return done(await objectToRelease(id, { reason: str(body.reason) }));
-      case "dev-pass":
-        // Stand-in for the verifier + decision policy (build step 2).
-        if (!devActionsAllowed()) return json(404, { error: "not found" });
-        return done(await locked((m) => transition(db(), m, "PASSED", "dev", {}, { event: "review:dev-pass" })));
       case "fund-card":
         return done(await fundWithTestCard(id, undefined, opts));
       case "schedule": {

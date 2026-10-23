@@ -26,11 +26,12 @@ const TRANSITIONS: Record<MilestoneState, readonly MilestoneState[]> = {
   DRAFT: ["AGREED", "CANCELLED"],
   AGREED: ["FUNDED", "CANCELLED"],
   FUNDED: ["SUBMITTED", "CANCELLED"],
-  SUBMITTED: ["IN_REVIEW", "PASSED", "CANCELLED"], // PASSED directly only via the dev route until the reviewer exists
+  SUBMITTED: ["IN_REVIEW", "CANCELLED"],
   IN_REVIEW: ["CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CANCELLED"],
   CHANGES_REQUESTED: ["SUBMITTED", "CANCELLED"],
   HUMAN_CHECK: ["PASSED", "CHANGES_REQUESTED", "CANCELLED"],
-  PASSED: ["RELEASED", "CONTESTED", "CANCELLED"],
+  // CHANGES_REQUESTED: commits were pushed after approval, so the approved commit is not what would be paid (review/run.ts).
+  PASSED: ["RELEASED", "CONTESTED", "CHANGES_REQUESTED", "CANCELLED"],
   // One second review on the same commit: pass → back to PASSED with release_after = objection + 72 h
   // (releaseFunds only runs from PASSED); fail → CHANGES_REQUESTED; no usable verdict in 72 h → HUMAN_CHECK.
   CONTESTED: ["PASSED", "CHANGES_REQUESTED", "HUMAN_CHECK", "CANCELLED"],

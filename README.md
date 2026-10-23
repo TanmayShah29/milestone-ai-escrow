@@ -241,7 +241,7 @@ Environment (names only; see `.env.example`):
 | `GITHUB_TOKEN` | Optional fine-grained token (PR read/write on the target repo) for higher rate limits and verdict comments. Public check runs need no Checks permission |
 | `OBJECTION_WINDOW_SECONDS` (default 120), `OBJECTION_RELEASE_SECONDS` (default 259200 = 72 h) | Review clocks |
 | `RATE_LIMIT_SALT` | Optional secret. IPs in the rate-limit table are HMAC-SHA256 hashed with it (plain salted SHA-256 if unset) |
-| `ALLOW_DEV_ACTIONS` | Dev-only routes and forced PayPal errors. Leave it unset in production |
+| `ALLOW_DEV_ACTIONS` | Forced PayPal errors (`PayPal-Mock-Response`) for local testing. Leave it unset in production |
 
 Tests use a separate database. PayPal, GitHub and the AI are faked at the `fetch` layer:
 
