@@ -153,5 +153,5 @@ Recording checklist:
 - Check `/api/status` shows `busy: false` before the AI draft; if a model is flaky, switch `AI_MODEL` on Render.
 - The live objection window is 2 minutes, so the release happens on camera; cut the wait.
 - Say "sandbox" whenever money appears. No copyrighted music.
-- Bryntum license applied, so no watermark in the timeline shot.
+- Bryntum still runs on the public trial package, so the timeline shows a watermark. If the hackathon license arrives before recording, apply it first; otherwise keep the watermark and don't claim it's licensed.
 - After recording: paste the YouTube link here and at the top of the README.
