@@ -3,6 +3,7 @@ import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
 import { cancelHold, createHold, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
 import { draftTerms, editTerms, signTerms } from "@/lib/contract/terms";
+import { eraseMilestone, rotateLink } from "@/lib/privacy";
 import { setDueDate } from "@/lib/schedule";
 import { humanDecision, objectToRelease, submitDeliverable, tick } from "@/lib/review/run";
 import { getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
@@ -30,6 +31,8 @@ const ALLOWED: Record<string, Role[]> = {
   schedule: ["client"],
   "dev-pass": ["client"],
   sync: ["client", "worker"],
+  "rotate-link": ["client", "worker"],
+  erase: ["client"],
 };
 
 // AI drafting spends the shared free-model budget: 5 per hour per IP (platform keys are exempt) and
@@ -106,6 +109,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
         return done(await cancelHold(id));
       case "refresh-hold":
         return done(await refreshHold(id));
+      case "rotate-link": {
+        // The new link's token is returned once, like at creation; the old one stops working now.
+        const which = body.link === "client" || body.link === "worker" ? body.link : role;
+        const { milestone, token } = await rotateLink(id, role, which);
+        return done(milestone, { link: which, token });
+      }
+      case "erase":
+        return done(await eraseMilestone(id, "client"));
       default:
         return done(await syncMilestone(id));
     }

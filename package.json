@@ -41,6 +41,13 @@
     "tsx": "^4.23.15",
     "typescript": "^5"
   },
+  "overrides": {
+    "@fastify/busboy": "^3.2.4",
+    "undici": "^7.16.0",
+    "next": {
+      "postcss": "^8.5.31"
+    }
+  },
   "engines": {
     "node": ">=22 <23"
   }

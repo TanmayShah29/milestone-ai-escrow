@@ -52,6 +52,8 @@ export type Milestone = {
   after_milestone_id: string | null;
   client_token_hash: string | null;
   worker_token_hash: string | null;
+  closed_at: Date | null;
+  erased_at: Date | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -140,6 +142,12 @@ export async function transition(
   assertTransition(m.state, to);
   // Every entry into HUMAN_CHECK restarts its clock (the post-objection decision deadline runs from here).
   if (to === "HUMAN_CHECK" && !("human_check_at" in set)) set = { ...set, human_check_at: new Date() };
+  // Closing starts the clocks for link expiry and retention (src/lib/privacy.ts).
+  // Reopening (a dispute on a paid milestone) stops them until it closes again.
+  if (!("closed_at" in set)) {
+    const closing = to === "PAID_OUT" || to === "CANCELLED";
+    if (closing || m.state === "PAID_OUT" || m.state === "CANCELLED") set = { ...set, closed_at: closing ? new Date() : null };
+  }
   const cols = Object.keys(set);
   const assignments = cols.map((c, i) => `${c} = $${i + 3}`);
   const { rows } = await q.query<Milestone>(

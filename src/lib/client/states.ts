@@ -30,6 +30,12 @@ export type MilestoneView = Record<string, unknown> & {
   human_check_at?: string | null;
   due_at?: string | null;
   paypal_authorization_id?: string | null;
+  worker_signed_at?: string | null;
+  /** When a closed milestone's links stop working. */
+  links_expire_at?: string | null;
+  /** Why the client can't erase this milestone's data yet; null when they can. */
+  erase_blocker?: string | null;
+  erased_at?: string | null;
 };
 
 export const usd = (cents: number | null | undefined) => (cents == null ? "—" : `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);

@@ -63,6 +63,26 @@ export function rememberLink(entry: Held): void {
   save(waiting ? { ...waiting, title: entry.title || waiting.title } : entry);
 }
 
+/**
+ * Replace a token this browser holds with one the server just reissued. It skips the pending check: the
+ * server issued it in answer to this browser's own request, and the old token no longer works.
+ */
+export function replaceLink(id: string, patch: Partial<Pick<Held, "client" | "worker" | "shareWorker">>): void {
+  const prev = stored().find((h) => h.id === id);
+  pending.delete(id);
+  save({ ...prev, id, title: prev?.title ?? "", ...patch });
+}
+
+/** Drop every link this browser holds for a milestone (after its data was erased). */
+export function forgetLink(id: string): void {
+  pending.delete(id);
+  try {
+    localStorage.setItem(KEY, JSON.stringify(stored().filter((h) => h.id !== id)));
+  } catch {
+    // storage unavailable: nothing was saved
+  }
+}
+
 /** Save a pending link for this milestone once the server has accepted it. */
 export function confirmLink(id: string): void {
   const p = pending.get(id);

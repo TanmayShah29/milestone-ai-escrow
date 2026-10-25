@@ -5,6 +5,7 @@ import { stateLabel } from "@/lib/client/states";
 import { InvariantViolation } from "@/lib/errors";
 import { audit, getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
 import { cancelHold, defaultDeps, releaseFunds, syncMilestone, type Deps } from "@/lib/money/flow";
+import { privacySweep } from "@/lib/privacy";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
 import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs } from "./deadlines";
 import { decide, humanTimeoutOutcome, type Verdict } from "./policy";
@@ -364,6 +365,13 @@ export async function tickAll(deps: ReviewDeps = defaultReviewDeps()): Promise<{
     } catch (err) {
       out.push({ id, error: String(err).slice(0, 200) });
     }
+  }
+  // Retention: prune old webhook payloads, erase closed milestones past their dispute window.
+  try {
+    const { erased } = await privacySweep();
+    for (const id of erased) out.push({ id, state: "erased" });
+  } catch (err) {
+    console.warn(`privacy sweep failed: ${String(err).slice(0, 200)}`);
   }
   return out;
 }

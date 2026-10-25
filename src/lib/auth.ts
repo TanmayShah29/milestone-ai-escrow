@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { db } from "@/lib/db";
 import type { Milestone } from "@/lib/milestones/repo";
 import { feeSchedule } from "@/lib/money/amounts";
+import { eraseBlocker, linksExpireAt } from "@/lib/privacy";
 import { humanCheckDeadline } from "@/lib/review/deadlines";
 
 // Who may do what. A milestone has a client link and a worker link (capability tokens); a platform
@@ -52,9 +53,12 @@ export async function roleOn(req: Request, m: Milestone): Promise<Role> {
     throw new Forbidden("This API key didn't create this milestone.");
   }
   const h = hashToken(t);
-  if (sameHash(h, m.client_token_hash)) return "client";
-  if (sameHash(h, m.worker_token_hash)) return "worker";
-  throw new Forbidden("This link doesn't open this milestone.");
+  const role: Role | undefined = sameHash(h, m.client_token_hash) ? "client" : sameHash(h, m.worker_token_hash) ? "worker" : undefined;
+  if (!role) throw new Forbidden("This link doesn't open this milestone.");
+  // Links stop working 30 days after the milestone closes (a platform's API key keeps access).
+  const expires = linksExpireAt(m);
+  if (expires && expires.getTime() <= Date.now()) throw new Forbidden(`This milestone closed, and its links expired on ${expires.toISOString().slice(0, 10)}.`);
+  return role;
 }
 
 export function requireRole(role: Role, ...allowed: Role[]): void {
@@ -70,5 +74,5 @@ export function publicMilestone(m: Milestone) {
   const { client_token_hash: _c, worker_token_hash: _w, ...rest } = m;
   void _c;
   void _w;
-  return { ...rest, objection_reason: m.objection_reason ?? null, changes_reason: m.changes_reason ?? null, decide_by: humanCheckDeadline(m), fee_schedule: feeSchedule() };
+  return { ...rest, objection_reason: m.objection_reason ?? null, changes_reason: m.changes_reason ?? null, decide_by: humanCheckDeadline(m), fee_schedule: feeSchedule(), links_expire_at: linksExpireAt(m) ?? null, erase_blocker: eraseBlocker(m) ?? null };
 }

@@ -5,9 +5,10 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { DemoTour } from "@/components/DemoTour";
 import { MoneyTracker, StatusPill } from "@/components/MoneyTracker";
-import { clientLinkUrl, discardLink, linkFor, markLinkSaved, needsLinkReminder, rememberLink, workerShareToken } from "@/lib/client/links";
+import { clientLinkUrl, discardLink, forgetLink, linkFor, markLinkSaved, needsLinkReminder, rememberLink, replaceLink, workerShareToken } from "@/lib/client/links";
 import { STATUS, cancelledAt, usd, type MilestoneView, type Role } from "@/lib/client/states";
 import { ContractSeal } from "./ContractSeal";
+import { LinksCard } from "./LinksCard";
 import { MoneyPanel } from "./MoneyPanel";
 import { NextStep } from "./NextStep";
 import { ProofTrail, type AuditRow } from "./ProofTrail";
@@ -102,6 +103,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   const [saveLink, setSaveLink] = useState<string>();
   const [ready, setReady] = useState(false);
   const [denied, setDenied] = useState(false);
+  const [erased, setErased] = useState(false);
   const token = as ? tokens[as] : undefined;
 
   // A shared link arrives as ?t=<token>: remember it, then drop it from the address bar.
@@ -165,6 +167,33 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
     },
     [id, authed, load],
   );
+
+  // For actions whose response the caller needs (a reissued link's token).
+  const post = useCallback(
+    async (action: string, body: Record<string, unknown>) => {
+      const r = await fetch(`/api/milestones/${id}/${action}`, authed({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));
+      return { ok: r.ok, body: ((await r.json().catch(() => ({}))) ?? {}) as Record<string, unknown> };
+    },
+    [id, authed],
+  );
+
+  const reissued = (which: Role, t: string) => {
+    const held = linkFor(id);
+    // A client reissuing the worker link holds it only to hand over, unless this browser acts as both (judge mode).
+    const patch = which === "client" ? { client: t } : as === "worker" || held?.worker ? { worker: t } : { shareWorker: t };
+    replaceLink(id, patch);
+    setTokens((prev) => ({ ...prev, ...(which === "client" ? { client: t } : "worker" in patch ? { worker: t } : {}) }));
+    if ("shareWorker" in patch || which === "worker") setShareToken(t);
+    if (which === "client") setSaveLink(undefined); // the new link is shown in the card
+  };
+
+  if (erased) {
+    return (
+      <LinkCard title="This milestone's personal data was erased">
+        Its title, brief, emails, terms, deliverable and reviews are gone, and its links no longer work. The PayPal record and audit trail stay, as the payment rules require.
+      </LinkCard>
+    );
+  }
 
   if (ready && !as) {
     return (
@@ -271,6 +300,16 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
             <MoneyPanel m={m} />
             <ContractSeal m={m} />
           </div>
+          <LinksCard
+            m={m}
+            role={as!}
+            post={post}
+            onReissued={reissued}
+            onErased={() => {
+              forgetLink(id);
+              setErased(true);
+            }}
+          />
           <p className="text-xs leading-relaxed text-ink-3">
             The AI never moves money. It drafts terms and reviews what tests can&apos;t check; fixed rules decide, and only those rules capture or release the PayPal hold. PayPal sandbox; no real money.
           </p>
