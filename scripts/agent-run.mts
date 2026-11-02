@@ -18,7 +18,7 @@ const REPO = "TanmayShah29/milestone-demo";
 const WORKER_EMAIL = "sb-puo47p53461265@personal.example.com";
 const MONEY_WORDS = /fund|capture|release|void|refund|payout|pay_|authorize/i;
 const MAX_ATTEMPTS = 3;
-const TOOL_TIMEOUT_MS = 300_000;
+const TOOL_TIMEOUT_MS = 430_000;
 const POLL_MS = 15_000;
 const WAIT_LIMIT_MS = 15 * 60_000;
 

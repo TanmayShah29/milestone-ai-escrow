@@ -29,7 +29,7 @@ type Criterion = {
 };
 type Suggestion = { text: string; why: string };
 type Policy = { platformFeeBps: number; objectionWindowSeconds: number };
-type AttackResult = { status: "survived" | "hardened" | "breakable"; fake: { path: string; code: string }[]; explanation: string; caughtBy: string[]; terms: string };
+type AttackResult = { status: "survived" | "hardened" | "breakable" | "inconclusive"; hardenIssue?: string; fake: { path: string; code: string }[]; explanation: string; caughtBy: string[]; terms: string };
 type Terms = { criteria: Criterion[]; testCommand?: string; suggestions?: Suggestion[]; policy?: Policy; attack?: AttackResult };
 
 const DEFAULT_TEST_COMMAND = "node --test 'acceptance/*.test.ts'";
@@ -292,10 +292,10 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
       )}
 
       {draft && (attack || attacking || canAttack) && (
-        <div aria-live="polite" className={`mt-4 rounded-md border p-3 text-sm ${attack?.status === "survived" ? "border-paid/40 bg-paid-field" : attack ? "border-held/40 bg-held-field" : "border-dashed border-rule-strong"}`}>
+        <div aria-live="polite" className={`mt-4 rounded-md border p-3 text-sm ${attack?.status === "survived" ? "border-paid/40 bg-paid-field" : attack && attack.status !== "inconclusive" ? "border-held/40 bg-held-field" : "border-dashed border-rule-strong"}`}>
           <h3 className="inline-flex items-center gap-1.5 font-medium text-ink">
             <Swords className="size-4" aria-hidden="true" />
-            {attacking ? "An AI is trying to cheat these tests…" : attack?.status === "survived" ? "Survived an AI attack" : attack?.status === "hardened" ? "An AI beat the first draft, so the tests were strengthened" : attack ? "An AI beat these tests" : "Attack these tests"}
+            {attacking ? "An AI is trying to cheat these tests…" : attack?.status === "survived" ? "Survived an AI attack" : attack?.status === "hardened" ? "An AI beat the first draft, so the tests were strengthened" : attack?.status === "breakable" ? "An AI beat these tests" : attack ? "The attack didn't finish" : "Attack these tests"}
           </h3>
           {attacking && <p className="mt-1 text-xs text-ink-2">It writes fake code, and we run it against the must-have tests. This can take a minute or two. You don&apos;t have to wait to read the terms.</p>}
           {!attacking && !attack && <p className="mt-1 text-xs text-ink-2">A second AI writes fake code and tries to pass the must-have tests without doing the work.</p>}
@@ -303,8 +303,8 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
             <p className="mt-1 text-xs text-ink">
               {attack.status === "survived" && (attack.caughtBy.length ? `It wrote fake code, and ${attack.caughtBy.join(", ")} caught it when we ran it.` : "It couldn't produce fake code that passed the tests and was still wrong.")}
               {attack.status === "hardened" && `Its fake code passed every must-have test. The tests were rewritten, and when we ran the same fake again, ${attack.caughtBy.join(", ")} caught it. Read the new tests before signing.`}
-              {attack.status === "breakable" && "Its fake code passes every must-have test, and the tests couldn't be strengthened automatically. You can still sign, but this code could get paid. Consider redrafting or tightening the tests."}{" "}
-              This only catches cheats the AI thought of.
+              {attack.status === "breakable" && `Its fake code passes every must-have test, and the tests couldn't be strengthened automatically${attack.hardenIssue ? ` (${attack.hardenIssue})` : ""}. You can still sign, but this code could get paid. Attack again, redraft, or tighten the tests.`}
+              {attack.status === "inconclusive" ? "Its code crashed or ran out of time, so this says nothing about your tests. Try again." : " This only catches cheats the AI thought of."}
             </p>
           )}
           {attack && (

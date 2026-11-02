@@ -100,6 +100,37 @@ describe("attackTerms", () => {
     assert.equal(termsSchema.parse(m.criteria).criteria[0]!.test!.code, WEAK);
   });
 
+  it("never counts a crash as caught: fake code that doesn't load or imports the wrong file is inconclusive", async () => {
+    const before = await draft();
+    const syntax = await attackTerms(before, { call: scripted(attackReply("export function double(n: number: number {")) });
+    assert.equal(storedAttack(syntax)!.status, "inconclusive");
+    assert.deepEqual(storedAttack(syntax)!.caughtBy, []);
+    const wrongFile = await draft();
+    const reply = JSON.stringify({ files: [{ path: "src/other.ts", code: HARDCODED }], explanation: "x", probe: PROBE });
+    assert.equal(storedAttack(await attackTerms(wrongFile, { call: scripted(reply) }))!.status, "inconclusive");
+    const missingExport = await draft();
+    assert.equal(storedAttack(await attackTerms(missingExport, { call: scripted(attackReply("export const other = 1;")) }))!.status, "inconclusive");
+    const hang = await draft();
+    assert.equal(storedAttack(await attackTerms(hang, { call: scripted(attackReply(HARDCODED)), run: async () => "error" }))!.status, "inconclusive");
+  });
+
+  it("counts a wrong answer and a test expecting a throw as really failing, not as crashes", async () => {
+    const id = await draft(terms(test1("  assert.throws(() => double(NaN), RangeError);")));
+    const m = await attackTerms(id, { call: scripted(attackReply(HARDCODED)) });
+    assert.equal(storedAttack(m)!.status, "survived");
+    assert.deepEqual(storedAttack(m)!.caughtBy, ["C1"]);
+  });
+
+  it("says why it couldn't harden", async () => {
+    const id = await draft();
+    const m = await attackTerms(id, { call: scripted(attackReply(HARDCODED), "not json at all", "nope", "nope", "nope", "nope", "nope") });
+    assert.equal(storedAttack(m)!.status, "breakable");
+    assert.match(storedAttack(m)!.hardenIssue!, /couldn't rewrite/);
+    const weak = await draft();
+    const n = await attackTerms(weak, { call: scripted(attackReply(HARDCODED), JSON.stringify({ tests: [{ id: "C1", code: WEAK }] })) });
+    assert.match(storedAttack(n)!.hardenIssue!, /still passes/);
+  });
+
   it("keeps the attack out of the fingerprint and the public contract", async () => {
     const id = await draft(terms(STRONG));
     const m = await attackTerms(id, { call: scripted(attackReply(HARDCODED)) });

@@ -31,7 +31,7 @@ async function call(method: "GET" | "POST", path: string, token?: string, body?:
     method,
     headers: { "content-type": "application/json", ...(token ? { "x-milestone-token": token } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(180_000), // the free demo host can take ~1 min to wake
+    signal: AbortSignal.timeout(420_000), // the free host can take ~1 min to wake, and an AI attack can try every model twice
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error(String(json.error ?? `HTTP ${res.status}`));

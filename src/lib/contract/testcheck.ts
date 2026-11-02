@@ -267,10 +267,25 @@ export async function checkOne(test: TestToCheck): Promise<TestProblem | undefin
   return { kind: "weak", reason: "passes against an empty implementation, so it doesn't check the requirement" };
 }
 
-/** Does the test pass against these files? Same sandbox as above; the files are AI-written too (attack.ts). */
-export async function passesWith(test: TestToCheck, files: SourceFile[]): Promise<boolean> {
+export type FakeOutcome = "pass" | "fail" | "error";
+
+/**
+ * Run the test against these files, in the same sandbox (they're AI-written too: attack.ts). "fail" means an
+ * assertion really failed. "error" means the run says nothing about the code: it didn't load, timed out, hit the
+ * sandbox, or a file the test imports isn't among `files`, so a stub would have failed in its place.
+ */
+export async function runAgainst(test: TestToCheck, files: SourceFile[]): Promise<FakeOutcome> {
+  const given = new Set(files.map((f) => posix.normalize(f.path)));
+  for (const { specifier } of parseImports(test.code)) {
+    if (specifier.startsWith(".") && !given.has(posix.normalize(posix.join(posix.dirname(test.path), specifier)))) return "error";
+  }
   const out = await runTest(test, files);
-  return !isProblem(out) && !out.killed && out.results.length > 0 && out.results.every((r) => r.ok);
+  if (isProblem(out) || out.killed || !out.results.length) return "error";
+  const fails = out.results.filter((r) => !r.ok);
+  if (!fails.length) return "pass";
+  // A broken program, not a wrong answer: errors no assertion or a thrown RangeError would raise on their own.
+  const broken = fails.some((r) => r.code === "ERR_ACCESS_DENIED" || ["EvalError", "ReferenceError", "SyntaxError"].includes(r.name ?? ""));
+  return broken ? "error" : "fail";
 }
 
 /** Check every test (a few at a time). Infrastructure failures leave a test unjudged rather than blocking. */

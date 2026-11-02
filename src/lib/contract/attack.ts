@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { generateJson, type ModelCall } from "@/lib/ai/client";
-import { checkTests, passesWith, type SourceFile, type TestChecker, type TestToCheck } from "@/lib/contract/testcheck";
+import { checkTests, runAgainst, type FakeOutcome, type SourceFile, type TestChecker, type TestToCheck } from "@/lib/contract/testcheck";
 import { saveTerms, storedSuggestions, storedTerms, type Criterion, type Terms } from "@/lib/contract/terms";
 import { db, withMilestoneLock } from "@/lib/db";
 import { InvariantViolation } from "@/lib/errors";
@@ -13,7 +13,8 @@ import { audit, getMilestone, updateFields, type Milestone } from "@/lib/milesto
 //   - the probe passes too: the attacker wrote real code, not a cheat, so it found nothing: survived;
 //   - every must-have test passes and the probe fails: the attacker won. One more AI call strengthens the
 //     tests, and they're kept only if the same fake now fails and they still fail on empty code ("hardened").
-//     Otherwise the terms stay as they were and both sides see the fake ("breakable"), which never blocks signing.
+//     Otherwise the terms stay as they were and both sides see the fake ("breakable"), which never blocks signing;
+//   - a run that crashed or timed out says nothing, so it never counts as caught ("inconclusive").
 // This only catches cheats the AI thinks of. The result sits beside the terms, outside the fingerprint. The AI
 // never touches money here either: this runs before funding and can only change unsigned-for tests.
 
@@ -29,7 +30,8 @@ const attackReply = z.object({
 const hardenReply = z.object({ tests: z.array(z.object({ id: z.string(), code: z.string().min(10).max(6000) })).max(8) });
 
 export const attackSchema = z.object({
-  status: z.enum(["survived", "hardened", "breakable"]),
+  status: z.enum(["survived", "hardened", "breakable", "inconclusive"]),
+  hardenIssue: z.string().optional(), // why a fake that won couldn't be fixed automatically
   fake: z.array(fileSchema),
   explanation: z.string(),
   caughtBy: z.array(z.string()), // the must-have tests that failed on the fake (after hardening, when hardened)
@@ -38,7 +40,7 @@ export const attackSchema = z.object({
   terms: z.string(), // the fingerprint this result is about: edited terms no longer show it
 });
 export type Attack = z.infer<typeof attackSchema>;
-export type FakeRunner = (test: TestToCheck, files: SourceFile[]) => Promise<boolean>;
+export type FakeRunner = (test: TestToCheck, files: SourceFile[]) => Promise<FakeOutcome>;
 
 const ATTACK_SYSTEM = `You test a paid software contract for loopholes by playing a cheating worker. The worker is paid when the acceptance tests below pass, so they want to pass them without doing the work.
 Write the laziest fake implementation that passes every test while NOT doing what the criteria say: hardcode the tested inputs, special-case them, use a lookup table. Imports in the tests show which file paths and exports you must provide. Plain TypeScript with type annotations only: no enums or namespaces, no imports of packages, no network or file access, nothing that interferes with the test runner or the process.
@@ -59,13 +61,19 @@ export function storedAttack(m: Pick<Milestone, "criteria">): Attack | undefined
   return parsed.success ? parsed.data.attack : undefined;
 }
 
-async function failing(tests: TestToCheck[], files: SourceFile[], run: FakeRunner): Promise<string[]> {
-  const passed = await Promise.all(tests.map((t) => run(t, files)));
-  return tests.filter((_, i) => !passed[i]).map((t) => t.id);
+/** One at a time: on a small server, parallel runs could hit the sandbox's time limit and look like crashes. */
+async function outcomes(tests: TestToCheck[], files: SourceFile[], run: FakeRunner): Promise<{ failed: string[]; errored: boolean }> {
+  const failed: string[] = [];
+  for (const t of tests) {
+    const out = await run(t, files);
+    if (out === "error") return { failed, errored: true };
+    if (out === "fail") failed.push(t.id);
+  }
+  return { failed, errored: false };
 }
 
 export async function attackTerms(milestoneId: string, deps: { call?: ModelCall; run?: FakeRunner; check?: TestChecker } = {}): Promise<Milestone> {
-  const run = deps.run ?? passesWith;
+  const run = deps.run ?? runAgainst;
   const check = deps.check ?? checkTests;
   const m = await getMilestone(milestoneId);
   const terms = storedTerms(m);
@@ -88,13 +96,17 @@ export async function attackTerms(milestoneId: string, deps: { call?: ModelCall;
   const fake = value.files;
   const tests = tested.map(asTest);
   const base = { fake, explanation: value.explanation, model, at: new Date().toISOString() };
-  const caught = await failing(tests, fake, run);
-  const probeFailed = !(await run({ id: "probe", path: "acceptance/probe.test.ts", code: value.probe }, fake));
-  if (caught.length || !probeFailed) return record(m.id, m.criteria_hash, { ...base, status: "survived", caughtBy: caught });
+  const first = await outcomes(tests, fake, run);
+  if (first.errored) return record(m.id, m.criteria_hash, { ...base, status: "inconclusive", caughtBy: [] });
+  if (first.failed.length) return record(m.id, m.criteria_hash, { ...base, status: "survived", caughtBy: first.failed });
+  const probe = await run({ id: "probe", path: "acceptance/probe.test.ts", code: value.probe }, fake);
+  if (probe === "error") return record(m.id, m.criteria_hash, { ...base, status: "inconclusive", caughtBy: [] });
+  if (probe === "pass") return record(m.id, m.criteria_hash, { ...base, status: "survived", caughtBy: [] }); // real code, not a cheat
 
   // The attacker won. One attempt at stronger tests, accepted only if they beat this fake and still bite.
   let hardened: Terms | undefined;
   let after: string[] = [];
+  let hardenIssue = "the AI couldn't rewrite the tests just now";
   try {
     const { value: fix } = await generateJson({
       purpose: "harden_tests",
@@ -108,15 +120,22 @@ export async function attackTerms(milestoneId: string, deps: { call?: ModelCall;
     const next = terms.criteria.map((c) => (tested.includes(c) && fresh.has(c.id) ? { ...c, test: { path: c.test!.path, code: fresh.get(c.id)! } } : c));
     const candidate = targets({ ...terms, criteria: next }).map(asTest);
     const weak = await check(candidate);
-    after = await failing(candidate, fake, run);
-    if (after.length && !weak.size) hardened = { ...terms, criteria: next };
+    const second = await outcomes(candidate, fake, run);
+    after = second.failed;
+    if (weak.size) hardenIssue = `the rewritten ${[...weak.keys()].join(", ")} wouldn't work as a check: ${[...weak.values()][0]!.reason}`.slice(0, 300);
+    else if (second.errored) hardenIssue = "the rewritten tests couldn't be run against the fake";
+    else if (!after.length) hardenIssue = "the fake still passes the rewritten tests";
+    else hardened = { ...terms, criteria: next };
   } catch (err) {
     console.warn(`hardening tests failed: ${String(err).slice(0, 200)}`);
   }
   return withMilestoneLock(m.id, async () => {
     const now = await getMilestone(m.id);
     if (now.state !== "DRAFT" || now.criteria_hash !== m.criteria_hash) return now; // edited meanwhile: this result is stale
-    if (!hardened) return record(m.id, m.criteria_hash!, { ...base, status: "breakable", caughtBy: [] });
+    if (!hardened) {
+      console.warn(`attack on ${m.id}: fake won, not hardened: ${hardenIssue}`);
+      return record(m.id, m.criteria_hash!, { ...base, status: "breakable", caughtBy: [], hardenIssue });
+    }
     const saved = await saveTerms(now, hardened, { repo: now.repo, stack: now.stack, model: now.criteria_model, actor: "ai", suggestions: storedSuggestions(now) });
     return record(m.id, saved.criteria_hash!, { ...base, status: "hardened", caughtBy: after });
   });
@@ -128,7 +147,7 @@ async function record(id: string, hash: string, result: Omit<Attack, "terms">): 
     if (now.state !== "DRAFT" || now.criteria_hash !== hash) return now;
     const attack: Attack = { ...result, terms: hash };
     const out = await updateFields(db(), id, { criteria: JSON.stringify({ ...(now.criteria as object), attack }) });
-    await audit(db(), { milestoneId: id, actor: "ai", event: "terms:attacked", detail: { status: attack.status, caughtBy: attack.caughtBy, model: attack.model, hash } });
+    await audit(db(), { milestoneId: id, actor: "ai", event: "terms:attacked", detail: { status: attack.status, caughtBy: attack.caughtBy, model: attack.model, hash, ...(attack.hardenIssue ? { hardenIssue: attack.hardenIssue } : {}) } });
     return out;
   });
 }
