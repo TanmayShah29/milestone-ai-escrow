@@ -8,25 +8,44 @@ export function db(): Pool {
   if (!g.__milestonePool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set");
-    g.__milestonePool = new Pool({ connectionString: url, max: 8 }) // each locked action holds one connection for the lock;
+    g.__milestonePool = new Pool({ connectionString: url, max: 8 }); // each locked action holds one connection for the lock
+    // Neon drops idle connections. Without a listener, node-postgres's error event would crash the whole process.
+    g.__milestonePool.on("error", dropped);
   }
   return g.__milestonePool;
+}
+
+const dropped = (err: Error) => console.warn(`database connection dropped: ${String(err).slice(0, 200)}`);
+
+/** A connection this code holds: the same crash applies to it while it's checked out. */
+async function checkOut(): Promise<PoolClient & { done: (err?: Error) => void }> {
+  const c = await db().connect();
+  c.on("error", dropped);
+  return Object.assign(c, {
+    done: (err?: Error) => {
+      c.removeListener("error", dropped);
+      c.release(err);
+    },
+  });
 }
 
 export type Queryable = Pick<Pool, "query"> | PoolClient;
 
 export async function tx<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
-  const c = await db().connect();
+  const c = await checkOut();
+  let broken: Error | undefined;
   try {
     await c.query("begin");
     const out = await fn(c);
     await c.query("commit");
     return out;
   } catch (err) {
-    await c.query("rollback");
+    await c.query("rollback").catch((e: Error) => {
+      broken = e;
+    });
     throw err;
   } finally {
-    c.release();
+    c.done(broken);
   }
 }
 
@@ -46,7 +65,7 @@ const held = new AsyncLocalStorage<Set<string>>();
 export async function withMilestoneLock<T>(milestoneId: string, fn: () => Promise<T>): Promise<T> {
   const mine = held.getStore();
   if (mine?.has(milestoneId)) return fn();
-  const c = await db().connect();
+  const c = await checkOut();
   let broken: Error | undefined;
   try {
     await c.query("begin");
@@ -60,6 +79,6 @@ export async function withMilestoneLock<T>(milestoneId: string, fn: () => Promis
       broken = err;
       console.warn(`milestone lock commit failed: ${String(err).slice(0, 200)}`);
     });
-    c.release(broken);
+    c.done(broken);
   }
 }

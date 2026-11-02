@@ -35,6 +35,20 @@ describe("withMilestoneLock", () => {
     assert.equal(rows[0].n, 0);
   });
 
+  it("survives the database dropping connections, idle or held, and frees the lock (Neon does this)", async () => {
+    await db().query("select 1");
+    await db().query("select pg_terminate_backend(pid) from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid()");
+    await sleep(100);
+    const out = await withMilestoneLock("lock-test-e", async () => {
+      await db().query("select pg_terminate_backend(pid) from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid()");
+      await sleep(100);
+      return "finished";
+    });
+    assert.equal(out, "finished");
+    assert.equal(await withMilestoneLock("lock-test-e", async () => "free"), "free");
+    assert.equal((await db().query("select 1 as n")).rows[0].n, 1);
+  });
+
   it("releases the lock when the action throws, and passes the error on", async () => {
     await assert.rejects(withMilestoneLock("lock-test-d", async () => { throw new Error("boom"); }), /boom/);
     assert.equal(await withMilestoneLock("lock-test-d", async () => "free"), "free");
