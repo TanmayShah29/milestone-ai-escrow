@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { canonical, contractDocument, hashTerms, markStale, termsSchema, type Terms } from "@/lib/contract/terms";
 import { subjectiveWords, termsWarnings } from "@/lib/contract/warnings";
+import { objectionWindowMs, signedObjectionMs } from "@/lib/review/deadlines";
 import { clientLinkUrl, markLinkSaved, needsLinkReminder } from "@/lib/client/links";
 import { writeDemo } from "@/lib/client/demo";
 
@@ -28,6 +29,32 @@ describe("contract document", () => {
     const stored = JSON.parse(JSON.stringify({ ...old, suggestions: [{ text: "empty input returns empty", why: "edge" }] }));
     assert.equal(hashTerms(m, termsSchema.parse(stored)), OLD_HASH);
     assert.equal("policy" in contractDocument(m, old), false);
+  });
+
+  it("version 2 commits to the worker's email without publishing it or the salt", () => {
+    const emailSalt = "ab".repeat(16);
+    const v2 = { ...old, emailSalt };
+    const text = canonical(contractDocument(m, v2));
+    assert.equal(contractDocument(m, v2).version, 2);
+    assert.equal(text.includes(m.freelancer_email), false);
+    assert.equal(text.includes(emailSalt), false);
+    assert.notEqual(hashTerms({ ...m, freelancer_email: "other@example.com" }, v2), hashTerms(m, v2));
+    assert.notEqual(hashTerms(m, { ...old, emailSalt: "cd".repeat(16) }), hashTerms(m, v2));
+    assert.equal(contractDocument(m, old).version, 1);
+    assert.match(canonical(contractDocument(m, old)), /"workerPayPalEmail":"w@example.com"/);
+  });
+
+  it("an edit keeps the stored salt and ignores one sent by the client", () => {
+    const stored = "ab".repeat(16);
+    assert.equal(markStale({ ...old, emailSalt: stored }, { ...old, emailSalt: "cd".repeat(16) }).emailSalt, stored);
+    assert.equal(markStale(old, { ...old, emailSalt: "cd".repeat(16) }).emailSalt, undefined);
+  });
+
+  it("the signed objection window wins over the env; older contracts use the env", () => {
+    assert.equal(signedObjectionMs({ policy: { objectionWindowSeconds: 172_800 } }), 172_800_000);
+    assert.equal(signedObjectionMs({ policy: { objectionWindowSeconds: 0 } }), 0);
+    assert.equal(signedObjectionMs({ criteria: [] }), objectionWindowMs());
+    assert.equal(signedObjectionMs(null), objectionWindowMs());
   });
 
   it("a policy written at save time is in the document and the hash", () => {

@@ -485,8 +485,9 @@ async function refreshHoldLocked(milestoneId: string, deps: Deps): Promise<Miles
     },
     paypalId: (r) => r.authorizationId,
     record: async (c, r) => {
-      const out = await updateFields(c, m.id, { paypal_authorization_id: r.authorizationId, authorization_expires_at: r.expiresAt, reauth_count: m.reauth_count + 1 });
-      await audit(c, { milestoneId: m.id, actor: "system", event: "hold:reauthorized", paypalId: r.authorizationId, detail: { previous: authorizationId } });
+      // The stored expiry stays: the 29 days run from the original authorization, whatever date this response gives.
+      const out = await updateFields(c, m.id, { paypal_authorization_id: r.authorizationId, authorization_expires_at: m.authorization_expires_at ?? r.expiresAt, reauth_count: m.reauth_count + 1 });
+      await audit(c, { milestoneId: m.id, actor: "system", event: "hold:reauthorized", paypalId: r.authorizationId, detail: { previous: authorizationId, paypalExpiry: r.expiresAt } });
       return out;
     },
   });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
 import { authorizedOrder, claimsFor, connectionDrop, depsWith, jsonResponse, resetDb, seedMilestone, stubFetch } from "./helpers";
 import { db } from "@/lib/db";
-import { authorizeHold, cancelHold, createHold, InvariantViolation, releaseFunds } from "@/lib/money/flow";
+import { authorizeHold, cancelHold, createHold, InvariantViolation, refreshHold, releaseFunds } from "@/lib/money/flow";
 import { claimAction } from "@/lib/money/claims";
 import { getMilestone } from "@/lib/milestones/repo";
 import { PaypalFailure } from "@/lib/paypal/errors";
@@ -225,6 +225,19 @@ describe("releaseFunds", () => {
     assert.equal(m.paypal_payout_batch_id, "BATCH1");
     assert.equal(stub.calls.length, 2);
     assert.equal(stub.calls[0]!.request.headers.get("paypal-request-id"), stub.calls[1]!.request.headers.get("paypal-request-id"));
+  });
+});
+
+describe("refreshHold", () => {
+  it("swaps in the new authorization id but keeps the original expiry, whatever date PayPal returns", async () => {
+    const original = new Date("2026-11-20T00:00:00Z");
+    const id = await seedMilestone({ state: "FUNDED", paypal_order_id: "ORDER1", paypal_authorization_id: "AUTH1", authorization_expires_at: original });
+    const stub = stubFetch(async () => jsonResponse(201, { id: "AUTH2", status: "CREATED", expiration_time: "2026-12-25T00:00:00Z" }));
+    const m = await refreshHold(id, depsWith(stub));
+
+    assert.equal(m.paypal_authorization_id, "AUTH2");
+    assert.equal(m.reauth_count, 1);
+    assert.equal(new Date(m.authorization_expires_at!).getTime(), original.getTime());
   });
 });
 

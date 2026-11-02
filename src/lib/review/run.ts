@@ -7,7 +7,7 @@ import { audit, getMilestone, transition, type Milestone } from "@/lib/milestone
 import { cancelHold, defaultDeps, releaseFunds, syncMilestone, type Deps } from "@/lib/money/flow";
 import { privacySweep } from "@/lib/privacy";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
-import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs } from "./deadlines";
+import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs, signedObjectionMs } from "./deadlines";
 import { decide, humanTimeoutOutcome, type Verdict } from "./policy";
 import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifiers";
 
@@ -111,7 +111,7 @@ async function applyDecision(m: Milestone, verdict: Verdict, deps: ReviewDeps, f
     );
   }
   // A failed review speaks for itself: drop any earlier client reason so the worker doesn't read a stale one.
-  const set = decision === "PASSED" ? { release_after: new Date(Date.now() + objectionWindowMs()) } : decision === "CHANGES_REQUESTED" ? { changes_reason: null } : {};
+  const set = decision === "PASSED" ? { release_after: new Date(Date.now() + signedObjectionMs(m.criteria)) } : decision === "CHANGES_REQUESTED" ? { changes_reason: null } : {};
   const out = await transition(db(), m, decision, "system", set, {
     event: `review:${decision.toLowerCase()}`,
     detail: { reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, injection: verdict.injection.detected, tampering: verdict.tampering },
@@ -151,7 +151,7 @@ export async function humanDecision(milestoneId: string, approve: boolean, opts:
   return withMilestoneLock(milestoneId, async () => {
     const m = await getMilestone(milestoneId);
     if (m.state !== "HUMAN_CHECK") throw new InvariantViolation("There's nothing waiting for your decision right now.");
-    if (approve) return transition(db(), m, "PASSED", "client", { release_after: new Date(Date.now() + objectionWindowMs()) }, { event: "review:approved_by_client" });
+    if (approve) return transition(db(), m, "PASSED", "client", { release_after: new Date(Date.now() + signedObjectionMs(m.criteria)) }, { event: "review:approved_by_client" });
     const reason = cleanReason(opts.reason);
     if (m.contested_at && !reason) throw new InvariantViolation("You already objected once, so say what needs to change. The worker reads it before fixing the work.");
     return transition(db(), m, "CHANGES_REQUESTED", "client", { changes_reason: reason }, { event: "review:changes_by_client", detail: { reason, afterObjection: !!m.contested_at } });

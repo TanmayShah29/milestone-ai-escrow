@@ -141,8 +141,8 @@ The integration contract (every field, header and error arm, looked up in the SD
 
 Free models on [OpenRouter](https://openrouter.ai), called through the Vercel AI SDK
 (`@openrouter/ai-sdk-provider`). The model is configuration, never code: `AI_MODEL`, `AI_MODEL_FALLBACK`,
-`AI_MODEL_FALLBACK_2` (currently `minimax/minimax-m3.1-flash:free`, `nvidia/nemotron-3.5-super-vl:free`,
-`google/gemma-4-31b-it:free`). On a 404, 429, 5xx or unreadable output, a call falls through to the next
+`AI_MODEL_FALLBACK_2` (currently `dots-studio/dots-3-note-preview:free`, `nvidia/nemotron-3.5-super-vl:free`,
+`nvidia/nemotron-3.5-lightning:free`). On a 404, 429, 5xx or unreadable output, a call falls through to the next
 model.
 
 | Step | Calls | What the model does |

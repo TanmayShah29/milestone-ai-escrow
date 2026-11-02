@@ -118,7 +118,7 @@ Claude Code.
 
 | Tool / model | How it was used |
 |---|---|
-| `minimax/minimax-m3.1-flash:free` (primary), `nvidia/nemotron-3.5-super-vl:free`, `google/gemma-4-31b-it:free` (fallbacks), via OpenRouter + Vercel AI SDK | In the product: drafting criteria and tests, regenerating a test, fixing a test that doesn't bite, reviewing untested criteria, and the post-objection second review on a different model. One structured call per task. The model's output is a recommendation; fixed code decides |
+| `dots-studio/dots-3-note-preview:free` (primary), `nvidia/nemotron-3.5-super-vl:free`, `nvidia/nemotron-3.5-lightning:free` (fallbacks), via OpenRouter + Vercel AI SDK | In the product: drafting criteria and tests, regenerating a test, fixing a test that doesn't bite, reviewing untested criteria, and the post-objection second review on a different model. One structured call per task. The model's output is a recommendation; fixed code decides |
 | PayPal APIs (sandbox) | Orders v2 (AUTHORIZE), authorizations (capture, void, reauthorize), Payouts, webhook signature verification, dispute webhooks |
 | APIMatic Context Plugin + the APIMatic-generated PayPal TypeScript SDK | Used in Claude Code while building the PayPal integration. Every SDK signature, header and error arm in `paypal-plan.md` was looked up in the SDK map |
 | Claude Code (Anthropic) | Development assistant for writing code, tests, docs and audits. Not part of the running product |

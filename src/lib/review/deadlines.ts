@@ -1,10 +1,16 @@
 import type { Milestone } from "@/lib/milestones/repo";
 
-// The review clocks, from env. Pure (no db, no AI), so the API's public view can use them too.
+// The review clocks, from the signed terms or env. Pure (no db, no AI), so the API's public view can use them too.
 
 export function objectionWindowMs(): number {
   const s = Number(process.env.OBJECTION_WINDOW_SECONDS ?? "120"); // 48 h in production; 2 min for the demo
   return (Number.isFinite(s) && s >= 0 ? s : 120) * 1000;
+}
+
+/** The window both sides signed (the terms' policy). Contracts signed before the policy existed use the env. */
+export function signedObjectionMs(criteria: unknown): number {
+  const s = (criteria as { policy?: { objectionWindowSeconds?: unknown } } | null | undefined)?.policy?.objectionWindowSeconds;
+  return typeof s === "number" && Number.isInteger(s) && s >= 0 ? s * 1000 : objectionWindowMs();
 }
 
 /** After an objection, a passing second review releases this long after the objection (72 h). */

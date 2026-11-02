@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { db, tx } from "@/lib/db";
 import { hashTerms, type Terms } from "@/lib/contract/terms";
 import { createMilestone, type Milestone } from "@/lib/milestones/repo";
@@ -10,6 +11,7 @@ import { requestIdFor, type MoneyAction } from "@/lib/money/claims";
 
 const DAY = 86_400_000;
 const REPO = "TanmayShah29/milestone-demo";
+const DEMO_MODEL = "dots-studio/dots-3-note-preview:free";
 const WORKER = "sb-puo47p53461265@personal.example.com";
 export const DEMO_BRIEF_MARK = "[judge demo]";
 const demoId = (prefix: string) => `DEMO-${prefix}${Math.random().toString(36).slice(2, 12).toUpperCase()}`;
@@ -52,8 +54,9 @@ async function seed(opts: { title: string; brief: string; cents: number; created
     ...(opts.after ? { afterMilestoneId: opts.after } : {}),
   });
   const m = { ...milestone, repo: REPO } as Milestone;
-  const hash = hashTerms(m, opts.terms);
-  const cols: Record<string, unknown> = { repo: REPO, stack: "TypeScript, node:test", criteria: JSON.stringify(opts.terms), criteria_hash: hash, client_signed_hash: hash, worker_signed_hash: hash, criteria_model: "minimax/minimax-m3.1-flash:free", created_at: new Date(opts.created), ...opts.set };
+  const terms: Terms = { ...opts.terms, emailSalt: randomBytes(16).toString("hex") };
+  const hash = hashTerms(m, terms);
+  const cols: Record<string, unknown> = { repo: REPO, stack: "TypeScript, node:test", criteria: JSON.stringify(terms), criteria_hash: hash, client_signed_hash: hash, worker_signed_hash: hash, criteria_model: DEMO_MODEL, created_at: new Date(opts.created), ...opts.set };
   const keys = Object.keys(cols);
   const events = [["created", "DRAFT", opts.created] as History[number], ...opts.history];
   // One transaction, four round trips: the seeded row, its replaced audit trail (one multi-row insert) and review.
@@ -77,7 +80,7 @@ async function seed(opts: { title: string; brief: string; cents: number; created
       );
     }
     if (opts.review) {
-      await c.query("insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, 'minimax/minimax-m3.1-flash:free')", [
+      await c.query("insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, '${DEMO_MODEL}')", [
         m.id,
         opts.review.sha,
         JSON.stringify(opts.review.verdict),

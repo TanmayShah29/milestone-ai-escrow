@@ -1,4 +1,5 @@
 import type { Milestone } from "@/lib/milestones/repo";
+import { signedObjectionMs } from "@/lib/review/deadlines";
 
 // Builds the Gantt view of a milestone: its phases as tasks, the money gates between them as
 // dependencies, and the hold's lifetime (day-3 honor period, day-29 expiry) as indicators and bands.
@@ -66,11 +67,6 @@ const COLOR: Record<PhaseStatus, string> = { done: "green", active: "blue", bloc
 export const RESCHEDULABLE_STATES = ["DRAFT", "AGREED", "FUNDED"] as const;
 export const canMoveDueDate = (state: string) => (RESCHEDULABLE_STATES as readonly string[]).includes(state);
 
-export function objectionMs(): number {
-  const s = Number(process.env.OBJECTION_WINDOW_SECONDS ?? "120");
-  return (Number.isFinite(s) && s >= 0 ? s : 120) * 1000;
-}
-
 // PayPal holds (authorizations) are valid for 29 days from the original authorization. Reauthorizing
 // gives a new 3-day honor period but never extends the 29 days, so a milestone's work must be due with
 // margin to review, wait out the objection window and capture before the hold expires.
@@ -130,7 +126,7 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
   const holdStart = held ?? termsEnd;
   const [workStart, workEnd] = span(holdStart, submitted ?? Math.max(due, holdStart + DAY));
   const [reviewStart, reviewEnd] = span(workEnd, decided && submitted ? decided : workEnd + DAY);
-  const [windowStart, windowEnd] = span(reviewEnd, released ?? (passed && t(m.release_after) ? t(m.release_after)! : reviewEnd + Math.max(objectionMs(), 2 * DAY)));
+  const [windowStart, windowEnd] = span(reviewEnd, released ?? (passed && t(m.release_after) ? t(m.release_after)! : reviewEnd + Math.max(signedObjectionMs(m.criteria), 2 * DAY)));
   const [payoutStart, payoutEnd] = span(windowEnd, paid ?? windowEnd + DAY);
   const [, holdEnd] = span(holdStart, released ?? cancelled ?? t(m.authorization_expires_at) ?? holdStart + 29 * DAY);
 
