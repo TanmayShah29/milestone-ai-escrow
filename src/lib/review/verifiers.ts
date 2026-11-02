@@ -178,7 +178,8 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
 
   // Only GitHub Actions jobs for this exact commit count, and only the ones named for the signed contract.
   const runs = (await deps.github.checkRuns(ref.owner, ref.repo, pr.headSha)).filter((r) => r.app === CI_APP && r.headSha === pr.headSha);
-  const contractJob = latest(runs.filter((r) => r.name === "contract"));
+  // A contract job older than this PR belongs to another PR on the same commit, so it says nothing about this one.
+  const contractJob = latest(runs.filter((r) => r.name === "contract" && !(pr.createdAt && r.startedAt && r.startedAt < pr.createdAt)));
   const testVerdicts: CriterionVerdict[] = [];
   const untrusted: string[] = []; // CI results that couldn't be tied to the milestone workflow
   const workflowRuns: WorkflowLookup = new Map();

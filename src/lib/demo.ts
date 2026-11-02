@@ -38,13 +38,13 @@ const WORDCOUNT: Terms = {
   testCommand: "node --test 'acceptance/*.test.ts'",
 };
 
-type History = [event: string, toState: string | null, at: number, paypalId?: string][];
+export type History = [event: string, toState: string | null, at: number, paypalId?: string][];
 
 // Who did it, as the live flow records it: the client funds and signs, the worker submits, PayPal pays out.
 const ACTOR_FOR_EVENT: Record<string, string> = { "hold:authorized": "client", "terms:agreed": "client", "deliverable:submitted": "freelancer", "payout:succeeded": "paypal" };
 const CLAIM_FOR_EVENT: Record<string, MoneyAction> = { "hold:authorized": "create_order", "hold:captured": "capture", "payout:succeeded": "payout" };
 
-async function seed(opts: { title: string; brief: string; cents: number; created: number; due: number; terms: Terms; after?: string; history: History; set: Record<string, unknown>; review?: Record<string, unknown> }) {
+export async function seed(opts: { title: string; brief: string; cents: number; created: number; due: number; terms: Terms; after?: string; history: History; set: Record<string, unknown>; review?: Record<string, unknown> }) {
   const { milestone, clientToken, workerToken } = await createMilestone({
     title: opts.title,
     brief: `${opts.brief} ${DEMO_BRIEF_MARK}`,
@@ -80,12 +80,13 @@ async function seed(opts: { title: string; brief: string; cents: number; created
       );
     }
     if (opts.review) {
-      await c.query("insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, '${DEMO_MODEL}')", [
+      await c.query("insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, $6)", [
         m.id,
         opts.review.sha,
         JSON.stringify(opts.review.verdict),
         opts.review.decision,
         JSON.stringify(opts.review.reasons),
+        DEMO_MODEL,
       ]);
     }
   });

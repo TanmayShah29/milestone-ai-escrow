@@ -5,6 +5,7 @@ import { useState } from "react";
 import { writeDemo } from "@/lib/client/demo";
 import { rememberLink } from "@/lib/client/links";
 import { preloadTimeline } from "@/app/timeline/preload";
+import { LiveRun } from "./LiveRun";
 
 type Seeded = { id: string; title: string; client: string; worker: string; story: "paid" | "caught" | "fund" };
 
@@ -30,8 +31,13 @@ export default function DemoPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-14 sm:py-20">
-      <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Try Milestone in about a minute</h1>
-      <p className="mt-4 text-lg text-ink-2">We&apos;ll set up a small project with three milestones, each showing one part of the idea. You&apos;ll be both the client and the worker; switch sides at the top of each milestone.</p>
+      <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Try Milestone</h1>
+      <p className="mt-4 text-lg text-ink-2">Hire a worker through PayPal, and pay only when tests prove the work is done. Everything here uses PayPal&apos;s sandbox, so no real money moves.</p>
+      <div className="mt-8">
+        <LiveRun />
+      </div>
+      <h2 className="mt-12 border-t border-rule pt-8 text-xl font-semibold tracking-tight">Or explore a finished project</h2>
+      <p className="mt-2 text-ink-2">We&apos;ll set up a small project with three milestones, each showing one part of the idea. You&apos;ll be both the client and the worker; switch sides at the top of each milestone.</p>
       <ul className="mt-6 space-y-3 text-ink">
         <li><span className="font-semibold">Place a real sandbox hold.</span> Fund a milestone with PayPal&apos;s sandbox test card and watch the hold appear. No login; sandbox test money only.</li>
         <li><span className="font-semibold">See proof pay out.</span> A finished milestone with its verdict, proof trail and sealed terms.</li>

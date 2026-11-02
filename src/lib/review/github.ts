@@ -20,6 +20,7 @@ export type PullRequest = {
   htmlUrl: string;
   /** GitHub's `changed_files`. The file list API stops at 300 files, so larger PRs can't be fully scanned. */
   changedFiles?: number;
+  createdAt?: string;
 };
 export type PrFile = { filename: string; status: string; additions: number; deletions: number; patch?: string };
 export type CheckRun = {
@@ -62,6 +63,31 @@ export function parsePrUrl(url: string): { owner: string; repo: string; number: 
   return m ? { owner: m[1]!, repo: m[2]!, number: Number(m[3]) } : undefined;
 }
 
+/** The only GitHub writes besides the verdict comment: opening and closing the live demo's PRs. Needs PR write. */
+export type GitHubPrWriter = {
+  openPrNumbers(owner: string, repo: string, branch: string): Promise<number[]>;
+  createPr(owner: string, repo: string, pr: { title: string; body: string; head: string; base: string }): Promise<string>;
+  closePr(owner: string, repo: string, n: number): Promise<void>;
+};
+
+export function githubPrWriter(fetchImpl: typeof fetch = fetch, token = process.env.GITHUB_TOKEN): GitHubPrWriter {
+  const send = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+    const res = await fetchImpl(`https://api.github.com${path}`, {
+      method,
+      headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "milestone-escrow", "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new GitHubError(res.status, `GitHub ${res.status} for ${method} ${path}`, repoOf(path));
+    return (await res.json()) as T;
+  };
+  return {
+    openPrNumbers: async (owner, repo, branch) => (await send<{ number: number }[]>("GET", `/repos/${owner}/${repo}/pulls?state=open&head=${owner}:${encodeURIComponent(branch)}`)).map((p) => p.number),
+    createPr: async (owner, repo, pr) => (await send<{ html_url: string }>("POST", `/repos/${owner}/${repo}/pulls`, pr)).html_url,
+    closePr: async (owner, repo, n) => void (await send("PATCH", `/repos/${owner}/${repo}/pulls/${n}`, { state: "closed" })),
+  };
+}
+
 export function githubClient(fetchImpl: typeof fetch = fetch, token = process.env.GITHUB_TOKEN): GitHub {
   const anonymous: Record<string, string> = { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "milestone-escrow" };
   const headers: Record<string, string> = token ? { ...anonymous, authorization: `Bearer ${token}` } : anonymous;
@@ -82,6 +108,7 @@ export function githubClient(fetchImpl: typeof fetch = fetch, token = process.en
         base: { repo: { full_name: string } };
         html_url: string;
         changed_files: number;
+        created_at?: string;
       }>(`/repos/${owner}/${repo}/pulls/${n}`);
       return {
         number: p.number,
@@ -93,6 +120,7 @@ export function githubClient(fetchImpl: typeof fetch = fetch, token = process.en
         baseRepo: p.base.repo.full_name,
         htmlUrl: p.html_url,
         changedFiles: p.changed_files,
+        ...(p.created_at ? { createdAt: p.created_at } : {}),
       };
     },
     async files(owner, repo, n) {
@@ -105,10 +133,15 @@ export function githubClient(fetchImpl: typeof fetch = fetch, token = process.en
       return out;
     },
     async checkRuns(owner, repo, sha) {
-      const r = await get<{
-        check_runs: { name: string; status: string; conclusion: string | null; html_url: string; details_url: string | null; started_at: string | null; head_sha: string; app: { slug: string } | null }[];
-      }>(`/repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100`);
-      return r.check_runs.map((c) => ({
+      type Raw = { name: string; status: string; conclusion: string | null; html_url: string; details_url: string | null; started_at: string | null; head_sha: string; app: { slug: string } | null };
+      // A commit reused by several PRs (the live demo's) collects a set of check runs per contract.
+      const all: Raw[] = [];
+      for (let page = 1; page <= 5; page++) {
+        const r = await get<{ check_runs: Raw[] }>(`/repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100&page=${page}`);
+        all.push(...r.check_runs);
+        if (r.check_runs.length < 100) break;
+      }
+      return all.map((c) => ({
         name: c.name,
         status: c.status,
         conclusion: c.conclusion,
