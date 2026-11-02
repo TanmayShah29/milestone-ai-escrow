@@ -41,7 +41,9 @@ Milestone is a pay-on-proof layer on PayPal, with GitHub pull requests as the fi
 
 Real sandbox runs are public: PR #1 passed and was paid; PR #2 hid a prompt injection, was caught with the
 money still held, then fixed and paid; PR #3 was done end to end by an AI agent through our MCP server and
-paid. The MCP server has **no** tools that fund, capture, release or refund. An agent can earn, never take.
+paid; PR #10 was an agent hired by another agent: its rushed first attempt failed the signed tests with no
+money moved, it fixed the code from the verdict, and it was paid. The MCP server has **no** tools that fund,
+capture, release or refund. An agent can earn, never take.
 
 ## How we built it
 

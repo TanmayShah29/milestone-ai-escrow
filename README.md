@@ -262,12 +262,12 @@ and point `MILESTONE_API` at your deployment.
 
 ## For AI agents: the MCP server
 
-An agent can work as the contractor: read the signed terms, accept them, open a PR, submit it and track the
+An agent can post work or do it: read the signed terms, accept them, open a PR, submit it and track the
 payout. There are **no tools that fund, capture, release, void or refund**. An agent can earn, never take.
 
 ```bash
 claude mcp add milestone -- npx tsx mcp/server.mts   # this repo's .mcp.json already registers it
-# MILESTONE_API defaults to the live app; MILESTONE_API_KEY (msk_…) enables the platform tools
+# MILESTONE_API defaults to the live app; MILESTONE_API_KEY (msk_…) adds list_milestones
 ```
 
 | Tool | What it does |
@@ -276,10 +276,24 @@ claude mcp add milestone -- npx tsx mcp/server.mts   # this repo's .mcp.json alr
 | `accept_terms` | Sign by fingerprint (refused if the terms changed since they were read) |
 | `submit_work` | Submit the PR URL (or text, for text deliverables) |
 | `get_status` | Verdict per criterion, feedback, objection window, payout |
-| `create_milestone`, `draft_terms`, `list_milestones` | Platform tools, with `MILESTONE_API_KEY` |
+| `create_milestone`, `draft_terms` | Post a job and have the AI draft its terms |
+| `list_milestones` | A platform's milestones, with `MILESTONE_API_KEY` |
 
-Give the agent the milestone's **worker link** (`…/milestones/<id>?t=mwt_…`).
+Give a worker agent the milestone's **worker link** (`…/milestones/<id>?t=mwt_…`).
 [milestone-demo#3](https://github.com/TanmayShah29/milestone-demo/pull/3) was done this way and paid.
+
+**An agent hires an agent:** `npm run agents` connects two separate MCP clients to the live app. A scripted
+buyer agent posts a job and signs the terms the AI drafted. The worker agent signs the same fingerprint, then
+writes code with a free AI model and opens a real PR. A person funds the hold once. The signed tests fail and no
+money moves; the worker reads the verdict, pushes a fix, and fixed rules pay it.
+[milestone-demo#10](https://github.com/TanmayShah29/milestone-demo/pull/10) is a real run: it failed, was fixed,
+and paid $13.10 about 7 minutes after the job was posted. It used `--auto-fund`, a test flag that has the script stand in for the person.
+
+Two limits to be plain about. The worker's first attempt is told to rush, so the failure path shows on every
+run; the failure itself comes from real CI. And the boundary is the tool list, not the buyer's credentials: the
+buyer agent holds the client link, which a program could use over HTTP for client actions such as `cancel` or the
+sandbox-only `fund-card`. A real PayPal hold still needs a person to approve it at PayPal, and a production
+buyer agent should get a token limited to posting and signing.
 
 **HTTP API:** `POST /api/milestones/:id/:action` with the link token in `x-milestone-token` (or
 `Authorization: Bearer msk_…`). Actions: `draft-terms`, `edit-terms`, `sign-terms`, `fund`, `fund-card`,

@@ -12,7 +12,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const API = (process.env.MILESTONE_API ?? "https://milestone-ai-escrow.onrender.com").replace(/\/$/, "");
-const API_KEY = process.env.MILESTONE_API_KEY; // optional: a platform key (msk_...) for create/list/draft
+const API_KEY = process.env.MILESTONE_API_KEY; // optional: a platform key (msk_...) adds list_milestones and id-only access
 
 type Ref = { id: string; token: string };
 
@@ -177,54 +177,55 @@ server.registerTool(
   },
 );
 
-// Platform tools (need MILESTONE_API_KEY): a marketplace or an agent posting work.
+// Posting work: a marketplace or an agent acting for a client. A platform key is optional, as on the website.
+server.registerTool(
+  "create_milestone",
+  {
+    title: "Create a milestone",
+    description: "Open a milestone for a worker. Returns the worker link to hand to the person or agent doing the work, and the client link for signing. Funding stays with a person: there is no tool for it.",
+    inputSchema: {
+      title: z.string().min(3).max(200).describe("Short name of the work"),
+      brief: z.string().max(5000).describe("What the client wants done; the AI drafts the criteria and tests from it"),
+      amount_usd: z.string().regex(/^\d+(\.\d{1,2})?$/).describe('Amount in US dollars, e.g. "300.00"'),
+      worker_paypal_email: z.string().email().describe("The PayPal email the worker is paid to"),
+      repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/).optional().describe('GitHub repository "owner/repo" for code work; when given, terms are drafted right away'),
+    },
+  },
+  async ({ title, brief, amount_usd, worker_paypal_email, repo }) => {
+    try {
+      const b = await call("POST", "/api/milestones", API_KEY, { title, brief, amount: amount_usd, freelancerEmail: worker_paypal_email });
+      const m = b.milestone as M;
+      if (repo) await call("POST", `/api/milestones/${m.id}/draft-terms`, API_KEY ?? (b.clientToken as string), { repo });
+      return text({ id: m.id, workerLink: `${API}/milestones/${m.id}?t=${b.workerToken}`, clientLink: `${API}/milestones/${m.id}?t=${b.clientToken}`, note: repo ? "Terms drafted; review and sign them." : "Next: draft_terms." });
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+server.registerTool(
+  "draft_terms",
+  {
+    title: "Draft terms with AI",
+    description: "Have the AI draft acceptance criteria and tests from the brief, or rewrite tests that can't be signed yet.",
+    inputSchema: {
+      milestone: z.string().describe("The client link from create_milestone, or its id when using a platform API key"),
+      repo: z.string().optional().describe('GitHub repository "owner/repo" the work happens in'),
+      stack: z.string().optional().describe('Language and test setup, e.g. "TypeScript, node:test"'),
+    },
+  },
+  async ({ milestone, repo, stack }) => {
+    try {
+      const r = ref(milestone);
+      const b = await call("POST", `/api/milestones/${r.id}/draft-terms`, r.token, { repo, stack });
+      return text(view(b.milestone as M, "client"));
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
 if (API_KEY) {
-  server.registerTool(
-    "create_milestone",
-    {
-      title: "Create a milestone (platform)",
-      description: "Open a milestone for a worker. Returns the worker link to hand to the person or agent doing the work. Funding stays with the client.",
-      inputSchema: {
-        title: z.string().min(3).max(200).describe("Short name of the work"),
-        brief: z.string().max(5000).describe("What the client wants done; the AI drafts the criteria and tests from it"),
-        amount_usd: z.string().regex(/^\d+(\.\d{1,2})?$/).describe('Amount in US dollars, e.g. "300.00"'),
-        worker_paypal_email: z.string().email().describe("The PayPal email the worker is paid to"),
-        repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/).optional().describe('GitHub repository "owner/repo" for code work; when given, terms are drafted right away'),
-      },
-    },
-    async ({ title, brief, amount_usd, worker_paypal_email, repo }) => {
-      try {
-        const b = await call("POST", "/api/milestones", API_KEY, { title, brief, amount: amount_usd, freelancerEmail: worker_paypal_email });
-        const m = b.milestone as M;
-        if (repo) await call("POST", `/api/milestones/${m.id}/draft-terms`, API_KEY, { repo });
-        return text({ id: m.id, workerLink: `${API}/milestones/${m.id}?t=${b.workerToken}`, clientLink: `${API}/milestones/${m.id}?t=${b.clientToken}`, note: repo ? "Terms drafted; review and sign them." : "Next: draft_terms." });
-      } catch (e) {
-        return fail(e);
-      }
-    },
-  );
-
-  server.registerTool(
-    "draft_terms",
-    {
-      title: "Draft terms with AI (platform)",
-      description: "Have the AI draft acceptance criteria and tests from the brief.",
-      inputSchema: {
-        milestone_id: z.string().describe("The id returned by create_milestone"),
-        repo: z.string().optional().describe('GitHub repository "owner/repo" the work happens in'),
-        stack: z.string().optional().describe('Language and test setup, e.g. "TypeScript, node:test"'),
-      },
-    },
-    async ({ milestone_id, repo, stack }) => {
-      try {
-        const b = await call("POST", `/api/milestones/${milestone_id}/draft-terms`, API_KEY, { repo, stack });
-        return text(view(b.milestone as M, "client"));
-      } catch (e) {
-        return fail(e);
-      }
-    },
-  );
-
   server.registerTool(
     "list_milestones",
     { title: "List my milestones (platform)", description: "Milestones this platform created.", inputSchema: {}, annotations: { readOnlyHint: true } },
