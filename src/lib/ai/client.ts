@@ -56,6 +56,8 @@ export function extractJson(text: string): unknown {
 }
 
 function retryable(err: unknown): number | undefined {
+  // A slow free model is no reason to give up: our own 90 s limit ends the call, and the next model may answer.
+  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return 504;
   if (APICallError.isInstance(err)) {
     const s = err.statusCode ?? 0;
     if (s === 404 || s === 408 || s === 429 || s >= 500 || err.isRetryable) return s || 503;

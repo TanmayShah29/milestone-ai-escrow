@@ -4,7 +4,8 @@ import { resetDb, seedMilestone } from "./helpers";
 import { attackTerms, storedAttack } from "@/lib/contract/attack";
 import { contractDocument, hashTerms, canonical, termsSchema, type Terms } from "@/lib/contract/terms";
 import { db } from "@/lib/db";
-import type { ModelCall } from "@/lib/ai/client";
+import { z } from "zod";
+import { generateJson, type ModelCall } from "@/lib/ai/client";
 import { getMilestone } from "@/lib/milestones/repo";
 
 // The attack, with the sandbox for real and the AI scripted. The model's claims never decide: running does.
@@ -44,6 +45,26 @@ const scripted = (...replies: string[]): ModelCall & { count: () => number } => 
 
 beforeEach(resetDb);
 after(() => db().end());
+
+describe("AI model fallback", () => {
+  it("moves on to the next model when one times out", async () => {
+    const tried: string[] = [];
+    const out = await generateJson({
+      purpose: "test",
+      system: "",
+      prompt: "",
+      schema: z.object({ ok: z.boolean() }),
+      models: ["slow", "fast"],
+      call: async (model) => {
+        tried.push(model);
+        if (model === "slow") throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+        return '{"ok":true}';
+      },
+    });
+    assert.deepEqual(tried, ["slow", "fast"]);
+    assert.equal(out.model, "fast");
+  });
+});
 
 describe("attackTerms", () => {
   it("hardens: a hardcoded fake passes, the tests are rewritten, and the same fake then fails", async () => {
