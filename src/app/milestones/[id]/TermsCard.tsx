@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertTriangle, FlaskConical, Lightbulb, PenLine, Plus, Sparkles, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AlertTriangle, FlaskConical, Lightbulb, PenLine, Plus, Sparkles, Swords, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { GuillocheSeal } from "@/components/GuillocheSeal";
 import type { MilestoneView, Role } from "@/lib/client/states";
 import { NO_TESTED_MUST_WARNING, SUBJECTIVE_WARNING, termsWarnings } from "@/lib/contract/warnings";
@@ -29,7 +29,8 @@ type Criterion = {
 };
 type Suggestion = { text: string; why: string };
 type Policy = { platformFeeBps: number; objectionWindowSeconds: number };
-type Terms = { criteria: Criterion[]; testCommand?: string; suggestions?: Suggestion[]; policy?: Policy };
+type AttackResult = { status: "survived" | "hardened" | "breakable"; fake: { path: string; code: string }[]; explanation: string; caughtBy: string[]; terms: string };
+type Terms = { criteria: Criterion[]; testCommand?: string; suggestions?: Suggestion[]; policy?: Policy; attack?: AttackResult };
 
 const DEFAULT_TEST_COMMAND = "node --test 'acceptance/*.test.ts'";
 const testTemplate = (id: string) =>
@@ -55,6 +56,7 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
   const [busy, setBusy] = useState<string>();
   const [repo, setRepo] = useState(String(m.repo ?? ""));
   const [stack, setStack] = useState(String(m.stack ?? "TypeScript, node:test"));
+  const attackedFor = useRef<string | null>(null);
 
   useEffect(() => {
     setDraft(stored);
@@ -82,6 +84,18 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
     setDraft({ ...(draft ?? {}), criteria: [...criteria, { id: `C${next}`, text: "", kind: "must", check: "review" }] });
     setDirty(true);
   };
+  // A result about other terms (they were edited since) isn't shown. The server decides what can be attacked.
+  const attack = stored?.attack && stored.attack.terms === hash ? stored.attack : undefined;
+  const attackable = (stored?.criteria ?? []).some((c) => c.kind === "must" && c.check === "test" && c.test && c.testBy !== "client" && !c.testStale && !c.testWeak);
+  const canAttack = editable && attackable && !dirty;
+  const attacking = busy === "attack";
+  const attackNow = () => run("attack", "attack-terms", {});
+  // Once per fingerprint: a fresh AI draft gets attacked without being asked, and a failure leaves the button.
+  useEffect(() => {
+    if (!hash || !canAttack || attack || busy || attackedFor.current === hash || (stored?.criteria ?? []).some((c) => c.testBy === "client")) return;
+    attackedFor.current = hash;
+    void attackNow();
+  }, [hash, canAttack, attack, busy]); // eslint-disable-line react-hooks/exhaustive-deps -- attackNow is rebuilt each render
   const repoChanged = repo !== String(m.repo ?? "");
   const savedById = new Map((stored?.criteria ?? []).map((c) => [c.id, c]));
   // Unsaved text edits that saving will mark stale (the server decides; this only warns ahead).
@@ -275,6 +289,43 @@ export function TermsCard({ m, role, call }: { m: MilestoneView; role: Role; cal
           <AlertTriangle className="mt-px size-3.5 shrink-0 text-held" aria-hidden="true" />
           <span>{NO_TESTED_MUST_WARNING}</span>
         </p>
+      )}
+
+      {draft && (attack || attacking || canAttack) && (
+        <div aria-live="polite" className={`mt-4 rounded-md border p-3 text-sm ${attack?.status === "survived" ? "border-paid/40 bg-paid-field" : attack ? "border-held/40 bg-held-field" : "border-dashed border-rule-strong"}`}>
+          <h3 className="inline-flex items-center gap-1.5 font-medium text-ink">
+            <Swords className="size-4" aria-hidden="true" />
+            {attacking ? "An AI is trying to cheat these tests…" : attack?.status === "survived" ? "Survived an AI attack" : attack?.status === "hardened" ? "An AI beat the first draft, so the tests were strengthened" : attack ? "An AI beat these tests" : "Attack these tests"}
+          </h3>
+          {attacking && <p className="mt-1 text-xs text-ink-2">It writes fake code, and we run it against the must-have tests. This can take a minute or two. You don&apos;t have to wait to read the terms.</p>}
+          {!attacking && !attack && <p className="mt-1 text-xs text-ink-2">A second AI writes fake code and tries to pass the must-have tests without doing the work.</p>}
+          {attack && (
+            <p className="mt-1 text-xs text-ink">
+              {attack.status === "survived" && (attack.caughtBy.length ? `It wrote fake code, and ${attack.caughtBy.join(", ")} caught it when we ran it.` : "It couldn't produce fake code that passed the tests and was still wrong.")}
+              {attack.status === "hardened" && `Its fake code passed every must-have test. The tests were rewritten, and when we ran the same fake again, ${attack.caughtBy.join(", ")} caught it. Read the new tests before signing.`}
+              {attack.status === "breakable" && "Its fake code passes every must-have test, and the tests couldn't be strengthened automatically. You can still sign, but this code could get paid. Consider redrafting or tightening the tests."}{" "}
+              This only catches cheats the AI thought of.
+            </p>
+          )}
+          {attack && (
+            <details className="mt-2 text-xs">
+              <summary className="cursor-pointer text-ink-2 hover:text-ink">See the fake code</summary>
+              <p className="mt-2 text-ink">{attack.explanation}</p>
+              {attack.fake.map((f) => (
+                <div key={f.path} className="mt-2">
+                  <p className="font-mono text-ink-2">{f.path}</p>
+                  <pre className="mt-1 max-h-64 overflow-auto rounded-md bg-paper p-3 font-mono leading-relaxed text-ink">{f.code}</pre>
+                </div>
+              ))}
+            </details>
+          )}
+          {!attacking && canAttack && (
+            <button disabled={!!busy} onClick={attackNow} className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-panel px-2.5 py-1 text-xs hover:bg-paper disabled:opacity-50">
+              <Swords className="size-3.5" aria-hidden="true" />
+              {attack ? "Attack again" : "Run the attack"}
+            </button>
+          )}
+        </div>
       )}
 
       {draft && suggestions.length > 0 && (

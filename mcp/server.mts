@@ -225,6 +225,25 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  "attack_terms",
+  {
+    title: "Attack the terms with AI",
+    description: "Before signing: a second AI writes fake code that tries to pass the must-have tests without doing the work, and code runs it. Strengthens the tests if the fake wins, which changes the fingerprint, so call get_milestone afterwards.",
+    inputSchema: { milestone: z.string().describe("The client link from create_milestone, or its id when using a platform API key") },
+  },
+  async ({ milestone }) => {
+    try {
+      const r = ref(milestone);
+      const b = await call("POST", `/api/milestones/${r.id}/attack-terms`, r.token);
+      const { attack } = ((b.milestone as M).criteria ?? {}) as { attack?: unknown };
+      return text({ fingerprint: (b.milestone as M).criteria_hash, attack: attack ?? null });
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
 if (API_KEY) {
   server.registerTool(
     "list_milestones",

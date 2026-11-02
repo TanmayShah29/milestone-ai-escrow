@@ -2,6 +2,7 @@ import { platformFrom, publicMilestone, requireRole, roleOn, type Role } from "@
 import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
 import { cancelHold, createHold, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
+import { attackTerms } from "@/lib/contract/attack";
 import { draftTerms, editTerms, signTerms } from "@/lib/contract/terms";
 import { eraseMilestone, rotateLink } from "@/lib/privacy";
 import { setDueDate } from "@/lib/schedule";
@@ -16,6 +17,7 @@ const str = (v: unknown): string | undefined => (typeof v === "string" ? v : und
 // Which side may trigger each action.
 const ALLOWED: Record<string, Role[]> = {
   "draft-terms": ["client"],
+  "attack-terms": ["client"],
   "edit-terms": ["client"],
   "sign-terms": ["client", "worker"],
   submit: ["worker"],
@@ -73,6 +75,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
         const limited = await draftLimit(req, id);
         if (limited) return limited;
         return done(await draftTerms(id, { repo: str(body.repo), stack: str(body.stack) }));
+      }
+      case "attack-terms": {
+        const v = await hit([
+          { key: `attack-terms:milestone:${id}`, limit: DRAFTS_PER_MILESTONE_DAY, windowMs: DAY },
+          ...((await platformFrom(req)) ? [] : [{ key: ipKey(req, "attack-terms"), limit: DRAFTS_PER_IP_HOUR, windowMs: HOUR }]),
+        ]);
+        if (!v.ok) return tooMany(`These terms have been attacked enough for now. Try again in ${waitText(v.retryAfterMs)}.`, v.retryAfterMs);
+        return done(await attackTerms(id));
       }
       case "edit-terms":
         return done(await editTerms(id, body.terms, { ...(str(body.repo) !== undefined ? { repo: str(body.repo) } : {}) }));

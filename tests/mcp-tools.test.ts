@@ -17,7 +17,7 @@ async function toolNames(env: Record<string, string>): Promise<string[]> {
   }
 }
 
-const BASE = ["accept_terms", "create_milestone", "draft_terms", "get_milestone", "get_status", "submit_work"];
+const BASE = ["accept_terms", "attack_terms", "create_milestone", "draft_terms", "get_milestone", "get_status", "submit_work"];
 
 describe("MCP tools", () => {
   it("are exactly these, with or without a platform key, and none moves money", async () => {

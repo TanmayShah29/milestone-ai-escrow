@@ -173,6 +173,7 @@ const EVENT_COPY: Record<string, string> = {
   created: "Milestone opened",
   "terms:drafted": "AI drafted the terms",
   "terms:edited": "Client edited the terms",
+  "terms:attacked": "A second AI tried to cheat the tests",
   "terms:signed:client": "Client signed the terms",
   "terms:signed:worker": "Worker signed the terms",
   "terms:agreed": "Terms sealed by both sides",

@@ -26,8 +26,9 @@ Milestone is a pay-on-proof layer on PayPal, with GitHub pull requests as the fi
 
 1. **Agree.** The client writes a brief. An AI model drafts acceptance criteria and writes `node:test` tests
    for the testable ones. Before anyone can sign, each test runs against an empty implementation and must
-   fail, because a test that passes against nothing proves nothing. Both sides sign the SHA-256 fingerprint
-   of the exact terms.
+   fail, because a test that passes against nothing proves nothing. Then a second AI attacks the contract: it
+   plays the cheating worker and writes fake code to pass the tests, and code runs it. If the fake wins, the
+   tests are strengthened and the same fake must fail. Both sides sign the SHA-256 fingerprint of the exact terms.
 2. **Fund.** The client's money is placed on a **PayPal authorization hold**: held, not captured.
 3. **Deliver.** The worker, a person or an AI agent over MCP, opens a PR that cites the fingerprint.
 4. **Verify.** CI runs the signed tests through a harness taken from the base branch. The AI reviews only
@@ -120,7 +121,7 @@ Claude Code.
 
 | Tool / model | How it was used |
 |---|---|
-| `dots-studio/dots-3-note-preview:free` (primary), `nvidia/nemotron-3.5-super-vl:free`, `nvidia/nemotron-3.5-lightning:free` (fallbacks), via OpenRouter + Vercel AI SDK | In the product: drafting criteria and tests, regenerating a test, fixing a test that doesn't bite, reviewing untested criteria, and the post-objection second review on a different model. One structured call per task. The model's output is a recommendation; fixed code decides |
+| `dots-studio/dots-3-note-preview:free` (primary), `nvidia/nemotron-3.5-super-vl:free`, `nvidia/nemotron-3.5-lightning:free` (fallbacks), via OpenRouter + Vercel AI SDK | In the product: drafting criteria and tests, regenerating a test, fixing a test that doesn't bite, attacking the tests with fake code and strengthening them, reviewing untested criteria, and the post-objection second review on a different model. One structured call per task. The model's output is a recommendation; fixed code decides |
 | PayPal APIs (sandbox) | Orders v2 (AUTHORIZE), authorizations (capture, void, reauthorize), Payouts, webhook signature verification, dispute webhooks |
 | APIMatic Context Plugin + the APIMatic-generated PayPal TypeScript SDK | Used in Claude Code while building the PayPal integration. Every SDK signature, header and error arm in `paypal-plan.md` was looked up in the SDK map |
 | Claude Code (Anthropic) | Development assistant for writing code, tests, docs and audits. Not part of the running product |

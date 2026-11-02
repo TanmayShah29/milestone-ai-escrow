@@ -123,6 +123,15 @@ async function main() {
     const tested = terms.criteria.filter((c: { test?: unknown }) => c.test);
     if (!tested.length) throw new Error("the draft has no tests; run again");
     for (const c of terms.criteria) say("buyer", `  ${c.id} (${c.kind}, ${c.check}): ${c.text}`);
+    say("buyer", "Before signing, a second AI tries to cheat these tests…");
+    const attacked = await buyer.tool("attack_terms", { milestone: clientLink }).catch((err: Error) => {
+      say("buyer", `The attack didn't run (${err.message.slice(0, 100)}). Signing without it.`);
+      return undefined;
+    });
+    if (attacked?.attack) {
+      say("attacker", `${attacked.attack.status}: ${attacked.attack.explanation}`);
+      terms = await buyer.tool("get_milestone", { milestone: clientLink });
+    }
     await buyer.tool("accept_terms", { milestone: clientLink, fingerprint: terms.fingerprint });
     say("buyer", `Signed terms ${String(terms.fingerprint).slice(0, 16)}…`);
 

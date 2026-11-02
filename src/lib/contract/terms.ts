@@ -237,7 +237,7 @@ export function markStale(prev: Terms | undefined, next: Terms): Terms {
   };
 }
 
-function storedTerms(m: Milestone): Terms | undefined {
+export function storedTerms(m: Milestone): Terms | undefined {
   const parsed = termsSchema.safeParse(m.criteria);
   return parsed.success ? parsed.data : undefined;
 }
@@ -388,7 +388,8 @@ export async function editTerms(milestoneId: string, raw: unknown, opts: { repo?
     const suggestions = storedSuggestions(m).filter((x) => !keepTexts || keepTexts.has(x.text));
     // Nothing in the contract changed (e.g. a suggestion was dismissed): keep the signatures.
     if (m.criteria_hash && hashTerms({ ...m, repo: nextRepo }, terms) === m.criteria_hash && nextRepo === m.repo) {
-      return updateFields(db(), m.id, { criteria: JSON.stringify(withSuggestions(terms, suggestions)) });
+      const { attack } = (m.criteria ?? {}) as { attack?: unknown }; // still true of the same fingerprint
+      return updateFields(db(), m.id, { criteria: JSON.stringify({ ...withSuggestions(terms, suggestions), ...(attack ? { attack } : {}) }) });
     }
     return saveTerms(m, terms, { repo: nextRepo, stack: m.stack, model: m.criteria_model, actor: "client", suggestions });
   });
@@ -414,7 +415,7 @@ function withSuggestions(terms: Terms, suggestions: Suggestion[]) {
   return suggestions.length ? { ...terms, suggestions } : terms;
 }
 
-async function saveTerms(m: Milestone, saved: Terms, meta: { repo: string | null; stack: string | null; model: string | null; actor: "ai" | "client"; suggestions: Suggestion[] }): Promise<Milestone> {
+export async function saveTerms(m: Milestone, saved: Terms, meta: { repo: string | null; stack: string | null; model: string | null; actor: "ai" | "client"; suggestions: Suggestion[] }): Promise<Milestone> {
   const terms: Terms = { ...saved, policy: currentPolicy(), emailSalt: storedTerms(m)?.emailSalt ?? randomBytes(16).toString("hex") };
   const withRepo = { ...m, repo: meta.repo };
   const hash = hashTerms(withRepo, terms);

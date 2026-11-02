@@ -50,7 +50,7 @@ export async function withMilestoneLock<T>(milestoneId: string, fn: () => Promis
   let broken: Error | undefined;
   try {
     await c.query("begin");
-    await c.query("set local lock_timeout = '60s'");
+    await c.query("set local lock_timeout = '180s'"); // longer than an AI draft, which holds this lock
     await c.query("select pg_advisory_xact_lock(hashtext($1))", [milestoneId]);
     return await held.run(new Set([...(mine ?? []), milestoneId]), fn);
   } finally {

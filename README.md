@@ -145,6 +145,18 @@ Free models on [OpenRouter](https://openrouter.ai), called through the Vercel AI
 `nvidia/nemotron-3.5-lightning:free`). On a 404, 429, 5xx or unreadable output, a call falls through to the next
 model.
 
+**The AI attacks the contract before anyone signs** (`src/lib/contract/attack.ts`). A second AI plays the cheating
+worker: it writes fake code to pass the must-have tests, plus a probe test showing where the fake is wrong. Code
+runs both in the test sandbox, so the result is a fact and not the model's opinion. If the fake beats the tests, one
+more AI call strengthens them, and the rewrite is kept only if the same fake now fails and the tests still fail on
+empty code. Otherwise both sides are told the tests can be beaten. On Nov 2, a free model beat a thin draft by
+hardcoding the two tested inputs, and the rewritten tests caught the same fake.
+
+Limits: it only catches cheats the AI thinks of. It can't prove a rewritten test is fair to an honest worker, or
+that it stays within the criteria's text, so people still read the tests before signing. Client-written tests are never attacked,
+because they aren't run on the server. The attacker's code runs in the same sandbox as AI-written tests, so
+the same limits apply (see the comment in `testcheck.ts`).
+
 | Step | Calls | What the model does |
 |---|---|---|
 | Draft terms | 1 (+1 fix if a test doesn't bite) | Brief → criteria, `node:test` tests for the testable ones, edge-case suggestions |
@@ -281,6 +293,8 @@ claude mcp add milestone -- npx tsx mcp/server.mts   # this repo's .mcp.json alr
 
 Give a worker agent the milestone's **worker link** (`…/milestones/<id>?t=mwt_…`).
 [milestone-demo#3](https://github.com/TanmayShah29/milestone-demo/pull/3) was done this way and paid.
+
+`attack_terms` runs the AI attack on a draft (see [AI used](#ai-used)).
 
 **An agent hires an agent:** `npm run agents` connects two separate MCP clients to the live app. A scripted
 buyer agent posts a job and signs the terms the AI drafted. The worker agent signs the same fingerprint, then

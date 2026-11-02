@@ -9,8 +9,8 @@ import { dirname, join, posix, relative, resolve, sep } from "node:path";
 // whose exports are functions that do nothing) and must (a) load and (b) fail. A test that passes
 // against nothing checks nothing; one that can't load can never pass.
 //
-// This runs acceptance-test code the AI wrote for the terms (client-written tests get staticCheckTests below),
-// never worker code, and never on a PR. The child process gets:
+// This runs acceptance-test code the AI wrote for the terms (client-written tests get staticCheckTests below)
+// and the attacker AI's fake code (attack.ts), never worker code, and never on a PR. The child process gets:
 // PATH as its only env var (no secrets), a fresh temp dir as cwd, Node's permission model (reads and
 // writes only inside that dir, no child processes, workers or native addons), no eval/new Function,
 // a 128 MB heap, network calls stubbed out, and a hard 10 s kill. Node calls its permission model a
@@ -156,9 +156,11 @@ function loadError(stderr: string, root: string): string {
   return clean(line ?? stderr.split("\n").find((l) => l.trim()) ?? "it exited with an error before running any test", root);
 }
 
-/** Lay out the test and stubs of everything it imports in a fresh dir, run it, and judge the result. */
-export async function checkOne(test: TestToCheck): Promise<TestProblem | undefined> {
-  if (!RUNNABLE.test(test.path)) return undefined; // only JS/TS tests run here
+export type SourceFile = { path: string; code: string };
+type Outcome = { killed: boolean; code: number | null; stderr: string; root: string; results: { ok: boolean; name: string | null; code: string | null; message: string | null }[] };
+
+/** Lay out the test and stubs of everything it imports (or `files` in their place) in a fresh dir, and run it. */
+async function runTest(test: TestToCheck, files: SourceFile[] = []): Promise<Outcome | TestProblem> {
   // The real path: on macOS the temp dir is behind a symlink, and the permission model checks real paths.
   const root = await realpath(await mkdtemp(join(tmpdir(), "milestone-testcheck-")));
   try {
@@ -197,6 +199,12 @@ export async function checkOne(test: TestToCheck): Promise<TestProblem | undefin
       }
       await writeFile(join(dir, "package.json"), JSON.stringify({ name: pkg, type: "module", exports }));
     }
+    for (const f of files) {
+      const target = resolve(root, f.path);
+      if (relative(root, target).startsWith("..")) continue;
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, f.code);
+    }
     await mkdir(dirname(testFile), { recursive: true });
     await writeFile(testFile, test.code);
     const runner = join(root, ".testcheck");
@@ -222,25 +230,47 @@ export async function checkOne(test: TestToCheck): Promise<TestProblem | undefin
       ],
       root,
     );
-    if (res.killed) return { kind: "broken", reason: `didn't finish within ${TIMEOUT_MS / 1000} seconds` };
-    const results = res.stdout
-      .split("\n")
-      .filter((l) => l.startsWith(MARK))
-      .map((l) => JSON.parse(l.slice(MARK.length)) as { ok: boolean; name: string | null; code: string | null; message: string | null });
-    if (!results.length) return res.code === 0 ? { kind: "weak", reason: "defines no tests" } : { kind: "broken", reason: `doesn't load: ${loadError(res.stderr, root)}` };
-    const fails = results.filter((r) => !r.ok);
-    // A ReferenceError can't come from a stub (all its exports exist): the test itself is wrong, e.g.
-    // jest's `expect` without an import. It would fail against any implementation.
-    const ref = fails.find((r) => r.name === "ReferenceError");
-    if (ref) return { kind: "broken", reason: `fails whatever the code does: ReferenceError: ${clean(ref.message ?? "", root)}` };
-    // Failures from the sandbox itself (child processes, eval, network) say nothing about the test.
-    const sandbox = (r: (typeof results)[number]) => r.code === "ERR_ACCESS_DENIED" || r.name === "EvalError";
-    if (fails.some((r) => !sandbox(r))) return undefined; // it bites
-    if (fails.length) return undefined; // can't judge it here; CI will run it for real
-    return { kind: "weak", reason: "passes against an empty implementation, so it doesn't check the requirement" };
+    return {
+      killed: res.killed,
+      code: res.code,
+      stderr: loadError(res.stderr, root),
+      root,
+      results: res.stdout
+        .split("\n")
+        .filter((l) => l.startsWith(MARK))
+        .map((l) => JSON.parse(l.slice(MARK.length))),
+    };
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+const isProblem = (o: Outcome | TestProblem): o is TestProblem => "kind" in o;
+
+/** Run the test against an empty implementation, and judge the result. */
+export async function checkOne(test: TestToCheck): Promise<TestProblem | undefined> {
+  if (!RUNNABLE.test(test.path)) return undefined; // only JS/TS tests run here
+  const out = await runTest(test);
+  if (isProblem(out)) return out;
+  if (out.killed) return { kind: "broken", reason: `didn't finish within ${TIMEOUT_MS / 1000} seconds` };
+  const { results, root } = out;
+  if (!results.length) return out.code === 0 ? { kind: "weak", reason: "defines no tests" } : { kind: "broken", reason: `doesn't load: ${out.stderr}` };
+  const fails = results.filter((r) => !r.ok);
+  // A ReferenceError can't come from a stub (all its exports exist): the test itself is wrong, e.g.
+  // jest's `expect` without an import. It would fail against any implementation.
+  const ref = fails.find((r) => r.name === "ReferenceError");
+  if (ref) return { kind: "broken", reason: `fails whatever the code does: ReferenceError: ${clean(ref.message ?? "", root)}` };
+  // Failures from the sandbox itself (child processes, eval, network) say nothing about the test.
+  const sandbox = (r: (typeof results)[number]) => r.code === "ERR_ACCESS_DENIED" || r.name === "EvalError";
+  if (fails.some((r) => !sandbox(r))) return undefined; // it bites
+  if (fails.length) return undefined; // can't judge it here; CI will run it for real
+  return { kind: "weak", reason: "passes against an empty implementation, so it doesn't check the requirement" };
+}
+
+/** Does the test pass against these files? Same sandbox as above; the files are AI-written too (attack.ts). */
+export async function passesWith(test: TestToCheck, files: SourceFile[]): Promise<boolean> {
+  const out = await runTest(test, files);
+  return !isProblem(out) && !out.killed && out.results.length > 0 && out.results.every((r) => r.ok);
 }
 
 /** Check every test (a few at a time). Infrastructure failures leave a test unjudged rather than blocking. */

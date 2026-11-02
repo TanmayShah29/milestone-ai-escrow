@@ -5,6 +5,7 @@ import { useState } from "react";
 import { writeDemo } from "@/lib/client/demo";
 import { rememberLink } from "@/lib/client/links";
 import { preloadTimeline } from "@/app/timeline/preload";
+import { AttackExample } from "./AttackExample";
 import { LiveRun } from "./LiveRun";
 
 type Seeded = { id: string; title: string; client: string; worker: string; story: "paid" | "caught" | "fund" };
@@ -36,6 +37,7 @@ export default function DemoPage() {
       <div className="mt-8">
         <LiveRun />
       </div>
+      <AttackExample />
       <h2 className="mt-12 border-t border-rule pt-8 text-xl font-semibold tracking-tight">Or explore a finished project</h2>
       <p className="mt-2 text-ink-2">We&apos;ll set up a small project with three milestones, each showing one part of the idea. You&apos;ll be both the client and the worker; switch sides at the top of each milestone.</p>
       <ul className="mt-6 space-y-3 text-ink">
