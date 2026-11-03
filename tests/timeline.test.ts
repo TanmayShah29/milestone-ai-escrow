@@ -5,7 +5,8 @@ import { db } from "@/lib/db";
 import { InvariantViolation } from "@/lib/errors";
 import { getMilestone } from "@/lib/milestones/repo";
 import { setDueDate } from "@/lib/schedule";
-import { buildTimeline, holdWarning } from "@/lib/timeline";
+import type { Milestone } from "@/lib/milestones/repo";
+import { buildTimeline, failedCriteria, holdWarning, reviewFailedLabel, type AuditRow } from "@/lib/timeline";
 
 beforeEach(resetDb);
 after(() => db().end());
@@ -112,5 +113,171 @@ describe("rescheduling", () => {
     await assert.rejects(setDueDate(id, new Date(Date.now() - DAY).toISOString()), InvariantViolation);
     const done = await seedMilestone({ state: "SUBMITTED" });
     await assert.rejects(setDueDate(done, new Date(Date.now() + DAY).toISOString()), InvariantViolation);
+  });
+});
+
+// Pure: a milestone row and its audit trail, no database.
+const T0 = Date.parse("2026-11-01T00:00:00Z");
+const H = 3_600_000;
+function fake(over: Partial<Milestone> = {}): Milestone {
+  return {
+    id: "00000000-0000-4000-8000-000000000001",
+    title: "Initials helper",
+    amount_cents: 1200,
+    state: "FUNDED",
+    created_at: new Date(T0),
+    due_at: new Date(T0 + 3 * DAY),
+    authorization_expires_at: new Date(T0 + 29 * DAY),
+    authorized_cents: 1200,
+    paypal_authorization_id: "AUTH-1",
+    criteria: { policy: { objectionWindowSeconds: 30 } },
+    criteria_hash: "abc123",
+    after_milestone_id: null,
+    release_after: null,
+    payout_cents: null,
+    pr_url: null,
+    paypal_payout_item_id: null,
+    ...over,
+  } as Milestone;
+}
+const ev = (event: string, to_state: string | null, at: number, detail?: unknown): AuditRow => ({ event, to_state, created_at: new Date(at), ...(detail ? { detail } : {}) });
+const funded = [ev("created", "DRAFT", T0), ev("terms:agreed", "AGREED", T0 + H), ev("hold:authorized", "FUNDED", T0 + 2 * H)];
+const failC2 = (at: number) => ev("review:changes_requested", "CHANGES_REQUESTED", at, { reasons: ["C2 failed"], injection: false });
+const ids = (tl: ReturnType<typeof buildTimeline>) => tl.tasks[0]!.children!.map((c) => c.phase);
+
+describe("timeline reacts to review and PayPal events", () => {
+  const sub1 = T0 + DAY;
+  const sub2 = T0 + 2 * DAY;
+  const paidAt = sub2 + 3 * H;
+  const reworked = [
+    ...funded,
+    ev("deliverable:submitted", "SUBMITTED", sub1),
+    failC2(sub1 + H),
+    ev("deliverable:submitted", "SUBMITTED", sub2),
+    ev("review:passed", "PASSED", sub2 + H),
+    ev("hold:captured", "RELEASED", sub2 + 2 * H),
+    ev("payout:succeeded", "PAID_OUT", paidAt),
+  ];
+
+  it("a failed review adds a sent-back review and a Rework bar, and the later phases move right with a baseline saying why", () => {
+    const tl = buildTimeline(fake({ state: "PAID_OUT", payout_cents: 1080, release_after: new Date(sub2 + 2 * H) }), reworked, sub2 + 4 * H);
+    assert.deepEqual(ids(tl), ["terms", "hold", "work", "review-1", "rework-1", "review", "window", "payout", "paid"]);
+    const p = phases(tl);
+    assert.equal(p.work!.endDate, new Date(sub1).toISOString());
+    assert.equal(p["review-1"]!.status, "failed");
+    assert.equal(p["rework-1"]!.status, "done");
+    assert.match(p["rework-1"]!.cls, /ms-rework/);
+    assert.equal(p["rework-1"]!.startDate, new Date(sub1 + H).toISOString());
+    assert.equal(p["rework-1"]!.endDate, new Date(sub2).toISOString());
+    assert.deepEqual(p["rework-1"]!.markers, [{ date: new Date(sub1 + H).toISOString(), label: "Review failed: C2 — rescheduled", kind: "review_failed" }]);
+    // The deciding review is the second submission's; it moved by the whole first cycle (review + rework).
+    assert.equal(p.review!.startDate, new Date(sub2).toISOString());
+    assert.equal(p.review!.status, "done");
+    assert.deepEqual(p.review!.baselines, [{ startDate: new Date(sub1).toISOString(), endDate: new Date(sub1 + H).toISOString() }]);
+    assert.match(p.payout!.movedBy ?? "", /^Moved 1d later: Review failed: C2, then rework$/);
+    assert.equal(p.work!.baselines, undefined);
+    // Paid: a zero-length milestone at the real time, with the amount.
+    assert.equal(p.paid!.name, "Paid $10.80");
+    assert.equal(p.paid!.startDate, new Date(paidAt).toISOString());
+    assert.equal(p.paid!.endDate, p.paid!.startDate);
+    assert.deepEqual(
+      tl.dependencies.map((d) => [d.fromTask.split(":")[1], d.toTask.split(":")[1], d.cls]),
+      [
+        ["terms", "hold", "ms-dep-open"],
+        ["hold", "work", "ms-dep-open"],
+        ["work", "review-1", "ms-dep-open"],
+        ["review-1", "rework-1", "ms-dep-rework"],
+        ["rework-1", "review", "ms-dep-open"],
+        ["review", "window", "ms-dep-open"],
+        ["window", "payout", "ms-dep-open"],
+        ["payout", "paid", "ms-dep-open"],
+      ],
+    );
+  });
+
+  it("every submission and review cycle is shown, not only the first", () => {
+    const sub3 = T0 + 3 * DAY;
+    const audit = [
+      ...funded,
+      ev("deliverable:submitted", "SUBMITTED", sub1),
+      failC2(sub1 + H),
+      ev("deliverable:submitted", "SUBMITTED", sub2),
+      ev("review:changes_requested", "CHANGES_REQUESTED", sub2 + H, { reasons: ["C1, C3 failed", "PR contains text aimed at the AI reviewer"], injection: true }),
+      ev("deliverable:submitted", "SUBMITTED", sub3),
+      ev("review:passed", "PASSED", sub3 + H),
+    ];
+    const tl = buildTimeline(fake({ state: "PASSED", release_after: new Date(sub3 + 2 * H) }), audit, sub3 + 90 * 60_000);
+    assert.deepEqual(ids(tl), ["terms", "hold", "work", "review-1", "rework-1", "review-2", "rework-2", "review", "window", "payout"]);
+    const p = phases(tl);
+    assert.equal(p["rework-2"]!.markers![0]!.label, "Review failed: C1, C3 (and text aimed at the reviewer) — rescheduled");
+    assert.equal(p.window!.status, "active");
+    assert.match(p.window!.movedBy ?? "", /^Moved 2d later: /);
+  });
+
+  it("while the worker is fixing it, the Rework bar is active and the review, window and payout wait after it", () => {
+    const now = sub1 + 5 * H;
+    const tl = buildTimeline(fake({ state: "CHANGES_REQUESTED" }), [...funded, ev("deliverable:submitted", "SUBMITTED", sub1), failC2(sub1 + H)], now);
+    const p = phases(tl);
+    assert.equal(p["rework-1"]!.status, "active");
+    assert.equal(p["rework-1"]!.endDate, new Date(sub1 + H + DAY).toISOString());
+    assert.equal(p.review!.status, "blocked");
+    assert.equal(p.review!.startDate, p["rework-1"]!.endDate);
+    assert.equal(p.review!.manuallyScheduled, false);
+    assert.equal(p.payout!.manuallyScheduled, false);
+  });
+
+  it("a voided hold marks every unfinished phase cancelled, with the reason, and ends the chart where the deal ended", () => {
+    const voided = sub1 + 2 * H;
+    const audit = [...funded, ev("deliverable:submitted", "SUBMITTED", sub1), failC2(sub1 + H), ev("hold:voided", "CANCELLED", voided)];
+    const tl = buildTimeline(fake({ state: "CANCELLED" }), audit, voided + DAY);
+    const p = phases(tl);
+    assert.equal(p.hold!.status, "cancelled");
+    assert.deepEqual(p.hold!.markers, [{ date: new Date(voided).toISOString(), label: "PayPal voided the hold: nothing was charged", kind: "voided" }]);
+    assert.equal(p.hold!.endDate, new Date(voided).toISOString());
+    for (const k of ["rework-1", "review", "window", "payout"]) {
+      assert.equal(p[k]!.status, "cancelled", k);
+      assert.match(p[k]!.note, /^Cancelled: PayPal voided the hold\./);
+      assert.equal(p[k]!.eventColor, "gray");
+      assert.ok(Date.parse(p[k]!.startDate) <= voided + 20 * 60_000, `${k} is drawn at the cancellation, not its old plan`);
+    }
+    assert.equal(p.work!.status, "done");
+    assert.equal(p["review-1"]!.status, "failed");
+    assert.equal(p.review!.baselines, undefined);
+    assert.equal(tl.tasks[0]!.status, "cancelled");
+    assert.equal(tl.tasks[0]!.manuallyScheduled, true);
+  });
+
+  it("an expired hold says PayPal ended it", () => {
+    const tl = buildTimeline(fake({ state: "CANCELLED" }), [...funded, ev("hold:ended", "CANCELLED", T0 + 29 * DAY)], T0 + 30 * DAY);
+    assert.equal(phases(tl).hold!.markers![0]!.kind, "expired");
+    assert.match(phases(tl).review!.note, /^Cancelled: PayPal ended the hold \(it expired\)/);
+  });
+
+  it("a reauthorized hold shows its new honor period from the reauthorization", () => {
+    const reauth = T0 + 5 * DAY;
+    const tl = buildTimeline(fake(), [...funded, ev("hold:reauthorized", null, reauth)], reauth + H);
+    const p = phases(tl);
+    assert.equal(p.hold!.honorStart, new Date(reauth).toISOString());
+    assert.equal(p.hold!.honorEnd, new Date(reauth + 3 * DAY).toISOString());
+    assert.equal(p.hold!.markers![0]!.kind, "reauthorized");
+    assert.equal(p.hold!.holdExpiry, new Date(T0 + 29 * DAY).toISOString(), "reauthorizing never extends the 29 days");
+  });
+
+  it("a PayPal dispute gets a marker on the payout and turns the milestone orange", () => {
+    const opened = paidAt + DAY;
+    const tl = buildTimeline(fake({ state: "DISPUTE", payout_cents: 1080 }), [...reworked, ev("dispute:opened", "DISPUTE", opened)], opened + H);
+    const p = phases(tl);
+    assert.deepEqual(p.payout!.markers, [{ date: new Date(opened).toISOString(), label: "PayPal dispute opened: PayPal decides it, not Milestone", kind: "dispute" }]);
+    assert.equal(p.payout!.status, "done");
+    assert.equal(p.window!.status, "done");
+    assert.equal(tl.tasks[0]!.eventColor, "orange");
+  });
+
+  it("reads the failed criteria from the review's reasons", () => {
+    assert.deepEqual(failedCriteria({ reasons: ["C2, C3, C4 failed", "PR contains text aimed at the AI reviewer"] }), ["C2", "C3", "C4"]);
+    assert.equal(failedCriteria({ reasons: ["every must-have criterion passed"] }), undefined);
+    assert.equal(failedCriteria(null), undefined);
+    assert.equal(reviewFailedLabel({ event: "review:changes_by_client", detail: { reason: "x" } }), "The client asked for changes — rescheduled");
+    assert.equal(reviewFailedLabel({ event: "review:changes_requested", detail: null }), "Review failed — rescheduled");
   });
 });

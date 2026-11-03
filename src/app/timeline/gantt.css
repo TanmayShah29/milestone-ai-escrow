@@ -143,3 +143,52 @@ html:root[data-theme="dark"]:not(.b-nothing) {
     font-size: 13px;
   }
 }
+
+/* Events from the audit log (lib/timeline.ts). A cancelled phase (the PayPal hold was voided or expired)
+   is a pale hatched stub; a Rework bar has a dashed failed-red edge, and the link out of a failed review
+   is dashed red, so the loop reads without colour alone (the bar names say "sent back" / "Rework"). */
+.b-gantt-task.ms-cancelled {
+  background-color: var(--blocked-field) !important;
+  color: var(--ink-2);
+  background-image: repeating-linear-gradient(-45deg, transparent 0 5px, color-mix(in oklab, var(--blocked) 30%, transparent) 5px 7px);
+  border: 1px dashed var(--blocked);
+}
+.b-gantt-task.ms-rework {
+  outline: 2px dashed var(--failed);
+  outline-offset: 1px;
+}
+.b-gantt-task.ms-dispute {
+  outline: 2px solid var(--held);
+  outline-offset: 1px;
+}
+.b-sch-dependency.ms-dep-rework {
+  stroke: var(--failed);
+  stroke-dasharray: 5 3;
+}
+
+/* Baselines: where a phase sat before a failed review pushed it. A thin dashed outline under the bar. */
+.b-gantt {
+  --b-baseline-background: transparent;
+  --b-baseline-border-color: var(--ink-3);
+}
+.b-task-baseline {
+  border-style: dashed !important;
+}
+
+/* Event markers on a row (review failed, hold voided or reauthorized, dispute). */
+.b-indicator.ms-ind-event > i {
+  font-size: 1.05em;
+}
+.b-indicator.ms-ind-review_failed > i,
+.b-indicator.ms-ind-voided > i,
+.b-indicator.ms-ind-expired > i,
+.b-indicator.ms-ind-cancelled > i {
+  color: var(--failed);
+}
+.b-indicator.ms-ind-reauthorized > i,
+.b-indicator.ms-ind-dispute > i {
+  color: var(--held);
+}
+.b-indicator.ms-ind-paid > i {
+  color: var(--paid);
+}

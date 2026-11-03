@@ -29,7 +29,10 @@ class MilestoneTask extends TaskModel {
       { name: "status", type: "string" },
       { name: "milestoneId", type: "string" },
       { name: "phase", type: "string" },
+      { name: "honorStart", type: "date" },
       { name: "honorEnd", type: "date" },
+      { name: "movedBy", type: "string" },
+      { name: "markers" }, // TimelineMarker[] from lib/timeline.ts: review failed, hold voided, dispute…
       { name: "holdExpiry", type: "date" },
       { name: "holdWarn", type: "boolean" },
       { name: "holdExpiring", type: "boolean" },
@@ -57,7 +60,7 @@ const PRESET: ViewPresetConfig = {
 // Under Tailwind's `sm` the grid shrinks to the task names so the bars stay visible.
 const NARROW = "(max-width: 639px)";
 const GRID = { wide: { name: 320, status: 140 }, narrow: { name: 150 } };
-const STATUS_LABEL: Record<string, string> = { unfunded: "not funded" };
+const STATUS_LABEL: Record<string, string> = { unfunded: "not funded", failed: "failed / sent back" };
 
 const canDrag = (t: TaskModel) => t.get("phase") === "work" && !!t.get("canReschedule");
 
@@ -74,6 +77,7 @@ const pushedBy = (t: TaskModel): TaskModel[] => {
 };
 
 const DAY_FMT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+const DATE_TIME: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
 
 // Bands behind every phase row of a milestone with a live hold: the 3-day honor period, the rest of the
 // hold's life, and its expiry line (red once the hold is within 3 days of expiring). Drawn as Indicators
@@ -83,12 +87,14 @@ function liveHold(t: TaskModel) {
   const hold = ((t.parent?.children ?? []) as TaskModel[]).find((c) => c.get("phase") === "hold");
   const honorEnd = hold?.get("honorEnd") as Date | null | undefined;
   const expiry = hold?.get("holdExpiry") as Date | null | undefined;
-  return hold?.startDate && honorEnd && expiry ? { start: hold.startDate as Date, honorEnd, expiry, expiring: !!hold.get("holdExpiring") } : null;
+  // After a reauthorization the honor period restarts there (honorStart), not at the original hold.
+  const start = (hold?.get("honorStart") as Date | null | undefined) ?? (hold?.startDate as Date | undefined);
+  return start && honorEnd && expiry ? { start, honorEnd, expiry, expiring: !!hold!.get("holdExpiring") } : null;
 }
 const holdBands: Record<string, (t: TaskModel) => TimeSpanConfig | null> = {
   honorBand: (t) => {
     const h = liveHold(t);
-    return h && { startDate: h.start, endDate: h.honorEnd, name: "Honor period (days 0–3): the hold can be captured in full", cls: "ms-band ms-band-honor" };
+    return h && { startDate: h.start, endDate: h.honorEnd, name: "Honor period (3 days): the hold can be captured in full", cls: "ms-band ms-band-honor" };
   },
   holdBand: (t) => {
     const h = liveHold(t);
@@ -100,8 +106,28 @@ const holdBands: Record<string, (t: TaskModel) => TimeSpanConfig | null> = {
   },
 };
 
-export default function GanttView(props: { data: Data; onReschedule: (milestoneId: string, dueAt: Date) => void; onRefuse?: (message: string) => void }) {
-  const { data, onReschedule, onRefuse } = props;
+// Events from the audit log pinned to a bar's row (lib/timeline.ts `markers`): why a phase moved or ended.
+type Marker = { date: string; label: string; kind: string };
+const MARKER_ICON: Record<string, string> = {
+  review_failed: "fa fa-rotate-left",
+  reauthorized: "fa fa-arrows-rotate",
+  voided: "fa fa-ban",
+  expired: "fa fa-hourglass-end",
+  cancelled: "fa fa-ban",
+  dispute: "fa fa-scale-balanced",
+  paid: "fa fa-circle-check",
+};
+const markerItem = (i: number) => (t: TaskModel) => {
+  const m = (t.get("markers") as Marker[] | null | undefined)?.[i];
+  return m ? { startDate: new Date(m.date), name: m.label, iconCls: MARKER_ICON[m.kind] ?? "fa fa-circle-info", cls: `ms-ind-event ms-ind-${m.kind}` } : null;
+};
+
+/**
+ * readOnly: the public showcase of judge runs. Nothing can be dragged and no request is ever made.
+ * fit: zoom to the data on load (live runs take minutes, so the week scale would squash them).
+ */
+export default function GanttView(props: { data: Data; onReschedule?: (milestoneId: string, dueAt: Date) => void; onRefuse?: (message: string) => void; readOnly?: boolean; fit?: boolean }) {
+  const { data, onReschedule, onRefuse, readOnly = false, fit = false } = props;
 
   const ref = useRef<BryntumGantt>(null);
   const refused = useRef<TaskModel | null>(null); // the Work bar whose drag ended past the hold's limit
@@ -144,7 +170,8 @@ export default function GanttView(props: { data: Data; onReschedule: (milestoneI
       project,
       // Open at the start of the work (a day before), not the empty days the time axis pads in before it.
       visibleDate: { date: new Date(Math.min(...data.tasks.map((t) => Date.parse((t as { startDate: string }).startDate))) - 86_400_000), block: "start" },
-      ariaLabel: "Milestone timeline: each milestone's phases and PayPal hold over time",
+      ariaLabel: readOnly ? "Live judge runs: each run's phases and PayPal hold over time (read only)" : "Milestone timeline: each milestone's phases and PayPal hold over time",
+      readOnly,
       viewPreset: PRESET,
       rowHeight: 50,
       barMargin: 10,
@@ -170,7 +197,7 @@ export default function GanttView(props: { data: Data; onReschedule: (milestoneI
       dependencyEditFeature: false,
       taskDragFeature: false,
       taskDragCreateFeature: false,
-      taskResizeFeature: {
+      taskResizeFeature: readOnly ? false : {
         leftHandle: false,
         reservedSpace: 0,
         // The hold's limit is a hard stop: a drop past it is refused here and by the schedule API.
@@ -191,6 +218,11 @@ export default function GanttView(props: { data: Data; onReschedule: (milestoneI
       },
       percentBarFeature: { allowResize: false }, // progress comes from the milestone's state, not a drag
       dependenciesFeature: { allowCreate: false },
+      // Where a phase was planned before a failed review pushed it (lib/timeline.ts `baselines`).
+      baselinesFeature: {
+        template: ({ baseline }: { baseline: { task: TaskModel; startDate: Date; endDate: Date } }) =>
+          `<b>Planned before the rework</b><br>${StringHelper.encodeHtml(baseline.startDate.toLocaleString(undefined, DATE_TIME))} → ${StringHelper.encodeHtml(baseline.endDate.toLocaleString(undefined, DATE_TIME))}<br>${StringHelper.encodeHtml(String(baseline.task.get("movedBy") ?? ""))}`,
+      },
       timeRangesFeature: { showCurrentTimeLine: true },
       // A hold about to lapse is outlined red on its bar (its fill is already red from the data).
       taskRenderer: ({ taskRecord, renderData }: { taskRecord: TaskModel; renderData: { cls: unknown } }) => {
@@ -200,6 +232,9 @@ export default function GanttView(props: { data: Data; onReschedule: (milestoneI
       indicatorsFeature: {
         items: {
           ...holdBands, // first, so the icons below draw over them
+          event0: markerItem(0),
+          event1: markerItem(1),
+          event2: markerItem(2),
           earlyDates: false,
           lateDates: false,
           constraintDate: false,
@@ -223,7 +258,9 @@ export default function GanttView(props: { data: Data; onReschedule: (milestoneI
       taskTooltipFeature: {
         template: ({ taskRecord }: { taskRecord: TaskModel }) =>
           `<b>${StringHelper.encodeHtml(taskRecord.name)}</b><br>${StringHelper.encodeHtml(String(taskRecord.get("note") ?? ""))}` +
-          (taskRecord.get("phase") !== "work" ? "" : canDrag(taskRecord) ? `<br><i>Drag the end of this bar to move the due date${taskRecord.get("dueLimit") ? ` (up to ${StringHelper.encodeHtml((taskRecord.get("dueLimit") as Date).toDateString())}: PayPal holds last 29 days)` : ""}.</i>` : "<br><i>The due date is fixed: work was submitted, or only the client can move it.</i>"),
+          (taskRecord.get("movedBy") ? `<br><b>Why it moved:</b> ${StringHelper.encodeHtml(String(taskRecord.get("movedBy")))} (the thin bar below is the old plan).` : "") +
+          ((taskRecord.get("markers") as Marker[] | null | undefined) ?? []).map((m) => `<br>• ${StringHelper.encodeHtml(m.label)}`).join("") +
+          (taskRecord.get("phase") !== "work" || readOnly ? "" : canDrag(taskRecord) ? `<br><i>Drag the end of this bar to move the due date${taskRecord.get("dueLimit") ? ` (up to ${StringHelper.encodeHtml((taskRecord.get("dueLimit") as Date).toDateString())}: PayPal holds last 29 days)` : ""}.</i>` : "<br><i>The due date is fixed: work was submitted, or only the client can move it.</i>"),
       },
       onBeforeTaskResize: ({ taskRecord }: { taskRecord: TaskModel }) => canDrag(taskRecord),
       onTaskResizeStart: ({ taskRecord }: { taskRecord: TaskModel }) => {
@@ -256,11 +293,24 @@ export default function GanttView(props: { data: Data; onReschedule: (milestoneI
         await project.commitAsync(); // let the engine push the later phases before the preview is dropped
         clearPreview();
         if (conflicted.current) return; // cancelled by the engine: nothing to save (and already explained)
-        if (changed && taskRecord.endDate) onReschedule(String(taskRecord.get("milestoneId")), taskRecord.endDate as Date);
+        if (changed && taskRecord.endDate) onReschedule?.(String(taskRecord.get("milestoneId")), taskRecord.endDate as Date);
       },
     }),
-    [project, data, onReschedule, onRefuse],
+    [project, data, onReschedule, onRefuse, readOnly],
   );
+
+  // Zoom to the data once the engine has placed it (the showcase: runs that took minutes).
+  useEffect(() => {
+    if (!fit) return;
+    let cancelled = false;
+    project.commitAsync().then(() => {
+      const g = ref.current?.instance as Gantt | undefined;
+      if (!cancelled && g && !g.isDestroyed) void g.zoomToFit({ leftMargin: 40, rightMargin: 80 });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project, fit]);
 
   useEffect(() => {
     const mq = window.matchMedia(NARROW);
