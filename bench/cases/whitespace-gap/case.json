@@ -1,0 +1,6 @@
+{
+  "title": "Add initials helper",
+  "body": "Splits on spaces and tabs, drops empty pieces, and joins the uppercased first letters.",
+  "shouldPay": false,
+  "reason": "Only spaces and tabs count as whitespace, so 'Ada\\nLovelace' gives 'A'; C2 says any run of whitespace separates words. The signed tests use only spaces and tabs."
+}

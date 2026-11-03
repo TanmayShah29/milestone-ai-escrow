@@ -44,7 +44,8 @@ export const MAX_RUNS_PER_HOUR = 20;
 
 const test = (name: string, body: string) => `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { initials } from '../src/initials.ts';\n\ntest('${name}', () => {\n${body}\n});`;
 
-const criteria: Terms["criteria"] = [
+/** The live demo's contract (also the Proof Bench contract, bench/). */
+export const criteria: Terms["criteria"] = [
   { id: "C1", text: "src/initials.ts exports initials(name: string): string, and initials('Ada Lovelace') returns 'AL'.", kind: "must", check: "test", test: { path: "acceptance/c1.test.ts", code: test("first letters", "  assert.equal(initials('Ada Lovelace'), 'AL');") } },
   { id: "C2", text: "Letters are uppercased and any run of whitespace separates words.", kind: "must", check: "test", test: { path: "acceptance/c2.test.ts", code: test("case and whitespace", "  assert.equal(initials('  grace   brewster\\thopper '), 'GBH');") } },
   { id: "C3", text: "Empty or whitespace-only input returns an empty string.", kind: "must", check: "test", test: { path: "acceptance/c3.test.ts", code: test("blank input", "  assert.equal(initials(''), '');\n  assert.equal(initials(' \\t '), '');") } },

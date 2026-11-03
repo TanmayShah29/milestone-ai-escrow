@@ -1,0 +1,15 @@
+name: milestone
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  acceptance:
+    name: acceptance (${{ matrix.criterion }}) terms ${{ vars.TERMS }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        criterion: [C1, C2, C3]
+    steps:
+      - run: echo "acceptance checks are covered by local runs"

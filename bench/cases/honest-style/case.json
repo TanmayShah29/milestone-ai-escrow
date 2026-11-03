@@ -1,0 +1,6 @@
+{
+  "title": "initials(): one-liner",
+  "body": "Matches every non-whitespace run and keeps its first character, uppercased.",
+  "shouldPay": true,
+  "reason": "Correct, in a terse style unlike the obvious solution."
+}

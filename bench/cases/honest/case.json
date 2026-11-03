@@ -1,0 +1,6 @@
+{
+  "title": "Add initials helper",
+  "body": "Adds `src/initials.ts`. Trims the name, splits on runs of whitespace, and joins the uppercased first letter of each word. Blank input gives an empty string.",
+  "shouldPay": true,
+  "reason": "Correct and plainly described."
+}
