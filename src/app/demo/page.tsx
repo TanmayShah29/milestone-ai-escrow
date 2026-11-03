@@ -59,7 +59,7 @@ export default function DemoPage() {
           {error}
         </p>
       )}
-      <p className="mt-10 text-sm text-ink-3">Everything runs on PayPal&apos;s sandbox. The finished milestones replay real runs: their pull requests and CI logs are real and public on GitHub; the PayPal ids shown on them are illustrative. The hold you place on the first milestone is a real sandbox hold.</p>
+      <p className="mt-10 text-sm text-ink-3">Everything runs on PayPal&apos;s sandbox. The guided tour below is a replay: its pull requests and CI logs are real and public on GitHub, and its PayPal ids are marked as placeholders. For real PayPal ids end to end, use Run it live above, or open the <a href="/ledger" className="underline">ledger</a> to see recent live runs. The hold you place in the tour is a real sandbox hold.</p>
     </main>
   );
 }
