@@ -5,9 +5,10 @@ import { createMilestone, type Milestone } from "@/lib/milestones/repo";
 import { requestIdFor, type MoneyAction } from "@/lib/money/claims";
 
 // Judge mode: a fresh three-milestone project, seeded straight into the database. Histories mirror the real
-// sandbox runs (and link to the real pull requests in TanmayShah29/milestone-demo); PayPal ids on the
-// finished milestones are illustrative (prefixed DEMO-). The third milestone is real: funding it places an
-// actual PayPal sandbox hold.
+// sandbox runs (and link to the real pull requests in TanmayShah29/milestone-demo). They are replays: the
+// PayPal ids on the finished milestones are placeholders (prefixed DEMO-), and every page that shows them
+// labels them as a replay. Real sandbox ids are on the live judge runs (src/lib/showcase.ts). The third
+// milestone is real: funding it places an actual PayPal sandbox hold.
 
 const DAY = 86_400_000;
 const REPO = "TanmayShah29/milestone-demo";

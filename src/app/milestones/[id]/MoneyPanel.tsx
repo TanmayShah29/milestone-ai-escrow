@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { TriangleAlert } from "lucide-react";
 import { cancelledAt, holdExpiryWarning, moneyLine, usd, type MilestoneView } from "@/lib/client/states";
 import { DEFAULT_FEE_SCHEDULE, estimateSplit, scheduleFor, type FeeSchedule } from "@/lib/money/amounts";
@@ -127,7 +128,13 @@ export function MoneyPanel({ m }: { m: MilestoneView }) {
           {!m.paypal_order_id && <p className="text-xs text-ink-3">No PayPal activity yet.</p>}
         </dl>
         {String(m.paypal_order_id ?? "").startsWith("DEMO-") && (
-          <p className="mt-2 text-xs text-ink-3">Demo replay: these ids are illustrative. The pull request and CI logs are real.</p>
+          <p className="mt-2 rounded border border-held/40 bg-held-field px-2 py-1 text-xs text-ink">
+            <strong>Replay.</strong> These DEMO- ids are placeholders, not PayPal ids. The pull request and CI logs are real. For real sandbox ids, see the{" "}
+            <Link href="/timeline" className="underline">
+              live judge runs
+            </Link>{" "}
+            or run one on /demo.
+          </p>
         )}
       </details>
     </section>

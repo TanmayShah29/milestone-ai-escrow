@@ -10,9 +10,9 @@ import { readDemo, writeDemo, type DemoState, type DemoStory } from "@/lib/clien
 
 const STEPS: { story: DemoStory | "timeline"; title: string; body: string }[] = [
   { story: "fund", title: "Place a real sandbox hold", body: "This milestone's terms are signed. Fund it with the sandbox test card: PayPal's sandbox places a real hold (test money only), and nothing is captured until the work passes." },
-  { story: "paid", title: "See proof pay out", body: "A finished milestone: CI ran the signed tests, the AI reviewed only the README, and fixed rules released the money. The pull request and CI logs are real; the PayPal ids shown here are illustrative." },
+  { story: "paid", title: "See proof pay out", body: "A finished milestone: CI ran the signed tests, the AI reviewed only the README, and fixed rules released the money. This one is a replay: the pull request and CI logs are real, the DEMO- ids are placeholders. Real sandbox ids are on the live judge runs." },
   { story: "caught", title: "Watch a trick fail", body: "This pull request told the AI reviewer to pass everything. The rules caught it, CI failed two tests, and the money is still held." },
-  { story: "timeline", title: "See the money schedule", body: "The timeline shows each phase gated by the money: work waits for the hold, payout waits for review." },
+  { story: "timeline", title: "See the money schedule", body: "The timeline shows each phase gated by the money: work waits for the hold, payout waits for review, and a failed review reschedules what follows." },
 ];
 
 export function DemoTour({ currentId, state, onTimeline = false }: { currentId?: string; state?: string; onTimeline?: boolean }) {

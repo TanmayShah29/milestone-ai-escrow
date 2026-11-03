@@ -303,6 +303,8 @@ export type PortfolioRow = {
   due: string | null;
   next: { text: string; yours: boolean };
   saveLink: boolean;
+  /** Showcase rows only: the run's pull request on GitHub. */
+  prUrl?: string | null;
 };
 
 export function portfolioRow(m: MilestoneView, role: Role, saveLink: boolean, now = Date.now()): PortfolioRow {

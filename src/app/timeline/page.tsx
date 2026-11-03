@@ -2,9 +2,11 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DemoTour } from "@/components/DemoTour";
+import { ShowcaseNotice, ShowcaseToggle } from "@/components/ShowcaseNotice";
 import { heldLinks, rememberLink } from "@/lib/client/links";
+import { fetchShowcase, type ShowcaseRunView } from "@/lib/client/showcase";
 import { loadGanttView, preloadTimeline } from "./preload";
 
 // Bryntum renders in the browser only. Its chunk is large, so a skeleton holds the space while it loads.
@@ -24,8 +26,16 @@ function forRole(tasks: Task[], role: Timeline["role"]): Task[] {
   });
 }
 
+type Data = { tasks: unknown[]; dependencies: unknown[] };
+
+// The judge runs as one read-only chart, in the showcase's order (the paid run, then the caught cheat).
+const showcaseData = (runs: ShowcaseRunView[]): Data => ({ tasks: runs.flatMap((r) => r.timeline.tasks), dependencies: runs.flatMap((r) => r.timeline.dependencies) });
+
 export default function TimelinePage() {
-  const [data, setData] = useState<{ tasks: unknown[]; dependencies: unknown[] }>();
+  const [data, setData] = useState<Data>();
+  // A browser with no milestone links of its own sees the recent live judge runs instead (read only).
+  const [showcase, setShowcase] = useState<ShowcaseRunView[]>();
+  const [view, setView] = useState<"own" | "showcase">("own");
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [warnings, setWarnings] = useState<string[]>([]);
   const [notice, setNotice] = useState<Notice>();
@@ -49,6 +59,9 @@ export default function TimelinePage() {
     const ok = results.filter((x): x is { id: string; token: string; t: Timeline } => !!x);
     setTokens(Object.fromEntries(ok.map((x) => [x.id, x.token])));
     setWarnings(ok.flatMap((x) => x.t.warnings));
+    const runs = await fetchShowcase();
+    setShowcase(runs);
+    if (!ok.length && runs.length) setView("showcase");
     const byStart = (a: Task, b: Task) => a.startDate.localeCompare(b.startDate);
     setData({
       tasks: ok.flatMap((x) => forRole(x.t.tasks, x.t.role)).sort(byStart),
@@ -83,6 +96,10 @@ export default function TimelinePage() {
   // A drag past the hold's limit is refused in the Gantt before any request is made.
   const onRefuse = useCallback((message: string) => setNotice({ kind: "error", text: `The due date was not moved: ${message}` }), []);
 
+  const showing = view === "showcase" && !!showcase?.length;
+  const showcaseChart = useMemo(() => (showcase?.length ? showcaseData(showcase) : undefined), [showcase]);
+  const ownCount = data?.tasks.length ?? 0;
+
   return (
     <main className="flex h-[calc(100vh-3.25rem)] flex-col">
       <DemoTour onTimeline />
@@ -91,15 +108,17 @@ export default function TimelinePage() {
           ← Milestones
         </Link>
         <h1 className="font-semibold">Timeline</h1>
-        <p className="text-sm text-ink-2">Money gates the schedule: work starts when the PayPal hold is placed, and pays out after review and the objection window.</p>
+        <p className="text-sm text-ink-2">Money gates the schedule: work starts when the PayPal hold is placed, and pays out after review and the objection window. A failed review reschedules what follows.</p>
+        {!showing && ownCount > 0 && !!showcase?.length && <ShowcaseToggle onShow={() => setView("showcase")} />}
       </header>
+      {showing && <ShowcaseNotice count={showcase!.length} onBack={ownCount > 0 ? () => setView("own") : undefined} className="mx-4 mt-2" />}
       <div role="status" aria-live="polite" className="empty:hidden mx-4 mt-2 flex flex-col gap-2">
-        {notice && (
+        {!showing && notice && (
           <p className={`rounded-md border p-2 text-sm ${notice.kind === "error" ? "border-failed/40 bg-failed-field" : "border-paid/40 bg-paid-field"}`}>
             {notice.text}
           </p>
         )}
-        {warnings.map((w, i) => (
+        {!showing && warnings.map((w, i) => (
           <p key={`${i}:${w}`} className="rounded-md border border-held/40 bg-held-field p-2 text-sm">
             {w}
           </p>
@@ -108,8 +127,10 @@ export default function TimelinePage() {
       <div className="min-h-0 flex-1">
         {!data ? (
           <TimelineSkeleton />
+        ) : showing ? (
+          <GanttView key="showcase" data={showcaseChart!} readOnly fit />
         ) : data.tasks.length > 0 ? (
-          <GanttView data={data} onReschedule={onReschedule} onRefuse={onRefuse} />
+          <GanttView key="own" data={data} onReschedule={onReschedule} onRefuse={onRefuse} />
         ) : (
           <p className="p-4 text-sm text-ink-2">
             No milestones yet: <Link href="/new" className="underline">create one first</Link>.
