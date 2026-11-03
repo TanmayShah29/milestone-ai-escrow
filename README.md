@@ -15,17 +15,28 @@ For small software teams and agencies hiring contractors or coding agents.
 
 > **Demo video:** _link coming soon_ · **Live app:** https://milestone-ai-escrow.onrender.com
 
-### Judge it in 90 seconds
-1. Open **https://milestone-ai-escrow.onrender.com/demo** (no login; if the free server is asleep, the first load
-   takes up to a minute).
-2. **Run it live:** click **Honest worker** or **Cheating worker**. One click places a real PayPal sandbox hold,
-   opens a real pull request and runs real CI. In about 3 minutes the honest worker is paid, or the cheater is
-   caught with the money still held. Each step shows its PayPal id or GitHub link.
-3. **The AI attack:** below the buttons, a saved real run where fake code beat a first draft of the tests, and
-   the strengthened tests then caught the same fake.
-4. **Explore a finished project:** click **Start the demo** for a verdict table, proof trail and contract seal,
-   then `/timeline` (Bryntum: the schedule follows the money) and `/ledger` (AG Grid: every PayPal call with the
-   idempotency key that makes retries safe).
+### Judge it
+
+| You have | Do this |
+|---|---|
+| **30 seconds** | Open [`/timeline`](https://milestone-ai-escrow.onrender.com/timeline) or [`/ledger`](https://milestone-ai-escrow.onrender.com/ledger): with no deals of your own, they show the latest live judge runs, with real sandbox PayPal ids (authorization, capture, payout batch). The Gantt shows each review cycle, rework and payout as it happened. |
+| **2 minutes** | [`/demo`](https://milestone-ai-escrow.onrender.com/demo) → **Run it live**. One click places a real PayPal sandbox hold, opens a real PR, runs real CI (each signed test streams live), has the AI reviewer read the diff, then code captures and pays out, or catches the cheater with the money still held. A money rail shows where the $12.00 is at every step, and the payout line shows each fee. |
+| **5 minutes** | [`/bench`](https://milestone-ai-escrow.onrender.com/bench), **Proof Bench**: the same contract and 12 pull requests (3 honest, 9 cheats) judged by an approver that only asks an LLM, and by Milestone. Every call is shown, including Milestone's miss. |
+| **15 minutes** | Below the live run on `/demo`, the saved AI attack (fake code beats a draft of the tests, the strengthened tests catch it). Then **Start the demo** for a verdict table, proof trail and contract seal, or connect the [MCP server](#for-ai-agents-the-mcp-server) and take a job as an agent. |
+
+If the free server is asleep, the first load takes up to a minute. A GitHub Action pings it every 10 minutes.
+
+**Proof Bench, Nov 3 run** ([method](bench/README.md), reproducible with `npm run bench`):
+
+| | Cheats paid | Honest work blocked | No verdict | Attacks flagged with the quote |
+|---|---|---|---|---|
+| LLM-only approver (one free-model call per PR) | 1 of the 8 it judged | 0 of 3 | 1 of 12 | 0 of the 4 it judged |
+| Milestone (tests attacked before signing, then CI and fixed rules) | 1 of 9 | 0 of 3 | 0 | 5 of 5 |
+
+Milestone's miss passes every signed test and is wrong on newlines, which no test checks: Milestone is only as
+strict as the tests both sides sign. The LLM-only approver's miss hid its prompt injection with invisible and
+look-alike characters. Before signing, Milestone's AI attacked its own contract: its lookup-table fake passed the
+drafted tests, so a check was added (hardening may only add checks), and that closed a second hole.
 
 Real paid runs on the PayPal sandbox, with public PRs and CI logs in
 [TanmayShah29/milestone-demo](https://github.com/TanmayShah29/milestone-demo):
@@ -44,7 +55,7 @@ payment at some point in their careers, and they lost an average of $5,968 to un
 |---|---|
 | PayPal Orders v2 (create, authorize), Payments v2 (capture, void, reauthorize), Payouts, webhooks (incl. disputes) | Holds, capture on proof, payout minus fees, signature-verified webhooks |
 | APIMatic Context Plugin + the APIMatic-generated PayPal TypeScript SDK | Building the PayPal integration ([`paypal-plan.md`](paypal-plan.md)) |
-| Free OpenRouter models (Vercel AI SDK) | Drafting terms and tests; reviewing only what tests can't check |
+| Free OpenRouter models (Vercel AI SDK) | Drafting terms and tests; attacking them before signing; reviewing only what tests can't check (live in every judge run) |
 | Bryntum Gantt · AG Grid · Render | `/timeline` · `/ledger` and `/milestones` · hosting |
 | Model Context Protocol server | AI agents read terms, accept them, submit work and track payment; no money tools |
 
