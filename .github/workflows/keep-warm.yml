@@ -1,0 +1,32 @@
+# Keeps the free Render instance awake for judges and moves milestones forward (/api/tick), and once a day
+# smoke-tests the pages a judge opens first. A failed smoke test fails this workflow, and GitHub emails the owner.
+name: keep-warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APP: https://milestone-ai-escrow.onrender.com
+    steps:
+      - name: Tick
+        run: curl -fsS -m 120 --retry 3 --retry-delay 20 "$APP/api/tick" -o /dev/null
+      - name: Smoke test (once a day)
+        env:
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -e
+          # Scheduled runs drift, so "once a day" is the first run in the 03:00 UTC hour that lands before 03:15.
+          if [ "$MANUAL" != true ] && { [ "$(date -u +%H)" != 03 ] || [ "$(date -u +%M)" -ge 15 ]; }; then echo "not the daily slot"; exit 0; fi
+          for path in / /demo /bench /timeline /ledger /milestones /new /api/health /api/showcase; do
+            code=$(curl -s -m 90 -o /dev/null -w '%{http_code}' "$APP$path")
+            echo "$path $code"
+            [ "$code" = 200 ] || { echo "::error::$path returned $code"; exit 1; }
+          done

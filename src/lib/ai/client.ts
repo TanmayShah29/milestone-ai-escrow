@@ -22,7 +22,7 @@ export function dailyCap(): number {
   return Number.isInteger(n) && n > 0 ? n : 40;
 }
 
-const openRouterCall: ModelCall = async (model, system, prompt, maxOutputTokens) => {
+export const openRouterCall: ModelCall = async (model, system, prompt, maxOutputTokens) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
   const openrouter = createOpenRouter({ apiKey });
