@@ -40,6 +40,13 @@ export function attemptTooltip(row: LedgerRow | undefined): string | undefined {
 export function MonoCell({ value, node }: CustomCellRendererProps<LedgerRow, string | null>) {
   if (node.rowPinned) return null;
   if (!value) return <span className="text-ink-3">—</span>;
+  // Seeded judge-mode replays carry placeholder ids (src/lib/demo.ts); never let one pass for a PayPal id.
+  if (value.startsWith("DEMO-"))
+    return (
+      <span className="font-mono text-[13px] text-ink-3" title="A replayed demo: this is a placeholder, not a PayPal id">
+        {value} <span className="font-sans text-xs">(replay)</span>
+      </span>
+    );
   return <span className="font-mono text-[13px] text-ink">{value}</span>;
 }
 
@@ -49,6 +56,27 @@ export function LedgerMilestoneCell({ data }: CustomCellRendererProps<LedgerRow>
     <Link href={`/milestones/${data.milestoneId}`} tabIndex={-1} className="text-ink underline decoration-rule-strong hover:decoration-ink">
       {data.milestone}
     </Link>
+  );
+}
+
+/** Showcase ledger (read only): the milestone's name, with no link to a deal room this browser can't open. */
+export function LedgerMilestoneTextCell({ data }: CustomCellRendererProps<LedgerRow>) {
+  if (!data?.milestoneId) return null;
+  return <span className="text-ink">{data.milestone}</span>;
+}
+
+/** Showcase portfolio (read only): the title, and the run's real pull request on GitHub. */
+export function ShowcaseTitleCell({ data }: CustomCellRendererProps<PortfolioRow>) {
+  if (!data) return null;
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="min-w-0 truncate font-medium text-ink">{data.title}</span>
+      {data.prUrl && (
+        <a href={data.prUrl} target="_blank" rel="noreferrer" tabIndex={-1} className="shrink-0 text-sm text-ink-2 underline hover:text-ink">
+          Pull request
+        </a>
+      )}
+    </span>
   );
 }
 

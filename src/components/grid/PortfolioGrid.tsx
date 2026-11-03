@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useRef } from "react";
 import type { PortfolioRow } from "@/lib/client/ledger";
 import { usd } from "@/lib/client/states";
-import { HoldCell, MoneyNowCell, NextActionCell, PortfolioStatusCell, TitleCell } from "./cells";
+import { HoldCell, MoneyNowCell, NextActionCell, PortfolioStatusCell, ShowcaseTitleCell, TitleCell } from "./cells";
 import { GRID_MODULES, gridTheme, resetColumns, restoreColumns, saveColumns } from "./setup";
 
 const COLUMNS_KEY = "milestone:portfolio-columns";
@@ -28,13 +28,15 @@ const holdComparator = (a: number | null, b: number | null, _na: unknown, _nb: u
   return a - b;
 };
 
-export default function PortfolioGrid({ rows }: { rows: PortfolioRow[] }) {
+/** readOnly: the public showcase of judge runs. No deal-room links (this browser holds no link to them). */
+export default function PortfolioGrid({ rows, readOnly = false }: { rows: PortfolioRow[]; readOnly?: boolean }) {
+  const columnsKey = readOnly ? `${COLUMNS_KEY}:showcase` : COLUMNS_KEY;
   const router = useRouter();
   const api = useRef<GridApi<PortfolioRow>>(null);
 
   const columnDefs = useMemo<ColDef<PortfolioRow>[]>(
     () => [
-      { field: "title", headerName: "Milestone", cellRenderer: TitleCell, tooltip: true, filter: "agTextColumnFilter", pinned: "left", lockPinned: true, flex: 1.3, minWidth: 150 },
+      { field: "title", headerName: readOnly ? "Live judge run" : "Milestone", cellRenderer: readOnly ? ShowcaseTitleCell : TitleCell, tooltip: true, filter: "agTextColumnFilter", pinned: "left", lockPinned: true, flex: 1.3, minWidth: 150 },
       { field: "status", headerName: "Status", cellRenderer: PortfolioStatusCell, filter: "agTextColumnFilter", width: 255 },
       {
         colId: "next",
@@ -72,17 +74,17 @@ export default function PortfolioGrid({ rows }: { rows: PortfolioRow[] }) {
       },
       { field: "amountCents", headerName: "Amount", valueFormatter: (p) => usd(p.value as number), filter: "agNumberColumnFilter", type: "rightAligned", width: 95 },
       { field: "due", headerName: "Due", valueFormatter: fmtDue, width: 80 },
-      { field: "role", headerName: "Your role", valueFormatter: (p) => (p.value === "client" ? "Client" : "Worker"), filter: false, width: 100 },
+      { field: "role", headerName: "Your role", valueFormatter: (p) => (p.value === "client" ? "Client" : "Worker"), filter: false, width: 100, hide: readOnly },
     ],
-    [],
+    [readOnly],
   );
 
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: true, resizable: true }), []);
-  const save = useCallback(() => api.current && saveColumns(api.current, COLUMNS_KEY), []);
-  const open = (id: string | undefined) => id && router.push(`/milestones/${id}`);
+  const save = useCallback(() => api.current && saveColumns(api.current, columnsKey), [columnsKey]);
+  const open = (id: string | undefined) => !readOnly && id && router.push(`/milestones/${id}`);
 
   return (
-    <section aria-label="Your milestones">
+    <section aria-label={readOnly ? "Recent live judge runs" : "Your milestones"}>
       <AgGridReact<PortfolioRow>
         modules={GRID_MODULES}
         theme={gridTheme}
@@ -92,10 +94,10 @@ export default function PortfolioGrid({ rows }: { rows: PortfolioRow[] }) {
         getRowId={(p) => p.data.id}
         domLayout="autoHeight"
         tooltipShowDelay={300}
-        rowClass="cursor-pointer"
+        rowClass={readOnly ? undefined : "cursor-pointer"}
         onGridReady={(e) => {
           api.current = e.api;
-          restoreColumns(e.api, COLUMNS_KEY);
+          restoreColumns(e.api, columnsKey);
         }}
         onSortChanged={save}
         onColumnMoved={(e) => e.finished && save()}
@@ -107,11 +109,13 @@ export default function PortfolioGrid({ rows }: { rows: PortfolioRow[] }) {
           if ((k.event as KeyboardEvent | undefined)?.key === "Enter") open(k.data?.id);
         }}
       />
-      <div className="mt-2 flex justify-end">
-        <button type="button" onClick={() => api.current && resetColumns(api.current, COLUMNS_KEY)} className="text-sm text-ink-2 underline hover:text-ink">
-          Reset columns
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="mt-2 flex justify-end">
+          <button type="button" onClick={() => api.current && resetColumns(api.current, columnsKey)} className="text-sm text-ink-2 underline hover:text-ink">
+            Reset columns
+          </button>
+        </div>
+      )}
     </section>
   );
 }

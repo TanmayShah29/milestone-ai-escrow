@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { STATUS_COPY, ledgerTotals, totalRows, type LedgerRow, type TotalRow } from "@/lib/client/ledger";
 import { usd, type MilestoneView } from "@/lib/client/states";
-import { AttemptCell, LedgerMilestoneCell, LedgerStatusCell, MonoCell, attemptTooltip } from "./cells";
+import { AttemptCell, LedgerMilestoneCell, LedgerMilestoneTextCell, LedgerStatusCell, MonoCell, attemptTooltip } from "./cells";
 import { GRID_MODULES, gridTheme, resetColumns, restoreColumns, saveColumns } from "./setup";
 
 const COLUMNS_KEY = "milestone:ledger-columns";
@@ -29,9 +29,11 @@ type Props = {
   rows: LedgerRow[];
   /** The loaded milestones, for the milestone filter and the pinned totals. */
   milestones: MilestoneView[];
+  /** The public showcase of judge runs: rows don't open a deal room (this browser holds no link to them). */
+  readOnly?: boolean;
 };
 
-export default function LedgerGrid({ rows, milestones }: Props) {
+export default function LedgerGrid({ rows, milestones, readOnly = false }: Props) {
   const router = useRouter();
   const api = useRef<GridApi<LedgerRow>>(null);
   const [query, setQuery] = useState("");
@@ -45,7 +47,7 @@ export default function LedgerGrid({ rows, milestones }: Props) {
   const columnDefs = useMemo<ColDef<LedgerRow>[]>(
     () => [
       { field: "at", headerName: "Date", valueFormatter: fmtDate, filter: "agDateColumnFilter", filterParams: dateFilterParams, sort: "desc", flex: 1.1, minWidth: 180, getQuickFilterText: (p) => (p.value ? dateFmt.format(new Date(p.value)) : "") },
-      { field: "milestone", headerName: "Milestone", filter: "agTextColumnFilter", cellRenderer: LedgerMilestoneCell, flex: 1.4, minWidth: 150 },
+      { field: "milestone", headerName: "Milestone", filter: "agTextColumnFilter", cellRenderer: readOnly ? LedgerMilestoneTextCell : LedgerMilestoneCell, flex: 1.4, minWidth: 150 },
       {
         field: "action",
         headerName: "Action",
@@ -89,7 +91,7 @@ export default function LedgerGrid({ rows, milestones }: Props) {
       // Not shown; exported to CSV so the file carries the idempotency key of every attempt.
       { field: "requestId", headerName: "PayPal-Request-Id", hide: true },
     ],
-    [narrow],
+    [narrow, readOnly],
   );
 
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: true, resizable: true, filter: true, suppressHeaderMenuButton: false }), []);
@@ -103,8 +105,8 @@ export default function LedgerGrid({ rows, milestones }: Props) {
   }, [only]);
 
   const open = useCallback((data: LedgerRow | undefined, pinned: unknown) => {
-    if (!pinned && data?.milestoneId) router.push(`/milestones/${data.milestoneId}`);
-  }, [router]);
+    if (!readOnly && !pinned && data?.milestoneId) router.push(`/milestones/${data.milestoneId}`);
+  }, [router, readOnly]);
 
   const save = useCallback(() => api.current && saveColumns(api.current, COLUMNS_KEY), []);
 
@@ -169,7 +171,7 @@ export default function LedgerGrid({ rows, milestones }: Props) {
           doesExternalFilterPass={doesExternalFilterPass}
           domLayout="autoHeight"
           tooltipShowDelay={300}
-          rowClass="cursor-pointer"
+          rowClass={readOnly ? undefined : "cursor-pointer"}
           overlayNoRowsTemplate="<span>No PayPal calls match.</span>"
           onGridReady={(e) => {
             api.current = e.api;
