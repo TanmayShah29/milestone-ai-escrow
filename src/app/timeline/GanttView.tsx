@@ -60,7 +60,7 @@ const PRESET: ViewPresetConfig = {
 // Under Tailwind's `sm` the grid shrinks to the task names so the bars stay visible.
 const NARROW = "(max-width: 639px)";
 const GRID = { wide: { name: 320, status: 140 }, narrow: { name: 150 } };
-const STATUS_LABEL: Record<string, string> = { unfunded: "not funded", failed: "failed / sent back" };
+const STATUS_LABEL: Record<string, string> = { unfunded: "not funded" };
 
 const canDrag = (t: TaskModel) => t.get("phase") === "work" && !!t.get("canReschedule");
 
@@ -172,6 +172,8 @@ export default function GanttView(props: { data: Data; onReschedule?: (milestone
       visibleDate: { date: new Date(Math.min(...data.tasks.map((t) => Date.parse((t as { startDate: string }).startDate))) - 86_400_000), block: "start" },
       ariaLabel: readOnly ? "Live judge runs: each run's phases and PayPal hold over time (read only)" : "Milestone timeline: each milestone's phases and PayPal hold over time",
       readOnly,
+      // Project start/end lines mean little across unrelated judge runs.
+      ...(readOnly ? { projectLinesFeature: false } : {}),
       viewPreset: PRESET,
       rowHeight: 50,
       barMargin: 10,
@@ -186,6 +188,7 @@ export default function GanttView(props: { data: Data; onReschedule?: (milestone
           renderer: ({ record }: { record: MilestoneTask }) => {
             if (!record.isLeaf) return `${Math.round(record.percentDone)}% done`;
             const s = String(record.get("status") ?? "");
+            if (s === "failed" && String(record.get("phase") ?? "").startsWith("review-")) return "sent back";
             return STATUS_LABEL[s] ?? s;
           },
         },

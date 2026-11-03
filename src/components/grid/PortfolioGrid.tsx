@@ -109,11 +109,13 @@ export default function PortfolioGrid({ rows, readOnly = false }: { rows: Portfo
           if ((k.event as KeyboardEvent | undefined)?.key === "Enter") open(k.data?.id);
         }}
       />
-      <div className="mt-2 flex justify-end">
-        <button type="button" onClick={() => api.current && resetColumns(api.current, columnsKey)} className="text-sm text-ink-2 underline hover:text-ink">
-          Reset columns
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="mt-2 flex justify-end">
+          <button type="button" onClick={() => api.current && resetColumns(api.current, columnsKey)} className="text-sm text-ink-2 underline hover:text-ink">
+            Reset columns
+          </button>
+        </div>
+      )}
     </section>
   );
 }

@@ -396,7 +396,8 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
     endDate: iso(Math.max(...phases.map((p) => p.end), holdEnd)),
     // A pinned parent ignores its children; while any phase can move, the parent rolls them up instead.
     manuallyScheduled: !auto,
-    percentDone: Math.round((children.filter((c) => c.status === "done").length / children.length) * 100),
+    // A review that sent the work back is a finished step too (its cycle is over).
+    percentDone: allDone ? 100 : Math.round((children.filter((c) => c.status === "done" || c.phase?.startsWith("review-")).length / children.length) * 100),
     cls: `ms-milestone ${allDone ? "ms-done" : cancelled ? "ms-cancelled" : s === "DISPUTE" ? "ms-dispute" : ""}`,
     iconCls: "fa fa-flag",
     eventColor: allDone ? "green" : cancelled ? "gray" : s === "DISPUTE" ? "orange" : "indigo",

@@ -103,7 +103,9 @@ async function load(): Promise<Showcase> {
   ]);
   const runs = picked.map(({ row }): ShowcaseRun => {
     const trail = audit.filter((a) => a.milestone_id === row.id);
-    const m = { ...(row as Milestone), after_milestone_id: null };
+    // Runs share one brief, so the title names the worker and when it ran (UTC) to tell them apart.
+    const when = new Date(row.run_created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
+    const m = { ...(row as Milestone), after_milestone_id: null, title: `${row.run_kind === "honest" ? "Honest worker" : "Cheating worker"} · ${when} UTC` };
     return {
       kind: row.run_kind,
       outcome: row.run_outcome,
