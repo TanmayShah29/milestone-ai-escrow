@@ -7,14 +7,16 @@ const publicSans = Public_Sans({ variable: "--font-public-sans", subsets: ["lati
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 const DESCRIPTION = "Pay freelancers and AI agents through PayPal when their work passes tests. AI writes the tests and attacks them before signing; only code moves the money.";
-const OG_IMAGE = { url: "/og.png", width: 1200, height: 630, alt: "Milestone: money moves only on proof. A PayPal hold released by fixed rules when the signed tests pass." };
+// ?v= changes with the image, so sites that cached the old preview fetch the new one.
+const OG_IMAGE = { url: "/og.png?v=2", width: 1200, height: 630, alt: "Milestone: pay only when the work passes. A PayPal hold released by code when the signed tests pass." };
+const OG_TITLE = "Milestone: pay only when the work passes";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.APP_URL ?? "https://milestone-ai-escrow.onrender.com"),
   title: "Milestone",
   description: DESCRIPTION,
-  openGraph: { type: "website", siteName: "Milestone", title: "Milestone: money moves only on proof", description: DESCRIPTION, url: "/", images: [OG_IMAGE] },
-  twitter: { card: "summary_large_image", title: "Milestone: money moves only on proof", description: DESCRIPTION, images: [OG_IMAGE] },
+  openGraph: { type: "website", siteName: "Milestone", title: OG_TITLE, description: DESCRIPTION, url: "/", images: [OG_IMAGE] },
+  twitter: { card: "summary_large_image", title: OG_TITLE, description: DESCRIPTION, images: [OG_IMAGE] },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

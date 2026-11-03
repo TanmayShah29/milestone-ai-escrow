@@ -1,0 +1,58 @@
+<!doctype html>
+<!-- The link-preview image (public/og.png), 1200×630. Rebuild with: node scripts/og/render.mjs
+     The cheque is the real run in milestone-demo pull request #1; keep it a real run. -->
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=block" rel="stylesheet">
+<style>
+  :root { --paper:#eef3f1; --panel:#f8fbfa; --ink:#13233a; --ink2:#4a5b6e; --rule:#c9d6d2; --rule2:#a9bbb6; --paid:#1e6b4e; --seal:#1e6b4e; --seal2:#13233a; }
+  * { box-sizing: border-box; margin: 0; }
+  body { width: 1200px; height: 630px; background: var(--paper); font-family: "Public Sans", sans-serif; color: var(--ink); padding: 44px 56px; font-variant-numeric: tabular-nums; }
+  header { display: flex; justify-content: space-between; align-items: baseline; }
+  .brand { font-weight: 700; font-size: 22px; }
+  .tag { color: var(--ink2); font-size: 22px; }
+  h1 { margin-top: 18px; font-size: 66px; font-weight: 700; letter-spacing: -1.5px; line-height: 1.02; }
+  .sub { margin-top: 14px; color: var(--ink2); font-size: 25px; line-height: 1.35; max-width: 1040px; }
+  .cheque { position: relative; margin-top: 30px; height: 262px; border: 1.5px solid var(--rule2); border-radius: 16px; background: var(--panel); display: grid; grid-template-columns: 1fr 260px; padding: 34px 36px 34px 36px; box-shadow: 0 24px 60px -28px rgb(19 35 58 / .35); overflow: hidden; }
+  .band { position: absolute; left: 0; width: 100%; height: 22px; }
+  .band.top { top: 0; } .band.bottom { bottom: 0; }
+  ol { list-style: none; padding: 0; border-top: 1px solid var(--rule); }
+  li { display: flex; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 20px; }
+  li .by { margin-left: auto; color: var(--paid); font-size: 16px; white-space: nowrap; }
+  .tick { width: 22px; height: 22px; border-radius: 50%; background: var(--paid); display: grid; place-items: center; flex: none; }
+  .right { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+  .amount { font-size: 46px; font-weight: 700; letter-spacing: -1px; line-height: 1.1; }
+  .stamp { margin-top: 6px; transform: rotate(-6deg); border: 3px solid var(--paid); color: var(--paid); border-radius: 8px; padding: 5px 10px; font-weight: 700; font-size: 16px; letter-spacing: 1.2px; text-transform: uppercase; white-space: nowrap; }
+</style>
+</head>
+<body>
+  <header><span class="brand">Milestone</span><span class="tag">Pay-on-proof on PayPal</span></header>
+  <h1>Pay only when the work passes.</h1>
+  <p class="sub">AI turns the job into tests, then tries to cheat them before anyone signs. PayPal holds the money; only code releases it.</p>
+  <div class="cheque">
+    <svg class="band top" viewBox="0 0 1000 22" preserveAspectRatio="none"></svg>
+    <svg class="band bottom" viewBox="0 0 1000 22" preserveAspectRatio="none"></svg>
+    <ol>
+      <li><span class="tick"></span>slugify lowercases and trims its input<span class="by">Passed · CI test</span></li>
+      <li><span class="tick"></span>Runs of punctuation become one hyphen<span class="by">Passed · CI test</span></li>
+      <li><span class="tick"></span>Accents transliterated; empty input returns empty<span class="by">Passed · CI test</span></li>
+      <li><span class="tick"></span>README documents it with an example<span class="by">Passed · AI review</span></li>
+    </ol>
+    <div class="right">
+      <svg width="96" height="96" viewBox="-60 -60 120 120" id="seal"></svg>
+      <span class="amount">$25.00</span>
+      <span class="stamp">Cleared · $23.75 paid</span>
+    </div>
+  </div>
+<script>
+  const wave = (w, y, a, k, ph) => { let d = ""; for (let x = 0; x <= w; x += 4) d += `${x ? "L" : "M"}${x} ${(y + a * Math.sin((x / w) * Math.PI * 2 * k + ph)).toFixed(2)}`; return d; };
+  for (const [sel, off] of [[".band.top", 0], [".band.bottom", 0.6]]) {
+    document.querySelector(sel).innerHTML = [0, 1, 2, 3, 4].map((i) => `<path d="${wave(1000, 11, 6, 28, i * 1.25 + off)}" fill="none" stroke="${i % 2 ? "#13233a" : "#1e6b4e"}" stroke-width="0.6" opacity="0.55"/>`).join("");
+  }
+  const ring = (R, A, k, ph) => { let d = ""; for (let t = 0; t <= 360; t += 2) { const th = (t * Math.PI) / 180, r = R + A * Math.sin(k * th + ph); d += `${t ? "L" : "M"}${(r * Math.cos(th)).toFixed(2)} ${(r * Math.sin(th)).toFixed(2)}`; } return d + "Z"; };
+  document.getElementById("seal").innerHTML = [[50, 4, 18], [42, 5, 14], [34, 4, 22]].flatMap(([R, A, k], j) => [0, 1, 2].map((i) => `<path d="${ring(R, A, k, i * 0.7 + j)}" fill="none" stroke="${(i + j) % 2 ? "#13233a" : "#1e6b4e"}" stroke-width="0.7" opacity="0.7"/>`)).join("");
+  document.querySelectorAll(".tick").forEach((t) => (t.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f8fbfa" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>'));
+</script>
+</body>
+</html>
