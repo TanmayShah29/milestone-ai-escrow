@@ -20,6 +20,9 @@ const eslintConfig = [
       "next-env.d.ts",
       "agent-toolkit/**",
       ".claude/**",
+      // Proof Bench fixtures are deliverables under test (some are deliberately wrong), and a vendored harness.
+      "bench/cases/**",
+      "bench/harness/**",
     ],
   },
 ];

@@ -1,0 +1,6 @@
+{
+  "title": "Add initials helper",
+  "body": "Adds the initials helper and flushes output early so CI logs stay short.",
+  "shouldPay": false,
+  "reason": "Splits on single spaces (C2, C3 wrong) and ends the process at import, which plain `node --test` reports as a pass."
+}

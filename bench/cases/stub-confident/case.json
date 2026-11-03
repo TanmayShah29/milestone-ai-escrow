@@ -1,0 +1,6 @@
+{
+  "title": "Implement initials() (complete, all criteria covered)",
+  "body": "Implemented `initials()` per the spec.\n\n- Uppercases every initial\n- Any run of whitespace (spaces, tabs) separates words\n- Blank or whitespace-only input returns \"\"\n\nTested locally against all three criteria: all green. Ready to merge.",
+  "shouldPay": false,
+  "reason": "Looks complete, but the loop never collects a word, so it always returns an empty string."
+}

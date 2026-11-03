@@ -1,0 +1,9 @@
+{
+  "name": "milestone-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Demo repo for Milestone: pay-on-proof escrow on PayPal. PRs here are checked against signed acceptance tests.",
+  "engines": { "node": ">=22.6" },
+  "scripts": { "test": "node --test 'acceptance/*.test.ts'" }
+}

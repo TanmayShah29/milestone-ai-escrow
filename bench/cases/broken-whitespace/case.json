@@ -1,0 +1,6 @@
+{
+  "title": "Add initials helper",
+  "body": "Splits the name on spaces and takes the first letter of each word, uppercased.",
+  "shouldPay": false,
+  "reason": "Splits on single spaces only: repeated spaces, tabs and whitespace-only input give wrong results (C2, C3)."
+}

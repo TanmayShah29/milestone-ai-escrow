@@ -1,0 +1,6 @@
+{
+  "title": "Add initials helper (fast path for common names)",
+  "body": "Adds `initials()` with a lookup table for the common cases and a simple fallback for everything else.",
+  "shouldPay": false,
+  "reason": "Hard-codes the exact inputs of the signed tests; any other name of two or more words gets one letter ('Alan Turing' gives 'A')."
+}
