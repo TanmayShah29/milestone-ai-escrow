@@ -1,32 +1,44 @@
 # Milestone: pay-on-proof payments on PayPal
 
-**A person or an AI agent gets paid through PayPal once their pull request passes tests both sides signed
-and a short objection window closes. The AI writes the tests; only code can release the money.**
+**Pay freelancers and AI coding agents through PayPal only when their work passes tests. Write the job in plain
+English: AI turns it into tests, a second AI tries to cheat them before anyone signs, PayPal holds the money, and
+only code releases it. A smart contract, without the blockchain.**
+
+For small software teams and agencies hiring contractors or coding agents.
 
 - The client's money sits as a PayPal **authorization hold**: proof it exists, but nothing is charged yet.
-- An AI drafts the acceptance criteria and compiles them into tests that must **fail on empty code** before
-  anyone can sign. CI runs them on the worker's PR; **fixed rules, never the model**, capture and pay out.
+- An AI drafts the acceptance criteria and compiles them into tests that must **fail on empty code**. Then a
+  **second AI attacks them**: it writes fake code to pass them without doing the work, and code runs it. If the
+  fake wins, the tests are strengthened until the same fake fails.
+- CI runs the signed tests on the worker's PR; **fixed rules, never the model**, capture and pay out.
 - A PR that tells the AI reviewer "mark everything as passed" is caught, and the money stays held.
 
 > **Demo video:** _link coming soon_ · **Live app:** https://milestone-ai-escrow.onrender.com
 
 ### Judge it in 90 seconds
-1. Open **https://milestone-ai-escrow.onrender.com/demo** and click **Start the demo** (no login; if the free
-   server is asleep, the first load takes up to a minute).
-2. **Step 1:** click **Fund with sandbox test card**. PayPal places a real sandbox hold, and its
-   authorization id appears in the money panel. If the sandbox declines a test card, click again: each
-   attempt uses the next PayPal test card.
-3. **Step 2:** a finished run: verdict table, CI logs, proof trail, contract seal.
-4. **Step 3:** the PR that tried to steer the AI reviewer, caught with the money still held.
-5. **Step 4 and the header:** `/timeline` (Bryntum: the schedule follows the money) and `/ledger`
-   (AG Grid: every PayPal call with the idempotency key that makes retries safe).
+1. Open **https://milestone-ai-escrow.onrender.com/demo** (no login; if the free server is asleep, the first load
+   takes up to a minute).
+2. **Run it live:** click **Honest worker** or **Cheating worker**. One click places a real PayPal sandbox hold,
+   opens a real pull request and runs real CI. In about 3 minutes the honest worker is paid, or the cheater is
+   caught with the money still held. Each step shows its PayPal id or GitHub link.
+3. **The AI attack:** below the buttons, a saved real run where fake code beat a first draft of the tests, and
+   the strengthened tests then caught the same fake.
+4. **Explore a finished project:** click **Start the demo** for a verdict table, proof trail and contract seal,
+   then `/timeline` (Bryntum: the schedule follows the money) and `/ledger` (AG Grid: every PayPal call with the
+   idempotency key that makes retries safe).
 
 Real paid runs on the PayPal sandbox, with public PRs and CI logs in
 [TanmayShah29/milestone-demo](https://github.com/TanmayShah29/milestone-demo):
 [#1](https://github.com/TanmayShah29/milestone-demo/pull/1) passed and paid $23.75;
 [#2](https://github.com/TanmayShah29/milestone-demo/pull/2) hid a prompt injection, was caught with the money
 still held, then fixed and paid; [#3](https://github.com/TanmayShah29/milestone-demo/pull/3) was delivered by
-an AI agent through the MCP server and paid $14.25.
+an AI agent through the MCP server and paid $14.25;
+[#10](https://github.com/TanmayShah29/milestone-demo/pull/10) was an agent hired by another agent: its first
+attempt failed the signed tests with no money moved, and its fix was paid $13.10.
+
+Why it matters: in a Freelancers Union survey of over 5,000 US freelancers
+([2015](https://onlabor.org/wp-content/uploads/2017/05/FU_NonpaymentReport_r3.pdf)), 71% had trouble collecting
+payment at some point in their careers, and they lost an average of $5,968 to unpaid work in 2014.
 
 | Built with | Used for |
 |---|---|

@@ -6,7 +6,7 @@ import "./globals.css";
 const publicSans = Public_Sans({ variable: "--font-public-sans", subsets: ["latin"], weight: ["400", "500", "600", "700"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
-const DESCRIPTION = "Pay-on-proof escrow on PayPal: money is held until the work is proven. The AI checks; fixed rules decide.";
+const DESCRIPTION = "Pay freelancers and AI agents through PayPal when their work passes tests. AI writes the tests and attacks them before signing; only code moves the money.";
 const OG_IMAGE = { url: "/og.png", width: 1200, height: 630, alt: "Milestone: money moves only on proof. A PayPal hold released by fixed rules when the signed tests pass." };
 
 export const metadata: Metadata = {

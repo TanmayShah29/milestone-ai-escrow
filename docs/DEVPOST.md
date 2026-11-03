@@ -1,7 +1,7 @@
 # Devpost submission: Milestone
 
-**Tagline:** Pay-on-proof on PayPal. The money is held until the work is proven. The AI writes and checks
-the contract, and only code moves money.
+**Tagline:** Pay freelancers and AI agents through PayPal only when their work passes tests. AI writes the
+contract and attacks it before anyone signs; only code moves the money.
 
 **Links**
 - Live app: https://milestone-ai-escrow.onrender.com (judge mode, no login: `/demo`)
