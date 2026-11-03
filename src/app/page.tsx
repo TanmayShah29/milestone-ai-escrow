@@ -157,6 +157,20 @@ export default function Home() {
         </div>
       </section>
 
+      <section aria-labelledby="bench-h" className="border-t border-rule">
+        <div className="mx-auto max-w-6xl px-4 py-14">
+          <h2 id="bench-h" className="text-2xl font-semibold tracking-tight">
+            Measured against an AI-only approver
+          </h2>
+          <p className="mt-3 max-w-2xl text-ink-2">
+            Most AI escrow asks a model whether the work is done. Proof Bench gives that approver and Milestone the same contract and twelve pull requests, honest ones and cheats, and shows every call, including where Milestone gets it wrong.
+          </p>
+          <Link href="/bench" className="mt-5 inline-block font-medium text-ink underline underline-offset-2">
+            See the results
+          </Link>
+        </div>
+      </section>
+
       <section aria-labelledby="agents-h" className="border-t border-rule">
         <div className="mx-auto grid max-w-6xl gap-8 px-4 py-14 md:grid-cols-2 md:items-center">
           <div>

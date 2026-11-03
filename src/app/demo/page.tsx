@@ -38,6 +38,9 @@ export default function DemoPage() {
         <LiveRun />
       </div>
       <AttackExample />
+      <p className="mt-8 text-ink-2">
+        How does this compare with asking an AI whether the work is done? <a href="/bench" className="font-medium text-ink underline underline-offset-2">Proof Bench</a> runs both on the same twelve pull requests.
+      </p>
       <h2 className="mt-12 border-t border-rule pt-8 text-xl font-semibold tracking-tight">Or explore a finished project</h2>
       <p className="mt-2 text-ink-2">We&apos;ll set up a small project with three milestones, each showing one part of the idea. You&apos;ll be both the client and the worker; switch sides at the top of each milestone.</p>
       <ul className="mt-6 space-y-3 text-ink">

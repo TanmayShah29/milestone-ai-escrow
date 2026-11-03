@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { benchTermsHash, loadCases, RESULTS_PATH, runMilestone, score, type BenchResults } from "@/lib/bench";
+import { droppedChecks } from "@/lib/contract/attack";
+import { benchTerms, benchTermsHash, hardened, hardenedTermsHash, loadCases, RESULTS_PATH, runMilestone, score, type BenchResults } from "@/lib/bench";
 
 // Proof Bench claims can't rot: Milestone's side is re-run over the corpus (signed tests through the CI
 // harness, then verifyCodePr and decide) and must match the committed bench/results.json. Pure: no
@@ -29,8 +30,22 @@ describe("Proof Bench", async () => {
       assert.deepEqual(got.reasons, row.milestone.reasons);
       assert.deepEqual(got.testResults.map((t) => [t.id, t.passed]), row.milestone.testResults.map((t) => [t.id, t.passed]));
       assert.equal(got.plainNodeTest, row.milestone.plainNodeTest);
+      if (row.milestoneHardened) {
+        const after = await runMilestone(c, "hardened");
+        assert.equal(after.decision, row.milestoneHardened.decision, `${c.id} after the attack`);
+        assert.deepEqual(after.testResults.map((t) => [t.id, t.passed]), row.milestoneHardened.testResults.map((t) => [t.id, t.passed]));
+      }
     });
   }
+
+  it("the hardened tests only add checks to the drafted ones, and match results.json", () => {
+    if (!hardened?.criteria) return;
+    assert.equal(committed.meta.attack?.termsHash, hardenedTermsHash);
+    for (const t of hardened.criteria) {
+      const draft = benchTerms.criteria.find((c) => c.id === t.id)!;
+      assert.deepEqual(droppedChecks(draft.test!.code, t.code), [], t.id);
+    }
+  });
 
   it("the scoreboard numbers follow from the rows", () => {
     const s = score(committed);

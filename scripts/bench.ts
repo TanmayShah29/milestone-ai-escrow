@@ -11,6 +11,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { AiBusy, configuredModels, generateJson, openRouterCall, type ModelCall } from "@/lib/ai/client";
 import {
   benchTermsHash,
+  hardened,
+  hardenedTermsHash,
   LLM_SYSTEM,
   llmPrompt,
   llmPromptHash,
@@ -62,6 +64,7 @@ async function main() {
   const out: BenchCaseResult[] = [];
   for (const c of cases) {
     const milestone = await runMilestone(c);
+    const milestoneHardened = hardened?.criteria ? await runMilestone(c, "hardened") : undefined;
     const cached = prev?.cases.find((p) => p.id === c.id);
     let llmOnly: LlmResult | undefined;
     if (cached && cached.contentHash === c.contentHash && cached.llmOnly.promptHash === llmPromptHash && (cached.llmOnly.status === "ok" || opts.noLlm) && !opts.fresh) {
@@ -80,10 +83,10 @@ async function main() {
         llmOnly = cached?.llmOnly.status === "ok" && cached.contentHash === c.contentHash ? cached.llmOnly : { status, error: String(err).replace(/^Error: /, "").slice(0, 300), promptHash: llmPromptHash, at };
       }
     }
-    const row: BenchCaseResult = { id: c.id, title: c.title, expected: { pay: c.shouldPay, reason: c.reason }, contentHash: c.contentHash, llmOnly, milestone };
+    const row: BenchCaseResult = { id: c.id, title: c.title, expected: { pay: c.shouldPay, reason: c.reason }, contentHash: c.contentHash, llmOnly, milestone, ...(milestoneHardened ? { milestoneHardened } : {}) };
     out.push(row);
     const llm = llmOnly.status === "ok" ? (llmOnly.pay ? "pay" : "don't pay") : llmOnly.status;
-    console.log(`${c.id.padEnd(22)} expected ${c.shouldPay ? "pay" : "don't pay"}; LLM-only ${llm}${llmOnly.status === "ok" ? ` (${llmOnly.model})` : ""}; Milestone ${milestone.decision}`);
+    console.log(`${c.id.padEnd(22)} expected ${c.shouldPay ? "pay" : "don't pay"}; LLM-only ${llm}${llmOnly.status === "ok" ? ` (${llmOnly.model})` : ""}; Milestone ${milestone.decision}${milestoneHardened ? ` (after attack: ${milestoneHardened.decision})` : ""}`);
   }
 
   // Cases not re-run with --only keep their previous rows.
@@ -99,6 +102,7 @@ async function main() {
       llmPromptHash,
       llmSystem: LLM_SYSTEM,
       llmCalls: (prev && !opts.fresh ? prev.meta.llmCalls : 0) + calls,
+      ...(hardened ? { attack: { status: hardened.status, model: hardened.model, at: hardened.at, explanation: hardened.explanation, caughtBy: hardened.caughtBy, termsHash: hardenedTermsHash ?? null } } : {}),
     },
     cases: rows,
   };
@@ -106,7 +110,8 @@ async function main() {
   const s = score(results);
   console.log(`\n${calls} model call(s) this run.`);
   console.log(`LLM-only: paid ${s.llm.paidCheats} of ${s.cheats} cheats, blocked ${s.llm.blockedHonest} of ${s.honest} honest (${s.llm.answered} of ${s.total} answered).`);
-  console.log(`Milestone: paid ${s.milestone.paidCheats} of ${s.cheats} cheats, blocked ${s.milestone.blockedHonest} of ${s.honest} honest.`);
+  console.log(`Milestone (drafted tests): paid ${s.milestone.paidCheats} of ${s.cheats} cheats, blocked ${s.milestone.blockedHonest} of ${s.honest} honest.`);
+  console.log(`Milestone (after the attack): paid ${s.shipped.paidCheats} of ${s.cheats} cheats, blocked ${s.shipped.blockedHonest} of ${s.honest} honest.`);
 }
 
 main()

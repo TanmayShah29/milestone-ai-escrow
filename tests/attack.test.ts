@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
 import { resetDb, seedMilestone } from "./helpers";
-import { attackTerms, storedAttack } from "@/lib/contract/attack";
+import { attackTerms, droppedChecks, storedAttack } from "@/lib/contract/attack";
 import { contractDocument, hashTerms, canonical, termsSchema, type Terms } from "@/lib/contract/terms";
 import { db } from "@/lib/db";
 import { z } from "zod";
@@ -173,5 +173,16 @@ describe("attackTerms", () => {
     const id = await draft();
     const bad = JSON.stringify({ files: [{ path: "../../etc/x.ts", code: HARDCODED }], explanation: "x", probe: PROBE });
     await assert.rejects(attackTerms(id, { call: scripted(bad, bad, bad, bad, bad, bad) }));
+  });
+});
+
+describe("hardening only adds checks", () => {
+  const before = "test('x', () => {\n  assert.equal(f('  a\\tb '), 'AB');\n  assert.equal(f(''), '');\n});";
+  it("finds a draft assert line the rewrite dropped, ignoring whitespace", () => {
+    const rewrite = "test('x', () => {\n  assert.equal( f(''), '' );\n  assert.equal(f('c d'), 'CD');\n});";
+    assert.deepEqual(droppedChecks(before, rewrite), ["assert.equal(f('  a\\tb '), 'AB');"]);
+  });
+  it("accepts a rewrite that keeps every check and adds more", () => {
+    assert.deepEqual(droppedChecks(before, `${before}\nassert.equal(f('x y'), 'XY');`), []);
   });
 });

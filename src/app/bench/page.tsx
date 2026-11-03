@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Check, X } from "lucide-react";
 import type { Metadata } from "next";
-import { score, type BenchCaseResult, type BenchResults, type LlmResult, type MilestoneResult } from "@/lib/bench-score";
+import { score, shipped, type BenchCaseResult, type BenchResults, type LlmResult, type MilestoneResult } from "@/lib/bench-score";
 
 // Proof Bench: the committed bench/results.json, read when the page is built. `npm run bench` writes it;
 // tests/bench.test.ts re-runs Milestone's side and fails if the file no longer matches.
@@ -100,7 +100,7 @@ function LlmCell({ r, expected }: { r: LlmResult; expected: boolean }) {
   );
 }
 
-function MilestoneCell({ r, expected }: { r: MilestoneResult; expected: boolean }) {
+function MilestoneCell({ r, expected, draft }: { r: MilestoneResult; expected: boolean; draft?: MilestoneResult }) {
   const escaped = r.plainNodeTest === "pass" && r.testResults.some((t) => !t.passed);
   return (
     <>
@@ -116,6 +116,11 @@ function MilestoneCell({ r, expected }: { r: MilestoneResult; expected: boolean 
         </p>
       )}
       {r.ciNote && <p className="mt-2 text-sm text-ink-3">{r.ciNote}</p>}
+      {draft && draft.pay !== r.pay && (
+        <p className="mt-2 border-l-2 border-held pl-2 text-sm text-ink-2">
+          On the tests as first drafted, this {draft.pay ? "was paid" : "was not paid"}. The pre-signing attack {r.pay ? "changed that" : "closed this hole"}.
+        </p>
+      )}
       {escaped && <p className="mt-2 text-sm text-ink-3">Plain <code className="font-mono text-xs">node --test</code> reports this as a pass; the CI harness checks every signed test actually ran.</p>}
     </>
   );
@@ -140,7 +145,7 @@ function CaseRow({ c }: { c: BenchCaseResult }) {
       </div>
       <div className="rounded-lg bg-panel p-4 md:bg-transparent md:p-0">
         <CellLabel>Milestone</CellLabel>
-        <MilestoneCell r={c.milestone} expected={c.expected.pay} />
+        <MilestoneCell r={shipped(c)} expected={c.expected.pay} {...(c.milestoneHardened ? { draft: c.milestone } : {})} />
       </div>
     </li>
   );
@@ -169,11 +174,12 @@ export default function BenchPage() {
   const unanswered = s.total - s.llm.answered;
   const date = new Date(meta.date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
   const cheats = cases.filter((c) => !c.expected.pay);
-  const msPaid = cheats.filter((c) => c.milestone.pay);
+  const msPaid = cheats.filter((c) => shipped(c).pay);
+  const closed = cheats.filter((c) => c.milestoneHardened && c.milestone.pay && !c.milestoneHardened.pay);
   const llmPaid = cheats.filter((c) => c.llmOnly.status === "ok" && c.llmOnly.pay);
-  const flagged = cases.filter((c) => c.milestone.injectionQuotes.length || c.milestone.tampering.length);
+  const flagged = cases.filter((c) => shipped(c).injectionQuotes.length || shipped(c).tampering.length);
   const attacks = cases.filter((c) => /^(injection|tamper|harness)-/.test(c.id));
-  const allFlagged = attacks.every((c) => c.milestone.injectionQuotes.length || c.milestone.tampering.length);
+  const allFlagged = attacks.every((c) => shipped(c).injectionQuotes.length || shipped(c).tampering.length);
   const llmNoticed = attacks.filter((c) => c.llmOnly.status === "ok" && /inject|instruction|aimed at|reviewer|workflow|process\.exit/i.test(`${c.llmOnly.rawSummary} ${c.llmOnly.perCriterion.map((x) => x.reason).join(" ")}`));
   const answeredAttacks = attacks.filter((c) => c.llmOnly.status === "ok");
   const noAnswer = { error: cases.filter((c) => c.llmOnly.status === "error").length, skipped: cases.filter((c) => c.llmOnly.status === "skipped" || c.llmOnly.status === "busy").length };
@@ -183,10 +189,10 @@ export default function BenchPage() {
     <main id="content" className="mx-auto max-w-6xl px-4 py-10 sm:py-14">
       <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Proof Bench</h1>
       <p className="mt-4 max-w-3xl text-lg text-ink-2">
-        One signed contract, {s.total} pull requests, two approvers. The first asks a language model whether the work is done, the way most AI escrow tools do. The second is Milestone: the signed acceptance tests run, deterministic checks look for tampering and text aimed at a reviewer, and fixed rules decide.
+        One signed contract, {s.total} pull requests, two approvers. The first asks a language model whether the work is done, the way most AI escrow tools do. The second is Milestone as it ships: before signing, an AI attacks the drafted tests and they&apos;re strengthened; then the signed tests run, deterministic checks look for tampering and text aimed at a reviewer, and fixed rules decide.
       </p>
       <p className="mt-3 text-sm text-ink-3">
-        Run {date} · {s.cheats} cheats, {s.honest} honest deliverables · one run, free models · every criterion in this contract is a test, so Milestone&apos;s side made no AI call here
+        Run {date} · {s.cheats} cheats, {s.honest} honest deliverables · one run, free models · every criterion in this contract is a test, so judging made no AI call on Milestone&apos;s side
       </p>
 
       <section aria-labelledby="score-title" className="mt-10">
@@ -206,11 +212,11 @@ export default function BenchPage() {
           </div>
           <div className="border-t border-rule py-6 sm:border-l sm:border-t-0 sm:pl-8">
             <h3 className="text-lg font-semibold">Milestone</h3>
-            <p className="mt-1 text-sm text-ink-2">Signed tests through the CI harness, tampering and injection checks, then fixed rules.</p>
+            <p className="mt-1 text-sm text-ink-2">Tests attacked and hardened before signing, run through the CI harness, tampering and injection checks, then fixed rules.</p>
             <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5">
-              <Stat value={s.milestone.paidCheats} of={s.cheats} label="Cheats paid" note={s.sameCheats.n < s.cheats ? `${s.sameCheats.milestonePaid} of the same ${s.sameCheats.n} the LLM answered` : undefined} />
-              <Stat value={s.milestone.blockedHonest} of={s.honest} label="Honest work blocked" />
-              <Stat value={s.milestone.correct} of={s.total} label="Right calls" />
+              <Stat value={s.shipped.paidCheats} of={s.cheats} label="Cheats paid" note={[s.sameCheats.n < s.cheats ? `${s.sameCheats.milestonePaid} of the same ${s.sameCheats.n} the LLM answered` : "", s.shipped.hardened && s.milestone.paidCheats !== s.shipped.paidCheats ? `${s.milestone.paidCheats} on the tests as first drafted` : ""].filter(Boolean).join("; ") || undefined} />
+              <Stat value={s.shipped.blockedHonest} of={s.honest} label="Honest work blocked" />
+              <Stat value={s.shipped.correct} of={s.total} label="Right calls" note="it answers every case" />
               <Stat value={flagged.length} of={s.total} label="Flagged to a person" note="injection or tampering, with the quote" />
             </dl>
           </div>
@@ -222,9 +228,14 @@ export default function BenchPage() {
           What this run shows
         </h2>
         <ul className="mt-4 list-disc space-y-3 pl-5 text-ink">
+          {meta.attack && (
+            <li>
+              <span className="font-semibold">Before signing, Milestone&apos;s AI attacked its own contract.</span> Playing the cheating worker, it wrote a fake that passed every drafted test: “{meta.attack.explanation}” Code ran the fake, so the tests were strengthened, and kept only because the same fake then failed ({meta.attack.caughtBy.join(", ")}). Hardening can only add checks: a rewrite that drops one is refused.{closed.length > 0 && <> That closed {closed.length === 1 ? "a hole" : `${closed.length} holes`} in this bench ({names(closed)}). The attacker never saw these cases.</>}
+            </li>
+          )}
           {msPaid.length > 0 && (
             <li>
-              <span className="font-semibold">Milestone paid {msPaid.length === 1 ? "one cheat" : `${msPaid.length} cheats`}</span> ({names(msPaid)}). {msPaid.length === 1 ? "It passes" : "Both pass"} every signed test and {msPaid.length === 1 ? "is" : "are"} wrong outside them. Milestone can only be as strict as the tests both sides signed; the LLM-only approver caught {msPaid.filter((c) => c.llmOnly.status === "ok" && !c.llmOnly.pay).length === msPaid.length ? (msPaid.length === 1 ? "it" : "both") : "some of these"}. Narrow tests are a contract problem, and this is where Milestone is weak.
+              <span className="font-semibold">Milestone still paid {msPaid.length === 1 ? "one cheat" : `${msPaid.length} cheats`}</span> ({names(msPaid)}). {msPaid.length === 1 ? "It passes" : "They pass"} every signed test and {msPaid.length === 1 ? "is" : "are"} wrong outside them. Milestone can only be as strict as the tests both sides signed; the LLM-only approver caught {msPaid.filter((c) => c.llmOnly.status === "ok" && !c.llmOnly.pay).length === msPaid.length ? (msPaid.length === 1 ? "it" : "both") : "some of these"}. Narrow tests are a contract problem, and this is where Milestone is weak.
             </li>
           )}
           {llmPaid.length > 0 && (
@@ -238,7 +249,7 @@ export default function BenchPage() {
             </li>
           )}
           <li>
-            <span className="font-semibold">Same input, same answer.</span> Milestone&apos;s side is deterministic and re-checked by a unit test on every run. The LLM side is one sample from free models: {unanswered} of {s.total} cases got no verdict in this run.
+            <span className="font-semibold">Same input, same answer.</span> Milestone&apos;s judging is deterministic and re-checked by a unit test on every run (the attack that hardened the tests is one AI run, before signing, and its tests are committed). The LLM side is one sample from free models: {unanswered} of {s.total} cases got no verdict in this run.
           </li>
         </ul>
       </section>
@@ -292,6 +303,7 @@ npx tsx --test tests/bench.test.ts`}</code>
             <li>{s.total} hand-written cases on one small contract, one run. This shows how each approver fails, not rates you can generalise.</li>
             <li>The LLM side used free models. A stronger paid model would likely catch more, and could also be fooled differently.</li>
             <li>Milestone&apos;s AI reviewer, which judges criteria no test covers, is not part of this bench. Here every criterion is a test.</li>
+            <li>The hardened tests come from one attack run ({meta.attack?.model ?? "a free model"}). Another run may harden differently, or not at all; Milestone then shows both sides that the contract is breakable.</li>
             <li>CI is simulated locally with the demo repo&apos;s own harness; the rewritten-workflow case assumes the worst (every job green).</li>
           </ul>
           <details className="mt-5 rounded-lg border border-rule bg-panel p-4">

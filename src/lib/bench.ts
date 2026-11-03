@@ -1,11 +1,16 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { canonical, hashTerms, type Terms } from "@/lib/contract/terms";
-import { criteria } from "@/lib/demo-live";
+import { criteria as liveCriteria } from "@/lib/demo-live";
+
+// The bench contract is the live run's three signed tests. The live run's AI-reviewed nice-to-have (C4) is
+// left out, so Milestone's side here makes no AI call and its results can be checked offline.
+const criteria = liveCriteria.filter((c) => c.test);
 import type { Milestone } from "@/lib/milestones/repo";
 import type { CheckRun, GitHub, PrFile, PullRequest } from "@/lib/review/github";
 import { decide } from "@/lib/review/policy";
@@ -32,6 +37,26 @@ const TEST_TIMEOUT_MS = 30_000;
 export const benchTerms: Terms = { criteria, testCommand: "node --test 'acceptance/*.test.ts'" };
 const deal = { id: "proof-bench", title: "Add an initials helper", amount_cents: 1200, currency: "USD", freelancer_email: "worker@example.com", repo: "TanmayShah29/milestone-demo" } as Parameters<typeof hashTerms>[0];
 export const benchTermsHash = hashTerms(deal, benchTerms);
+
+// The same contract after Milestone's pre-signing attack (scripts/bench-harden.ts), when it hardened the tests:
+// that's what both sides would actually sign. The attacker never saw the bench cases.
+type Hardened = { status: string; model: string | null; at: string; explanation: string; caughtBy: string[]; criteria: { id: string; path: string; code: string }[] | null };
+function loadHardened(): Hardened | undefined {
+  try {
+    return JSON.parse(readFileSync(join(BENCH_DIR, "hardened.json"), "utf8")) as Hardened;
+  } catch {
+    return undefined;
+  }
+}
+export const hardened = loadHardened();
+const hardenedCriteria = hardened?.criteria
+  ? criteria.map((c) => {
+      const t = hardened.criteria!.find((x) => x.id === c.id);
+      return t ? { ...c, test: { path: t.path, code: t.code } } : c;
+    })
+  : undefined;
+export const hardenedTerms: Terms | undefined = hardenedCriteria && { ...benchTerms, criteria: hardenedCriteria };
+export const hardenedTermsHash = hardenedTerms && hashTerms(deal, hardenedTerms);
 
 export type BenchCase = {
   id: string;
@@ -79,7 +104,7 @@ export async function loadCases(): Promise<BenchCase[]> {
 }
 
 /** The PR description as submitted: the worker's text plus the one line that cites the signed terms. */
-export const prBody = (c: BenchCase) => `${c.body}\n\nMilestone-Terms: ${benchTermsHash}`;
+export const prBody = (c: BenchCase, hash = benchTermsHash) => `${c.body}\n\nMilestone-Terms: ${hash}`;
 
 /** Each file as a GitHub PR file entry. The demo repo has none of them except the CI workflow. */
 export function prFiles(c: BenchCase): PrFile[] {
@@ -144,32 +169,32 @@ function run(args: string[], cwd: string): Promise<{ code: number; out: string }
 }
 
 /** The deliverable on top of the demo repo, with the signed tests written over whatever the PR put there (as CI does). */
-async function workspace(c: BenchCase): Promise<string> {
+async function workspace(c: BenchCase, signed: Terms["criteria"]): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), `proof-bench-${c.id}-`));
   await cp(BASE_DIR, dir, { recursive: true });
   for (const f of c.files) {
     await mkdir(dirname(join(dir, f.path)), { recursive: true });
     await writeFile(join(dir, f.path), f.content);
   }
-  for (const x of criteria) {
+  for (const x of signed) {
     await mkdir(dirname(join(dir, x.test!.path)), { recursive: true });
     await writeFile(join(dir, x.test!.path), x.test!.code);
   }
   return dir;
 }
 
-export async function runSignedTests(c: BenchCase): Promise<{ results: TestResult[]; plain: "pass" | "fail" }> {
-  const dir = await workspace(c);
+export async function runSignedTests(c: BenchCase, signed: Terms["criteria"] = criteria): Promise<{ results: TestResult[]; plain: "pass" | "fail" }> {
+  const dir = await workspace(c, signed);
   try {
     const results: TestResult[] = [];
-    for (const x of criteria) {
+    for (const x of signed) {
       const r = await run([HARNESS, x.test!.path], dir);
       const passed = r.code === 0 && /Acceptance passed for /.test(r.out);
       // The harness prints a random sentinel name; keep the output stable between runs.
       const output = r.out.replace(/milestone: every signed test ran [0-9a-f]{32}/g, "milestone: every signed test ran <sentinel>").replace(/\.milestone-run-[0-9a-f]{16}\.mjs/g, ".milestone-run-<id>.mjs").replace(new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "<workdir>").replace(/\s*duration_ms[^\n]*/g, "");
       results.push({ id: x.id, path: x.test!.path, passed, output: output.trim().split("\n").slice(-8).join("\n").slice(0, 800) });
     }
-    const plain = await run(["--test", ...criteria.map((x) => x.test!.path)], dir);
+    const plain = await run(["--test", ...signed.map((x) => x.test!.path)], dir);
     return { results, plain: plain.code === 0 ? "pass" : "fail" };
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -179,13 +204,13 @@ export async function runSignedTests(c: BenchCase): Promise<{ results: TestResul
 const PR_URL = "https://github.com/TanmayShah29/milestone-demo/pull/1";
 
 /** GitHub as verifyCodePr sees it: the PR, its files, and CI check runs carrying the local test results. */
-function benchGitHub(c: BenchCase, tests: TestResult[]): GitHub {
+function benchGitHub(c: BenchCase, tests: TestResult[], hash: string): GitHub {
   const headSha = c.contentHash.slice(0, 40);
-  const pr: PullRequest = { number: 1, title: c.title, body: prBody(c), state: "open", merged: false, headSha, baseRepo: "TanmayShah29/milestone-demo", htmlUrl: PR_URL, changedFiles: c.files.length, createdAt: "2026-11-01T00:00:00Z" };
+  const pr: PullRequest = { number: 1, title: c.title, body: prBody(c, hash), state: "open", merged: false, headSha, baseRepo: "TanmayShah29/milestone-demo", htmlUrl: PR_URL, changedFiles: c.files.length, createdAt: "2026-11-01T00:00:00Z" };
   const job = (name: string, conclusion: string, i: number): CheckRun => ({ name, status: "completed", conclusion, url: `https://github.com/TanmayShah29/milestone-demo/actions/runs/1/job/${i}`, startedAt: "2026-11-01T00:01:00Z", app: CI_APP, headSha, workflowRunId: 1 });
   const runs = [
     job("contract", "success", 0),
-    ...tests.map((t, i) => job(acceptanceCheckName(t.id, benchTermsHash), c.ciOverride === "success" || t.passed ? "success" : "failure", i + 1)),
+    ...tests.map((t, i) => job(acceptanceCheckName(t.id, hash), c.ciOverride === "success" || t.passed ? "success" : "failure", i + 1)),
   ];
   return {
     pr: async () => pr,
@@ -196,10 +221,14 @@ function benchGitHub(c: BenchCase, tests: TestResult[]): GitHub {
   };
 }
 
-export async function runMilestone(c: BenchCase): Promise<MilestoneResult> {
-  const { results, plain } = await runSignedTests(c);
-  const m = { pr_url: PR_URL, criteria_hash: benchTermsHash } as unknown as Milestone;
-  const out = await verifyCodePr(m, benchTerms, { github: benchGitHub(c, results), aiCall: async () => { throw new Error("Proof Bench: every criterion is tested, so Milestone makes no AI call"); } });
+/** Milestone on the drafted tests, or (`"hardened"`) on the tests its pre-signing attack strengthened. */
+export async function runMilestone(c: BenchCase, variant: "draft" | "hardened" = "draft"): Promise<MilestoneResult> {
+  const terms = variant === "hardened" ? hardenedTerms : benchTerms;
+  const hash = variant === "hardened" ? hardenedTermsHash : benchTermsHash;
+  if (!terms || !hash) throw new Error("no hardened terms: run scripts/bench-harden.ts");
+  const { results, plain } = await runSignedTests(c, terms.criteria);
+  const m = { pr_url: PR_URL, criteria_hash: hash } as unknown as Milestone;
+  const out = await verifyCodePr(m, terms, { github: benchGitHub(c, results, hash), aiCall: async () => { throw new Error("Proof Bench: every criterion is tested, so Milestone makes no AI call"); } });
   if (out.status !== "done") throw new Error(`verifier did not finish for ${c.id}: ${out.reason}`);
   const { decision, reasons } = decide(out.verdict);
   return {

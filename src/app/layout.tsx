@@ -32,7 +32,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               Milestone
             </Link>
             <Link href="/milestones" className="text-[#b9c7cf] no-underline hover:text-white">
-              <span className="sm:hidden">Yours</span>
+              <span className="sm:hidden">Deals</span>
               <span className="hidden sm:inline">Your milestones</span>
             </Link>
             <Link href="/timeline" className="text-[#b9c7cf] no-underline hover:text-white">
@@ -40,6 +40,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             </Link>
             <Link href="/ledger" className="text-[#b9c7cf] no-underline hover:text-white">
               Ledger
+            </Link>
+            <Link href="/bench" className="hidden text-[#b9c7cf] no-underline hover:text-white sm:inline">
+              Proof Bench
             </Link>
             <Link href="/new" className="ml-auto whitespace-nowrap rounded-md bg-[#e4ecea] px-3 py-1.5 font-medium text-[#13233a] no-underline hover:bg-white">
               New<span className="hidden sm:inline"> milestone</span>
