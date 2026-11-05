@@ -163,12 +163,21 @@ describe("code_pr review", () => {
     const { id, body, c1 } = await submitted();
     let aiCalls = 0;
     const counting: ModelCall = async (...a) => (aiCalls++, passingAi(...a));
-    const { gh } = fakeGitHub({ body, runs: [run("contract", "success"), run(c1, "failure")] });
+    const { gh } = fakeGitHub({ body, runs: [run("contract", "success"), run(c1, "success")] });
     await reviewMilestone(id, deps(gh, counting));
     await db().query("update milestones set state = 'SUBMITTED' where id = $1", [id]); // worker resubmits the same commit
     const m = await reviewMilestone(id, deps(gh, counting));
-    assert.equal(m.state, "CHANGES_REQUESTED");
+    assert.equal(m.state, "PASSED");
     assert.equal(aiCalls, 1);
+  });
+
+  it("a failing tested must-have costs no AI call", async () => {
+    const { id, body, c1 } = await submitted();
+    let aiCalls = 0;
+    const counting: ModelCall = async (...a) => (aiCalls++, passingAi(...a));
+    const { gh } = fakeGitHub({ body, runs: [run("contract", "success"), run(c1, "failure")] });
+    assert.equal((await reviewMilestone(id, deps(gh, counting))).state, "CHANGES_REQUESTED");
+    assert.equal(aiCalls, 0);
   });
 });
 

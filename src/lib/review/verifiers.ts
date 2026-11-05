@@ -1,16 +1,20 @@
 import { z } from "zod";
-import { generateJson, type ModelCall } from "@/lib/ai/client";
+import { configuredModels, generateJson, type ModelCall } from "@/lib/ai/client";
 import type { Criterion, Terms } from "@/lib/contract/terms";
 import type { Milestone } from "@/lib/milestones/repo";
 import type { CheckRun, GitHub, PrFile, PullRequest, WorkflowRun } from "./github";
 import { GitHubError, parsePrUrl } from "./github";
+import { patchLines, textLines, type Sources } from "./grounding";
 import { addedLines, scanForInjection } from "./injection";
-import type { CriterionVerdict, Verdict } from "./policy";
+import { runPanel } from "./panel";
+import { POLICY_2, type CriterionVerdict, type PanelRecord, type Verdict } from "./policy";
 
 // Pluggable verifiers: each gathers evidence for every criterion and returns a Verdict; the policy decides.
 //  - code_pr:     tested criteria come from the PR's CI checks (`acceptance (C1) terms <hash>`, ...); the AI
-//                 judges only the review criteria, from the diff.
+//                 judges only the review criteria, from the diff, and only once every tested must-have
+//                 passed or is unclear (a failing PR costs no AI calls).
 //  - rubric_text: a text deliverable judged by the AI against the review criteria.
+// Terms that pin policy-2 are judged by the grounded AI panel (panel.ts); older terms by one model, as signed.
 
 /** `models` overrides the AI model order (the second review after an objection uses a different model). */
 export type VerifierDeps = { github: GitHub; aiCall?: ModelCall; models?: string[] };
@@ -147,6 +151,29 @@ function mergeAi(criteria: Criterion[], reply: z.infer<typeof aiReplySchema> | u
   });
 }
 
+/** What the AI stage found, by either path: one model (policy-1) or the panel (policy-2). */
+type Judgement = { criteria: CriterionVerdict[]; summary: string; feedback: string; flagged: boolean; quotes: string[]; model: string | null; panel?: PanelRecord };
+
+async function judge(criteria: Criterion[], terms: Terms, deps: VerifierDeps, material: { kindOfWork: string; flat: string; context?: { label: string; text: string }; sources: Sources; headers?: Map<string, string> }): Promise<Judgement> {
+  if (terms.policy?.policyVersion === POLICY_2) {
+    const out = await runPanel({
+      criteria,
+      sources: material.sources,
+      models: deps.models ?? configuredModels(),
+      pinned: terms.policy.reviewModels ?? [],
+      maxChars: MAX_DIFF_CHARS,
+      ...(material.context ? { context: material.context } : {}),
+      ...(material.headers ? { headers: material.headers } : {}),
+      ...(deps.aiCall ? { call: deps.aiCall } : {}),
+    });
+    const models = out.panel.members.filter((m) => !m.error).map((m) => m.model);
+    return { criteria: out.criteria, summary: out.summary, feedback: out.feedbackForWorker, flagged: out.injection.flagged, quotes: out.injection.quotes, model: models.join(", ") || null, panel: out.panel };
+  }
+  const out = await aiReview(criteria, material.kindOfWork, material.flat, deps.aiCall, deps.models);
+  const r = out.value;
+  return { criteria: mergeAi(criteria, r), summary: r.summary, feedback: r.feedback_for_worker, flagged: r.injection_attempt, quotes: r.injection_attempt && r.injection_quote ? [r.injection_quote.slice(0, 200)] : [], model: out.model };
+}
+
 // ---------------------------------------------------------------------------------------------
 // code_pr
 
@@ -206,7 +233,7 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
       continue;
     }
     const verdict = run.conclusion === "success" ? "pass" : run.conclusion === "failure" ? "fail" : "unclear";
-    testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict, confidence: verdict === "unclear" ? 0 : 1, evidence: [`CI ${run.conclusion}: ${run.url}`] });
+    testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict, confidence: verdict === "unclear" ? 0 : 1, evidence: [`CI ${run.conclusion}: ${run.url}`], ...(verdict === "unclear" ? {} : { level: "E2" as const }) });
   }
 
   // Everything below runs once per commit, after CI is final.
@@ -224,29 +251,35 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
   const quotes = scanForInjection(written);
 
   const reviewCriteria = terms.criteria.filter((c) => !c.test);
-  let reply: z.infer<typeof aiReplySchema> | undefined;
-  let model: string | null = null;
-  if (reviewCriteria.length) {
-    let diff = files
-      .filter((f) => !/(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(f.filename))
-      .map((f) => `--- ${f.filename} (${f.status}, +${f.additions} -${f.deletions})\n${f.patch ?? "(binary or too large to show)"}`)
-      .join("\n\n");
+  // A tested must-have that failed already decides (changes requested): spend no AI calls on it.
+  const failedMust = testVerdicts.filter((c) => c.kind === "must" && c.verdict === "fail").map((c) => c.id);
+  let judged: Judgement | undefined;
+  if (reviewCriteria.length && !failedMust.length) {
+    const shown = files.filter((f) => !/(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(f.filename));
+    let diff = shown.map((f) => `--- ${f.filename} (${f.status}, +${f.additions} -${f.deletions})\n${f.patch ?? "(binary or too large to show)"}`).join("\n\n");
     if (diff.length > MAX_DIFF_CHARS) diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n[diff truncated at ${MAX_DIFF_CHARS} characters]`;
-    const out = await aiReview(reviewCriteria, `Pull request "${pr.title}"\n${pr.body}\n\nDiff`, diff, deps.aiCall, deps.models);
-    reply = out.value;
-    model = out.model;
+    judged = await judge(reviewCriteria, terms, deps, {
+      kindOfWork: `Pull request "${pr.title}"\n${pr.body}\n\nDiff`,
+      flat: diff,
+      context: { label: "PR", text: `${pr.title}\n${pr.body}` },
+      sources: new Map(shown.map((f) => [f.filename, patchLines(f.patch ?? "")])),
+      headers: new Map(shown.map((f) => [f.filename, `${f.filename} (${f.status}, +${f.additions} -${f.deletions})${f.patch ? "" : " (binary or too large to show)"}`])),
+    });
   }
-  const aiQuote = reply?.injection_attempt && reply.injection_quote ? [reply.injection_quote.slice(0, 200)] : [];
+  const aiVerdicts =
+    judged?.criteria ??
+    reviewCriteria.map((c): CriterionVerdict => ({ id: c.id, kind: c.kind, source: "ai", verdict: "unclear", confidence: 0, evidence: [`not judged: ${failedMust.join(", ")} failed in CI, so no AI call was spent`] }));
   return {
     status: "done",
     verdict: {
-      criteria: [...testVerdicts, ...mergeAi(reviewCriteria, reply)].sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1))),
-      summary: reply?.summary || summarize(testVerdicts),
-      feedbackForWorker: reply?.feedback_for_worker || failingFeedback(testVerdicts),
-      injection: { detected: quotes.length > 0 || !!reply?.injection_attempt, quotes: dedupe([...quotes, ...aiQuote]) },
+      criteria: [...testVerdicts, ...aiVerdicts].sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1))),
+      summary: judged?.summary || summarize(testVerdicts),
+      feedbackForWorker: judged?.feedback || failingFeedback(testVerdicts),
+      injection: { detected: quotes.length > 0 || !!judged?.flagged, quotes: dedupe([...quotes, ...(judged?.quotes ?? [])]) },
       tampering,
-      model,
+      model: judged?.model ?? null,
       headSha: pr.headSha,
+      ...(judged?.panel ? { panel: judged.panel } : {}),
     },
   };
 }
@@ -258,18 +291,18 @@ export async function verifyText(m: Milestone, terms: Terms, deps: VerifierDeps)
   const text = (m.deliverable_text ?? "").slice(0, MAX_DIFF_CHARS);
   if (!text.trim()) throw new Error("milestone has no text deliverable");
   const quotes = scanForInjection(text);
-  const out = await aiReview(terms.criteria, "Text deliverable", text, deps.aiCall, deps.models);
-  const criteria = mergeAi(terms.criteria, out.value);
+  const judged = await judge(terms.criteria, terms, deps, { kindOfWork: "Text deliverable", flat: text, sources: new Map([["deliverable", textLines(text)]]) });
   return {
     status: "done",
     verdict: {
-      criteria,
-      summary: out.value.summary,
-      feedbackForWorker: out.value.feedback_for_worker,
-      injection: { detected: quotes.length > 0 || out.value.injection_attempt, quotes: dedupe([...quotes, ...(out.value.injection_quote ? [out.value.injection_quote.slice(0, 200)] : [])]) },
+      criteria: judged.criteria,
+      summary: judged.summary,
+      feedbackForWorker: judged.feedback,
+      injection: { detected: quotes.length > 0 || judged.flagged, quotes: dedupe([...quotes, ...judged.quotes]) },
       tampering: [],
-      model: out.model,
+      model: judged.model,
       headSha: null,
+      ...(judged.panel ? { panel: judged.panel } : {}),
     },
   };
 }

@@ -11,6 +11,30 @@ const PATTERNS: RegExp[] = [
   /\boverride\b.{0,40}\b(verdict|review|policy|criteria)\b/i,
 ];
 
+// The same two moves ("ignore your instructions", "mark the criteria passed") in Hindi, Spanish, Chinese,
+// Russian, Portuguese and French. Matched on text folded without the look-alike map (which would turn
+// Cyrillic into Latin) and with Latin accents stripped, so "instrucciónes" and "instrucciones" both hit.
+const MULTILINGUAL: RegExp[] = [
+  // Spanish
+  /\b(ignora|ignore|olvida|olvide)\w* (todas )?(las )?instrucciones( (anteriores|previas))?/i,
+  /\b(aprueba|aprobar|marca|marcar|califica)\w* (todos )?(los )?criterios( como)? (aprobados|cumplidos|superados)/i,
+  // Portuguese
+  /\b(ignore|ignora|esqueca|esqueça)\w* (todas )?(as )?instrucoes( (anteriores|previas))?/i,
+  /\b(aprove|aprovar|marque|marcar)\w* (todos )?(os )?criterios( como)? (aprovados|cumpridos|atendidos)/i,
+  // French
+  /\b(ignore|ignorez|oublie|oubliez)\w* (toutes )?(les )?instructions( (precedentes|anterieures))?/i,
+  /\b(approuve|approuvez|valide|validez|marque|marquez)\w* tous (les )?criteres/i,
+  // Russian
+  /(игнорируй|игнорируйте|забудь|забудьте|проигнорируй)\S* (все )?(предыдущие |прошлые )?(инструкции|указания)/iu,
+  /(одобри|одобрите|прими|примите|отметь|отметьте)\S* все критери/iu,
+  // Chinese
+  /(忽略|无视|忽视)(之前|以前|上面|上述|所有|先前)?的?(所有)?(指令|说明|指示|规则)/u,
+  /(批准|通过|标记)(所有|全部)(标准|条件|要求)|(所有|全部)(标准|条件)(都)?(标记为|视为)?通过/u,
+  // Hindi
+  /(पिछले|पिछली|सभी|पहले के)\s*(सभी\s*)?(निर्देशों|निर्देश)\s*को\s*(अनदेखा|नज़रअंदाज़|नजरअंदाज|भूल)/u,
+  /(सभी\s*)?(मानदंडों|मानदंड)\s*को\s*(पास|स्वीकृत|मंजूर|मंज़ूर)/u,
+].map((r) => new RegExp(r.source.normalize("NFKC"), r.flags));
+
 // Invisible characters (zero-width, soft hyphen, word joiners, BOM) split words so a regex misses them,
 // and bidi controls reorder what a human sees ("Trojan Source"). Either in a deliverable is itself a flag.
 const INVISIBLE = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/g;
@@ -22,6 +46,17 @@ const HOMOGLYPHS: Record<string, string> = {
   Α: "A", Β: "B", Ε: "E", Ζ: "Z", Η: "H", Ι: "I", Κ: "K", Μ: "M", Ν: "N", Ο: "O", Ρ: "P", Τ: "T", Χ: "X", Υ: "Y", ο: "o", ι: "i",
 };
 
+/** NFKC, invisibles gone, Latin accents stripped; other scripts (Cyrillic, Devanagari, Han) untouched. */
+function foldForLanguages(text: string): string {
+  return text
+    .normalize("NFKC")
+    .replace(INVISIBLE, "")
+    .replace(BIDI, "")
+    .replace(/[A-Za-z][\u0300-\u036f]+/g, (s) => s[0]!)
+    .replace(/[À-ÿ]/g, (ch) => ch.normalize("NFD")[0]!)
+    .replace(/\s+/g, " ");
+}
+
 /** The text as the model reads it: compatibility forms folded, invisibles removed, look-alikes mapped. */
 export function normalizeForScan(text: string): string {
   return text
@@ -32,9 +67,10 @@ export function normalizeForScan(text: string): string {
 }
 
 /**
- * Lines quoted from the text that match an injection pattern (first 5), after normalizing. A regex only
- * catches English phrasing; text in other languages reaches the model, which is why the model only ever
- * judges criteria no test covers and fixed rules decide (see README, threat model).
+ * Lines quoted from the text that match an injection pattern (first 5), after normalizing. The phrase
+ * lists are short (English plus six languages); anything else reaches the model, which is why each panel
+ * member flags injection on its own, the model only ever judges criteria no test covers, and fixed rules
+ * decide (see README, threat model).
  */
 export function scanForInjection(text: string): string[] {
   const hits: string[] = [];
@@ -44,6 +80,7 @@ export function scanForInjection(text: string): string[] {
   for (const line of text.split("\n")) {
     const clean = normalizeForScan(line);
     if (PATTERNS.some((p) => p.test(clean))) hits.push(clean.trim().slice(0, 200));
+    else if (MULTILINGUAL.some((p) => p.test(foldForLanguages(line)))) hits.push(foldForLanguages(line).trim().slice(0, 200));
     if (hits.length >= 5) break;
   }
   return hits.slice(0, 5);

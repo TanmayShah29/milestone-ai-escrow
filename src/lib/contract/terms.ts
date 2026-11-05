@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { AiBusy, AiUnreadable, configuredModels, generateJson, type ModelCall } from "@/lib/ai/client";
-import { CONFIDENCE_FLOOR, POLICY_VERSION, VERIFIER_VERSION } from "@/lib/review/policy";
+import { CONFIDENCE_FLOOR, EVIDENCE_LEVELS, POLICY_VERSION, VERIFIER_VERSION } from "@/lib/review/policy";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { checkAgentSignature, checkPasskeySignature, storeSignature, validLogin, type Site } from "@/lib/contract/signatures";
 import { checkTests, staticCheckTests, type TestChecker } from "@/lib/contract/testcheck";
@@ -39,6 +39,9 @@ export const criterionSchema = z.object({
   // worker knows it wasn't AI-written. Part of the hash; absent for AI-written tests, so hashes of terms
   // saved before this label existed don't change.
   testBy: z.literal("client").optional(),
+  // The least evidence this criterion settles on (policy-2): E3 trusted runner, E2 bound CI, E1 AI panel
+  // agreement, E0 nothing checked. Absent means the default (E2 tested, E1 AI-judged), and keeps the hash.
+  evidenceFloor: z.enum(EVIDENCE_LEVELS).optional(),
 });
 
 /**

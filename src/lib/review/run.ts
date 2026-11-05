@@ -8,7 +8,7 @@ import { cancelHold, defaultDeps, releaseFunds, syncMilestone, type Deps } from 
 import { privacySweep } from "@/lib/privacy";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
 import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs, signedObjectionMs } from "./deadlines";
-import { decide, humanTimeoutOutcome, type Pins, type Verdict } from "./policy";
+import { decide, humanTimeoutOutcome, type PanelRecord, type Pins, type Verdict } from "./policy";
 import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifiers";
 
 // Deliver → review → decide → (objection window) → release. The verifier and the AI only produce a
@@ -110,11 +110,33 @@ function pinnedFirst(terms: Terms, models: string[]): string[] {
 
 function pinsOf(criteria: unknown): Pins {
   const p = termsSchema.safeParse(criteria);
-  return p.success ? { confidenceFloor: p.data.policy?.confidenceFloor, reviewModels: p.data.policy?.reviewModels } : {};
+  if (!p.success) return {};
+  const floors = Object.fromEntries(p.data.criteria.flatMap((c) => (c.evidenceFloor ? [[c.id, c.evidenceFloor]] : [])));
+  return { policyVersion: p.data.policy?.policyVersion, confidenceFloor: p.data.policy?.confidenceFloor, reviewModels: p.data.policy?.reviewModels, floors };
+}
+
+/**
+ * Who judged what, for the audit row and so the proof chain (non-personal: model ids and verdicts, no
+ * quotes). `panelModels` and `panelVotes` are short strings the public chain body carries as facts:
+ * "C2:P,P,u" is pass, pass, unclear in member order; a lower-case letter is a vote that wasn't grounded.
+ */
+function panelDetail(panel: PanelRecord | undefined): Record<string, unknown> {
+  if (!panel) return {};
+  const ids = [...new Set(panel.members.flatMap((m) => m.order))];
+  const letter = (v: PanelRecord["members"][number]["votes"][number] | undefined) => (!v ? "-" : v.grounded ? v.verdict[0]!.toUpperCase() : v.verdict[0]!);
+  return {
+    panelModels: panel.members.map((m) => m.model).join(", "),
+    panelVotes: ids.map((id) => `${id}:${panel.members.map((m) => letter(m.votes.find((v) => v.id === id))).join(",")}`).join(" "),
+    panel: {
+      size: panel.size,
+      members: panel.members.map((m) => ({ model: m.model, order: m.order, injection: m.injection, ...(m.error ? { error: m.error } : {}), votes: m.votes.map((v) => ({ id: v.id, verdict: v.verdict, grounded: v.grounded })) })),
+    },
+  };
 }
 
 async function applyDecision(m: Milestone, verdict: Verdict, deps: ReviewDeps, fresh: boolean): Promise<Milestone> {
-  const { decision, reasons } = decide(verdict, pinsOf(m.criteria));
+  const pins = pinsOf(m.criteria);
+  const { decision, reasons } = decide(verdict, pins);
   // A blocked verdict is about the PR description, not the commit: keep it off the commit's key, so the
   // commit is reviewed for real once the description is fixed.
   const key = verdict.headSha && !verdict.blocked ? verdict.headSha : `${verdict.blocked ? "blocked" : "text"}-${m.id}-${Date.now()}`;
@@ -130,7 +152,7 @@ async function applyDecision(m: Milestone, verdict: Verdict, deps: ReviewDeps, f
   const set = decision === "PASSED" ? { release_after: new Date(Date.now() + signedObjectionMs(m.criteria)) } : decision === "CHANGES_REQUESTED" ? { changes_reason: null } : {};
   const out = await transition(db(), m, decision, "system", set, {
     event: `review:${decision.toLowerCase()}`,
-    detail: { reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, injection: verdict.injection.detected, tampering: verdict.tampering },
+    detail: { reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, policyVersion: pins.policyVersion ?? "policy-1", injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel) },
   });
   if (fresh && m.verifier === "code_pr" && m.pr_url) await postComment(m, verdict, decision, reasons, deps);
   return out;
@@ -145,7 +167,7 @@ async function postComment(m: Milestone, v: Verdict, decision: string, reasons: 
     "",
     "| | Criterion | Checked by | Evidence |",
     "|---|---|---|---|",
-    ...v.criteria.map((c) => `| ${icon(c.verdict)} | ${c.id} (${c.kind}) | ${c.source === "test" ? "CI test" : `AI (${Math.round(c.confidence * 100)}%)`} | ${(c.evidence[0] ?? "").replace(/\|/g, "\\|").slice(0, 140)} |`),
+    ...v.criteria.map((c) => `| ${icon(c.verdict)} | ${c.id} (${c.kind}) | ${c.source === "test" ? "CI test" : c.votes ? `AI panel (${c.votes.pass}/${c.votes.of} grounded passes)` : `AI (${Math.round(c.confidence * 100)}%)`} | ${(c.evidence[0] ?? "").replace(/\|/g, "\\|").slice(0, 140)} |`),
     "",
     `**Decision (fixed rules, not the model):** ${reasons.join("; ")}.`,
     ...(v.injection.detected ? ["", `⚠️ Text aimed at the AI reviewer was found and ignored: \`${(v.injection.quotes[0] ?? "").replace(/`/g, "'")}\``] : []),
@@ -210,7 +232,7 @@ export async function expireHumanCheck(milestoneId: string, deps: ReviewDeps = d
       "select verdict from reviews where milestone_id = $1 and status = 'done' and verdict is not null order by updated_at desc, id desc limit 1",
       [m.id],
     );
-    const { outcome, reasons } = humanTimeoutOutcome(rows[0]?.verdict);
+    const { outcome, reasons } = humanTimeoutOutcome(rows[0]?.verdict, pinsOf(m.criteria));
     const why = m.contested_at ? "within 72 hours of the objection's second review" : "3 days before the PayPal hold expires";
     const detail = { outcome, reasons: [`the client didn't decide ${why}`, ...reasons], deadline: deadline.toISOString(), afterObjection: !!m.contested_at };
     if (outcome === "release") return transition(db(), m, "PASSED", "system", { release_after: new Date() }, { event: "review:human_timeout", detail });
@@ -313,7 +335,8 @@ function movedVerdict(terms: Terms, reviewed: string, now: string): Verdict {
 }
 
 async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, releaseAt: Date, firstModel: string | null, deps: ReviewDeps, fresh: boolean): Promise<Milestone> {
-  const { decision, reasons } = decide(verdict, pinsOf(m.criteria));
+  const pins = pinsOf(m.criteria);
+  const { decision, reasons } = decide(verdict, pins);
   if (fresh) {
     await db().query(
       `insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, $6)
@@ -327,7 +350,7 @@ async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, 
   const set = decision === "PASSED" ? { release_after: releaseAt } : decision === "CHANGES_REQUESTED" ? { contested_at: null, changes_reason: null } : {};
   const out = await transition(db(), m, decision, "system", set, {
     event: "review:second",
-    detail: { decision, reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, firstModel, injection: verdict.injection.detected, tampering: verdict.tampering },
+    detail: { decision, reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, firstModel, policyVersion: pins.policyVersion ?? "policy-1", injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel) },
   });
   if (fresh && m.verifier === "code_pr" && m.pr_url) await postComment(m, verdict, decision, reasons, deps, "Second review after the client's objection");
   return out;

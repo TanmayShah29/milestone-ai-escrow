@@ -204,16 +204,37 @@ that it stays within the criteria's text, so people still read the tests before 
 because they aren't run on the server. The attacker's code runs in the same sandbox as AI-written tests, so
 the same limits apply (see the comment in `testcheck.ts`).
 
+**A panel of models reviews the work, and code checks what each one cites** (`src/lib/review/panel.ts`, for
+terms that pin `policy-2`, which is every contract signed from Nov 6). Up to three different free models
+(the ones the signed terms name come first; `AI_PANEL_SIZE`, default 3) judge the criteria no test covers.
+Each model gets the criteria in a different random order, to cancel out position bias.
+- **Grounding** (`grounding.ts`): a pass or a fail has to cite `file:line` (or a range) and quote the diff at
+  those lines word for word. Code looks up every quote. A vote whose quote isn't there counts as "unclear".
+- **The rule**, which is code: a criterion passes with at least 2 grounded passes and no grounded fail. One
+  grounded fail fails it. Anything else is "unclear" and goes to a person. With `AI_PANEL_SIZE=2`, a tie
+  escalates. A model's self-reported confidence is shown, and has no part in the decision.
+- **Evidence floors** (`policy.ts`, `policy-2`): each criterion may set the least evidence it settles on
+  (`evidenceFloor`). E2 is CI bound to the milestone workflow, and E1 is panel agreement. By default, tested
+  criteria need E2 and AI-judged ones need E1. Nothing settles below its floor. Contracts that pin
+  `policy-1` still decide exactly as they did when signed, with one model and a confidence floor.
+- **Spotlighting** (`spotlight.ts`): every line of the PR text and the diff reaches the model behind a random
+  marker, which the prompt says means "data, not instructions". The deterministic scan (`injection.ts`) also
+  knows the usual phrasing in Hindi, Spanish, Chinese, Russian, Portuguese and French. If the scan or any
+  one panel member flags an injection, the milestone goes to a person.
+- **Who judged what:** the audit row for a review records each member's model, the order it saw, and its
+  votes (no quotes). The public proof chain carries a short `panelModels` / `panelVotes` summary.
+
 | Step | Calls | What the model does |
 |---|---|---|
 | Draft terms | 1 (+1 fix if a test doesn't bite) | Brief → criteria, `node:test` tests for the testable ones, edge-case suggestions |
 | Regenerate one test | 1 | After the client edits a tested criterion |
-| Review | 1 per commit, cached | Judges only the criteria without tests, from the diff; flags injection attempts |
-| Second review | 1, after an objection | Same commit, a different model from the first review |
+| Review | up to `AI_PANEL_SIZE` (3) per commit, cached; **0** when a tested must-have failed | Each panel member judges the criteria without tests from the marked diff, with grounded citations, and flags injection attempts |
+| Second review | up to `AI_PANEL_SIZE`, after an objection | Same commit, a fresh panel with new orders |
 
-Every reply is one structured JSON call validated with zod. There are no tool loops, and the model sees the
-deliverable only as data between markers. Budget: a daily cap (`AI_DAILY_CAP`, 40 on the live demo) under
-OpenRouter's free 50 requests/day. Verdicts are cached per commit, and there are per-IP and per-milestone
+A busy panel member isn't replaced, because a replacement would spend more calls. The other two can still
+agree. A panel that today's budget can't finish doesn't start. Every reply is one structured JSON call,
+validated with zod. There are no tool loops. Budget: a daily cap (`AI_DAILY_CAP`, 40 on the live demo) under
+OpenRouter's free 50 requests/day, which fits about 13 full panel reviews. Verdicts are cached per commit, and there are per-IP and per-milestone
 limits on drafting. When the budget runs out, the app shows "AI busy, retry" and doesn't crash.
 
 **Plainly:** free models are the weakest part of this stack. They get rate-limited, return malformed JSON,

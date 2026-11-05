@@ -21,7 +21,7 @@ type AuditRow = {
 };
 
 // Detail keys whose values are facts about the deal rather than about people, copied into the public body.
-const FACT_KEYS = ["hash", "headSha", "decision", "model", "outcome", "policyVersion", "shareBps", "credentialId", "githubLogin", "method"] as const;
+const FACT_KEYS = ["hash", "headSha", "decision", "model", "outcome", "policyVersion", "shareBps", "credentialId", "githubLogin", "method", "panelModels", "panelVotes"] as const;
 
 function factsOf(detail: unknown): ProofBody["facts"] {
   const out: ProofBody["facts"] = {};

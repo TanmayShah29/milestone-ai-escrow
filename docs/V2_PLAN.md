@@ -428,6 +428,21 @@ Claude.
     `/.well-known/milestone-proof-keys.json` and `scripts/verify-proof.mts`;
   - passkey and agent-key signatures on the terms (migration 015, `src/lib/contract/signatures.ts`);
   - the worker's GitHub account, which binds who may submit.
+- **Phase 4 core built (Nov 6):**
+  - the AI panel (`src/lib/review/panel.ts`): up to `AI_PANEL_SIZE` (default 3) different models, a random
+    order each, and at most that many calls per review;
+  - grounding checked by code (`grounding.ts`);
+  - spotlighting (`spotlight.ts`), and a scan for the usual phrasing in six more languages (`injection.ts`);
+  - `policy-2` with evidence floors (`evidenceFloor` per criterion). `policy-1` terms decide exactly as
+    before. New terms pin `policy-2` and verifier `@2`;
+  - a failing tested must-have costs 0 AI calls;
+  - audit rows record the panel's models and votes, and the proof chain carries `panelModels` and
+    `panelVotes` facts.
+  - Tests: `tests/panel.test.ts`, 28 cases.
+- **Phase 4 still open:**
+  - earned shares (`shareBps`), which wait on Phase 5's partial capture;
+  - the timeout default moving to the resolution desk (Phase 6);
+  - one live panel run on the real free models, to be spent from the daily budget when you say so.
 - **Phase 2 still open:** Rekor anchoring of chain heads. It writes to a public, permanent log, so it needs
   your OK first.
 - **Not started:** Phase 1 (Proof Bench v2 labelling).

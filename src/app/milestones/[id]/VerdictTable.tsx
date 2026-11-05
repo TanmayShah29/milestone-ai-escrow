@@ -7,7 +7,7 @@ export type Review = {
   reasons: string[] | null;
   model: string | null;
   verdict: {
-    criteria: { id: string; kind: string; source: "test" | "ai"; verdict: "pass" | "fail" | "unclear"; confidence: number; evidence: string[] }[];
+    criteria: { id: string; kind: string; source: "test" | "ai"; verdict: "pass" | "fail" | "unclear"; confidence: number; evidence: string[]; votes?: { pass: number; fail: number; of: number } }[];
     summary: string;
     feedbackForWorker: string;
     injection: { detected: boolean; quotes: string[] };
@@ -76,7 +76,7 @@ export function VerdictTable({ review, criteriaText }: { review: Review; criteri
               <p className={`flex items-center gap-1.5 font-medium ${r.cls}`}>
                 <r.icon className="size-4" aria-hidden="true" />
                 {r.label}
-                <span className="font-normal text-ink-2">· {c.source === "test" ? "CI test" : `AI review, ${Math.round(c.confidence * 100)}%`}</span>
+                <span className="font-normal text-ink-2">· {checkedBy(c)}</span>
               </p>
               <p className="mt-1 text-ink">
                 <span className="font-mono text-xs text-ink-3">{c.id}</span> {criteriaText[c.id] ?? ""}
@@ -108,7 +108,7 @@ export function VerdictTable({ review, criteriaText }: { review: Review; criteri
                     <span className="font-mono text-xs text-ink-3">{c.id}</span> <span className="text-ink">{criteriaText[c.id] ?? ""}</span>
                     {c.kind === "nice" && <span className="ml-1 text-xs text-ink-3">(nice to have)</span>}
                   </td>
-                  <td className="whitespace-nowrap py-2.5 pr-3 text-ink-2">{c.source === "test" ? "CI test" : `AI review, ${Math.round(c.confidence * 100)}%`}</td>
+                  <td className="whitespace-nowrap py-2.5 pr-3 text-ink-2">{checkedBy(c)}</td>
                   <td className={`whitespace-nowrap py-2.5 pr-3 font-medium ${r.cls}`}>
                     <span className="inline-flex items-center gap-1">
                       <r.icon className="size-4" aria-hidden="true" />
@@ -131,4 +131,11 @@ export function VerdictTable({ review, criteriaText }: { review: Review; criteri
       {v.feedbackForWorker && <p className="mt-2 text-sm text-ink-2">{v.feedbackForWorker}</p>}
     </section>
   );
+}
+
+/** A panel verdict shows its grounded votes; confidence decides nothing there (policy-2). */
+function checkedBy(c: { source: "test" | "ai"; confidence: number; votes?: { pass: number; fail: number; of: number } }): string {
+  if (c.source === "test") return "CI test";
+  if (c.votes) return `AI panel, ${c.votes.pass} of ${c.votes.of} grounded passes${c.votes.fail ? `, ${c.votes.fail} grounded fail${c.votes.fail > 1 ? "s" : ""}` : ""}`;
+  return `AI review, ${Math.round(c.confidence * 100)}%`;
 }
