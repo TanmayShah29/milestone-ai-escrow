@@ -1,0 +1,53 @@
+name: run
+on:
+  workflow_dispatch:
+    inputs:
+      fixture: { description: "fixture to run", required: true }
+      nonce: { description: "caller nonce, echoed into the signed results", required: true }
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      FIXTURE: ${{ inputs.fixture }}
+      NONCE: ${{ inputs.nonce }}
+      IMG: node:22-alpine
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check inputs
+        run: |
+          [[ "$FIXTURE" =~ ^[a-z]+$ ]] && [ -d "fixtures/$FIXTURE" ] || { echo "bad fixture"; exit 1; }
+          [[ "$NONCE" =~ ^[A-Za-z0-9-]{8,64}$ ]] || { echo "bad nonce"; exit 1; }
+      - name: Worker and tests in separate containers, no network
+        run: |
+          set -euo pipefail
+          docker pull -q "$IMG"
+          mkdir -p out && chmod 777 out
+          docker volume create msock
+          docker run --rm -v msock:/sock "$IMG" chmod 777 /sock
+          docker run -d --name worker --network none --read-only --tmpfs /tmp --user 1000:1000 \
+            -v "$PWD/fixtures/$FIXTURE:/work:ro" -v "$PWD/harness:/harness:ro" -v msock:/sock \
+            "$IMG" node /harness/shim.mjs /work/index.mjs /sock/rpc.sock
+          sleep 3
+          docker run --rm --network none --read-only --user 1000:1000 -e RPC_SOCK=/sock/rpc.sock \
+            -v "$PWD/fixtures/tests:/tests:ro" -v "$PWD/harness:/harness:ro" -v msock:/sock -v "$PWD/out:/out" \
+            "$IMG" node --test --test-reporter=junit --test-reporter-destination=/out/junit.xml "/tests/*.test.mjs" || true
+          echo "--- worker log"; docker logs worker 2>&1 || true
+          docker rm -f worker
+      - name: Build results.json
+        run: |
+          IMAGE=$(docker image inspect "$IMG" --format '{{index .RepoDigests 0}}')
+          node harness/results.mjs out/junit.xml "$NONCE" "$FIXTURE" "$GITHUB_SHA" "$IMAGE" > results.json
+          cat results.json
+      - uses: actions/attest@v2
+        with:
+          subject-path: results.json
+          predicate-type: https://milestone-ai-escrow.onrender.com/attestations/test-results/v1
+          predicate-path: results.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: results.json

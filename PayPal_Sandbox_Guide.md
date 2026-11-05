@@ -409,3 +409,18 @@ Spike on 2026-10-22 with app hackathon2. Re-run it with `./scripts/multiparty-ch
 **Hold endings** [DOCS, developer.paypal.com/api/rest/webhooks/event-names]:
 - `PAYMENT.AUTHORIZATION.VOIDED` (Payments v2) fires on a manual void **and** when an authorization is voided automatically at the end of its validity period. There is **no** `PAYMENT.AUTHORIZATION.EXPIRED` event. The SDK's `AuthorizationStatus` enum has no `EXPIRED` either; we treat a status of `EXPIRED` like `VOIDED` defensively.
 - Our webhook `2JC020923H9067634` is subscribed to `PAYMENT.AUTHORIZATION.VOIDED` (scripts/register-webhook.sh). The handler re-reads the stored authorization (`GET /v2/payments/authorizations/{id}`) and cancels a pre-capture milestone (`hold:ended` audit row). A void of an older authorization id (replaced by a reauthorization) changes nothing.
+
+## v2 Phase 0 spikes (Nov 5, 2026)
+Full write-up in `docs/SPIKES_V2.md`; script `spikes/paypal_spikes.py`. Test Visa `4012888888881881`.
+- **Partial capture releases the rest** [VERIFIED]: auth $10 (`52M36812B5375762B`), capture $8 with `final_capture: true` → capture `725455390F957230V` COMPLETED (fee $0.70); the authorization goes straight to `CAPTURED`; a further capture returns 422 `AUTHORIZATION_ALREADY_CAPTURED`.
+- **Several captures on one authorization** [VERIFIED]: $5 with `final_capture: false` → auth `PARTIALLY_CAPTURED`; then $3 with `final_capture: true` → `CAPTURED` (order `3DM06959R2466240M`).
+- **Capture-first + refunds** [VERIFIED]: CAPTURE $10 (capture `33K466024U150005B`, fee $0.75); partial refund $3 then full refund of the rest ($7) both COMPLETED; capture → `REFUNDED`. Each refund's `seller_payable_breakdown.paypal_fee` was **$0.00**: the $0.75 fee is not returned, so capture-first costs the platform the fee on every refund.
+- **Vaulted card, no buyer present** [VERIFIED]: setup token `67138953HP356183E` APPROVED → payment token `38597659ja3344047` (customer `FuJwQfGGbM`) → `AUTHORIZE` order with `payment_source.card.vault_id` returned COMPLETED with an authorization CREATED (29-day expiry), both with `stored_credential {MERCHANT, UNSCHEDULED, SUBSEQUENT}` and with `vault_id` alone. Both voided (204).
+- **Payout to a third account** [VERIFIED]: $1 to the client account as a stand-in arbitrator, batch `P49D2AFDXM4HU`, item SUCCESS within 40 s.
+- **Disputes, seen live** [VERIFIED Nov 5]: details in `docs/SPIKES_V2.md` (H4).
+  - The client opened "service not received" on wallet capture `9SN506710E881745H`, creating dispute `PP-R-QEE-10196672`. Its `disputed_transactions` held the capture id and our `custom_id`.
+  - Webhooks `CUSTOMER.DISPUTE.CREATED` then `UPDATED` fired within about 90 s.
+  - The capture went `PENDING` (`BUYER_COMPLAINT`).
+  - `provide-evidence` (multipart `input` JSON + `file1` PDF, `PROOF_OF_FULFILLMENT`) returned 200 at the inquiry stage and again at the claim stage.
+  - A seller `escalate` returned 200 and moved the dispute to stage `CHARGEBACK` within about 3 min.
+  - Sandbox `adjudicate` returned 400 `ACTION_NOT_ALLOWED_IN_CURRENT_DISPUTE_STATE` at every stage tried, including `UNDER_REVIEW` in the claim stage.
