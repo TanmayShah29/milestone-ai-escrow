@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Copy, CreditCard, Hourglass, Loader2, Wallet } from "lucide-react";
+import { browserSupportsWebAuthn, startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { useEffect, useRef, useState } from "react";
 import { decideByCopy, holdExpiryWarning, usd, type MilestoneView, type Role } from "@/lib/client/states";
 import { humanTimeoutOutcome } from "@/lib/review/policy";
@@ -145,6 +146,10 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
   const [submitError, setSubmitError] = useState<string>();
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<string>();
+  const [githubLogin, setGithubLogin] = useState(String(m.worker_github_login ?? ""));
+  const [signError, setSignError] = useState<string>();
+  const [passkeys, setPasskeys] = useState(false);
+  useEffect(() => setPasskeys(browserSupportsWebAuthn()), []);
   const holdWarning = role === "client" ? holdExpiryWarning(m) : undefined;
   const releaseAt = m.release_after ? new Date(m.release_after).getTime() : 0;
   const now = useNow(m.state === "PASSED");
@@ -195,6 +200,31 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
     const r = await act("submit", "submit", body);
     if (!r.ok) setSubmitError(r.error ?? "That didn't go through. Try again.");
   };
+  // Register a passkey for this side (first time on this milestone), then sign the terms statement with it.
+  const signWithPasskey = async () => {
+    setBusy("passkey");
+    setSignError(undefined);
+    const login = githubLogin.trim() ? { githubLogin } : {};
+    try {
+      let o = await call("passkey-options", login);
+      if (!o.ok) throw new Error(o.error ?? "Couldn't start the passkey.");
+      if (o.data?.mode === "register") {
+        const created = await startRegistration({ optionsJSON: o.data.options as PublicKeyCredentialCreationOptionsJSON });
+        const r = await call("passkey-register", { response: created });
+        if (!r.ok) throw new Error(r.error ?? "Couldn't save the passkey.");
+        o = await call("passkey-options", login);
+        if (!o.ok) throw new Error(o.error ?? "Couldn't start the passkey.");
+      }
+      const signed = await startAuthentication({ optionsJSON: o.data!.options as PublicKeyCredentialRequestOptionsJSON });
+      const s = await call("sign-terms", { hash, passkey: signed, ...login });
+      if (!s.ok) throw new Error(s.error ?? "The signature didn't go through.");
+    } catch (e) {
+      const name = (e as Error).name;
+      setSignError(name === "NotAllowedError" ? "The passkey prompt was closed. Try again, or sign with the link only." : (e as Error).message);
+    } finally {
+      setBusy(undefined);
+    }
+  };
   const errorProps = submitError ? { "aria-invalid": true, "aria-describedby": "submit-error" } : {};
   const spin = (label: string) => busy === label && <Loader2 className="size-4 animate-spin" aria-hidden="true" />;
 
@@ -213,9 +243,35 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
             <p className="text-sm text-ink-2">
               {role === "client" ? "Signing seals exactly these terms. The fingerprint goes onto the PayPal order, so nobody can change them later." : "Once both sides sign, the client funds a PayPal hold. You're paid when the work meets these terms."}
             </p>
-            <button className={primary} disabled={!!busy} onClick={() => act("sign", "sign-terms", { hash })}>
-              {spin("sign")}Sign terms {hash.slice(0, 8)}
-            </button>
+            {role === "worker" && (
+              <label className="block text-sm">
+                <span className="text-ink-2">Your GitHub username (optional): only a pull request opened from this account can be submitted</span>
+                <input
+                  className="mt-1 block w-full max-w-xs rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm"
+                  placeholder="octocat"
+                  autoComplete="username"
+                  value={githubLogin}
+                  onChange={(e) => setGithubLogin(e.target.value)}
+                />
+              </label>
+            )}
+            <div className="flex flex-wrap gap-3">
+              {passkeys && (
+                <button className={primary} disabled={!!busy} onClick={signWithPasskey}>
+                  {spin("passkey")}Sign terms {hash.slice(0, 8)} with a passkey
+                </button>
+              )}
+              <button className={passkeys ? secondary : primary} disabled={!!busy} onClick={() => act("sign", "sign-terms", { hash, ...(githubLogin.trim() ? { githubLogin } : {}) })}>
+                {spin("sign")}
+                {passkeys ? "Sign with this link only" : `Sign terms ${hash.slice(0, 8)}`}
+              </button>
+            </div>
+            {passkeys && <p className="text-xs text-ink-3">A passkey signature is checkable by anyone on the proof page; a link signature only shows who held the link.</p>}
+            {signError && (
+              <p role="alert" className="text-sm text-failed">
+                {signError}
+              </p>
+            )}
           </div>
         );
       } else {

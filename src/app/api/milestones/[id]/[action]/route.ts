@@ -3,7 +3,8 @@ import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
 import { cancelHold, createHold, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
 import { attackTerms } from "@/lib/contract/attack";
-import { draftTerms, editTerms, signTerms } from "@/lib/contract/terms";
+import { passkeyOptions, passkeyRegister, siteFor } from "@/lib/contract/signatures";
+import { draftTerms, editTerms, signTerms, type SignOptions } from "@/lib/contract/terms";
 import { eraseMilestone, rotateLink } from "@/lib/privacy";
 import { setDueDate } from "@/lib/schedule";
 import { humanDecision, objectToRelease, submitDeliverable, tick } from "@/lib/review/run";
@@ -20,6 +21,8 @@ const ALLOWED: Record<string, Role[]> = {
   "attack-terms": ["client"],
   "edit-terms": ["client"],
   "sign-terms": ["client", "worker"],
+  "passkey-options": ["client", "worker"],
+  "passkey-register": ["client", "worker"],
   submit: ["worker"],
   check: ["client", "worker"],
   approve: ["client"],
@@ -86,8 +89,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
       }
       case "edit-terms":
         return done(await editTerms(id, body.terms, { ...(str(body.repo) !== undefined ? { repo: str(body.repo) } : {}) }));
-      case "sign-terms":
-        return done(await signTerms(id, role, str(body.hash) ?? ""));
+      case "sign-terms": {
+        // Optionally with a passkey assertion (body.passkey) or an agent's own key (body.agent: { jwk, signature }).
+        const opts: SignOptions = {
+          ...(body.passkey ? { passkey: { site: siteFor(req), response: body.passkey as NonNullable<SignOptions["passkey"]>["response"] } } : {}),
+          ...(body.agent && typeof body.agent === "object" ? { agent: body.agent as SignOptions["agent"] } : {}),
+          ...(str(body.githubLogin) ? { githubLogin: str(body.githubLogin) } : {}),
+        };
+        return done(await signTerms(id, role, str(body.hash) ?? "", opts));
+      }
+      case "passkey-options": {
+        const out = await passkeyOptions(await getMilestone(id), role, siteFor(req), str(body.githubLogin));
+        return json(200, out);
+      }
+      case "passkey-register":
+        await passkeyRegister(await getMilestone(id), role, siteFor(req), body.response as Parameters<typeof passkeyRegister>[3]);
+        return json(200, { registered: true });
       case "fund": {
         const m = await createHold(id, undefined, opts);
         return done(m, { approveUrl: m.approve_url });

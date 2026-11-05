@@ -121,6 +121,30 @@ review runs on the **same commit** with a **different model** (CI results are re
 The objection window is `OBJECTION_WINDOW_SECONDS`. The live demo uses 2 minutes so judges can watch a
 release; a real deployment would use something like 48 hours.
 
+**Proof you can check yourself.** Every step of a milestone (every audit row) is also an event in a signed
+**proof chain** (`src/lib/proof/`):
+- each event body holds the step, the PayPal id and public facts such as the terms fingerprint, the commit
+  and the decision;
+- personal details are committed to by a salted digest, never shown;
+- each event carries the hash of the one before and an ES256 signature;
+- the public keys are at `/.well-known/milestone-proof-keys.json`.
+
+`/proof/<id>` re-checks the whole chain in the browser with WebCrypto and has a "Tamper with a copy" button
+to show a one-character edit being caught. `npx tsx scripts/verify-proof.mts <url>` does the same from the
+command line.
+
+The signed terms also pin what decides: the decision-policy version, the confidence floor, the review models
+and the verifier. A verdict from a model the terms don't name can't pay on its own.
+
+Each side can sign the terms with a key instead of only its link:
+- **a person uses a passkey.** The WebAuthn challenge is the SHA-256 of a statement naming the milestone,
+  the side, the fingerprint and the worker's GitHub account;
+- **an AI agent uses its own ES256 key** (the MCP server makes one and keeps it in
+  `~/.config/milestone/agent-key.json`).
+
+Signatures are published with the chain and checked on the proof page. When the worker names a GitHub
+account, only a pull request opened by that account can be submitted.
+
 Milestones move forward on `GET /api/tick`, which reviews after CI, runs second reviews, releases and syncs
 payouts. An open milestone page runs the same step every 15 seconds (`check`), and a free uptime monitor can
 ping `/api/tick`. Each step is idempotent and gated by state. On the free host, nothing moves while nobody

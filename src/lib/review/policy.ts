@@ -25,17 +25,30 @@ export type Verdict = {
 export type Decision = "PASSED" | "CHANGES_REQUESTED" | "HUMAN_CHECK";
 
 export const CONFIDENCE_FLOOR = 0.8;
+/** The version of decide() below, pinned in the signed terms (contract/terms.ts currentPolicy). */
+export const POLICY_VERSION = "policy-1";
+/** The verifier's version, pinned the same way: bump it when what a verifier checks changes. */
+export const VERIFIER_VERSION = "1";
 
-export function decide(v: Verdict): { decision: Decision; reasons: string[] } {
+/** What the signed terms pinned (their `policy`); absent on contracts saved before pins existed. */
+export type Pins = { confidenceFloor?: number; reviewModels?: string[] };
+
+export function decide(v: Verdict, pins: Pins = {}): { decision: Decision; reasons: string[] } {
   if (v.blocked) return { decision: "CHANGES_REQUESTED", reasons: [v.blocked, ...flags(v)] };
+  const floor = pins.confidenceFloor ?? CONFIDENCE_FLOOR;
   const musts = v.criteria.filter((c) => c.kind === "must");
   const failed = musts.filter((c) => c.verdict === "fail");
   if (failed.length) {
     return { decision: "CHANGES_REQUESTED", reasons: [`${failed.map((c) => c.id).join(", ")} failed`, ...flags(v)] };
   }
   if (v.tampering.length || v.injection.detected) return { decision: "HUMAN_CHECK", reasons: flags(v) };
-  const shaky = musts.filter((c) => c.verdict === "unclear" || c.confidence < CONFIDENCE_FLOOR);
-  if (shaky.length) return { decision: "HUMAN_CHECK", reasons: [`${shaky.map((c) => c.id).join(", ")} unclear or below ${CONFIDENCE_FLOOR} confidence`] };
+  // A model both sides didn't sign up for may answer when every pinned one is gone (free models come and
+  // go): its verdict is shown, but it can't pay on its own.
+  if (v.model && pins.reviewModels?.length && !pins.reviewModels.includes(v.model)) {
+    return { decision: "HUMAN_CHECK", reasons: [`reviewed by ${v.model}, which the signed terms don't name (${pins.reviewModels.join(", ")})`] };
+  }
+  const shaky = musts.filter((c) => c.verdict === "unclear" || c.confidence < floor);
+  if (shaky.length) return { decision: "HUMAN_CHECK", reasons: [`${shaky.map((c) => c.id).join(", ")} unclear or below ${floor} confidence`] };
   if (musts.length === 0) return { decision: "HUMAN_CHECK", reasons: ["no must-have criteria to check"] };
   return { decision: "PASSED", reasons: ["every must-have criterion passed"] };
 }

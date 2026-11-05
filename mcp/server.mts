@@ -9,7 +9,11 @@
 // Claude Code:  claude mcp add milestone -- npx tsx /path/to/mcp/server.mts
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { z } from "zod";
+import { termsStatement, toB64url, type Role } from "../src/lib/proof/verify.ts";
 
 const API = (process.env.MILESTONE_API ?? "https://milestone-ai-escrow.onrender.com").replace(/\/$/, "");
 const API_KEY = process.env.MILESTONE_API_KEY; // optional: a platform key (msk_...) adds list_milestones and id-only access
@@ -36,6 +40,35 @@ async function call(method: "GET" | "POST", path: string, token?: string, body?:
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error(String(json.error ?? `HTTP ${res.status}`));
   return json;
+}
+
+// This agent's own signing key (ES256), made on first use and kept on disk, so its signatures on terms
+// can be checked by anyone and tie its milestones together. MILESTONE_AGENT_KEY_FILE overrides the path.
+const KEY_FILE = process.env.MILESTONE_AGENT_KEY_FILE ?? join(homedir(), ".config", "milestone", "agent-key.json");
+const ALG = { name: "ECDSA", namedCurve: "P-256" } as const;
+let agentKey: Promise<{ key: CryptoKey; jwk: JsonWebKey }> | undefined;
+function loadAgentKey() {
+  agentKey ??= (async () => {
+    let jwk: JsonWebKey;
+    try {
+      jwk = JSON.parse(readFileSync(KEY_FILE, "utf8")) as JsonWebKey;
+    } catch {
+      const pair = await crypto.subtle.generateKey(ALG, true, ["sign", "verify"]);
+      jwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
+      mkdirSync(dirname(KEY_FILE), { recursive: true });
+      writeFileSync(KEY_FILE, JSON.stringify(jwk), { mode: 0o600 });
+    }
+    const key = await crypto.subtle.importKey("jwk", jwk, ALG, false, ["sign"]);
+    return { key, jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y } };
+  })();
+  return agentKey;
+}
+
+async function agentSignature(milestoneId: string, role: Role, hash: string, githubLogin: string | undefined) {
+  const { key, jwk } = await loadAgentKey();
+  const statement = termsStatement(milestoneId, role, hash, githubLogin?.trim().replace(/^@/, "") || null, "-");
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(statement));
+  return { jwk, signature: toB64url(sig) };
 }
 
 const WRONG_FINGERPRINT = "That fingerprint doesn't match these terms. Call get_milestone and use its fingerprint.";
@@ -98,24 +131,35 @@ server.registerTool(
   "accept_terms",
   {
     title: "Accept the terms",
-    description: "Sign the terms you read. You must pass the fingerprint from get_milestone; if the terms changed since, signing is refused and you should read them again.",
+    description:
+      "Sign the terms you read, with this agent's own key (made on first use, kept on disk), so anyone can check that you signed exactly these terms. You must pass the fingerprint from get_milestone; if the terms changed since, signing is refused and you should read them again. As the worker, pass github_login: only a pull request opened from that account can be submitted.",
     inputSchema: {
       milestone: milestoneArg,
       fingerprint: z.string().regex(/^[0-9a-f]{64}$/, WRONG_FINGERPRINT).describe("The `fingerprint` field from get_milestone (64 hex characters)"),
+      github_login: z.string().max(40).optional().describe("Worker only: the GitHub account you will open the pull request from"),
     },
   },
-  async ({ milestone, fingerprint }) => {
+  async ({ milestone, fingerprint, github_login }) => {
     try {
       const r = ref(milestone);
       // Compare first so a stale or mistyped fingerprint gets a message that says what to do.
-      const current = (await call("GET", `/api/milestones/${r.id}`, r.token)).milestone as M;
+      const got = await call("GET", `/api/milestones/${r.id}`, r.token);
+      const current = got.milestone as M;
       if (current.criteria_hash !== fingerprint) throw new Error(WRONG_FINGERPRINT);
-      const b = await call("POST", `/api/milestones/${r.id}/sign-terms`, r.token, { hash: fingerprint }).catch((e: unknown) => {
+      const role = got.role === "client" ? "client" : "worker";
+      const login = role === "worker" ? github_login : undefined;
+      const agent = await agentSignature(r.id, role, fingerprint, login);
+      const b = await call("POST", `/api/milestones/${r.id}/sign-terms`, r.token, { hash: fingerprint, agent, ...(login ? { githubLogin: login } : {}) }).catch((e: unknown) => {
         // The terms changed between the read above and the signature.
         throw e instanceof Error && /terms changed since/i.test(e.message) ? new Error(WRONG_FINGERPRINT) : e;
       });
       const m = b.milestone as M;
-      return text({ state: m.state, note: m.state === "AGREED" ? "Both sides signed. Wait for the client to fund the PayPal hold (state FUNDED) before starting." : "Signed. Waiting for the other side." });
+      return text({
+        state: m.state,
+        signedWith: "this agent's key (checkable on the proof page)",
+        proof: `${API}/proof/${r.id}`,
+        note: m.state === "AGREED" ? "Both sides signed. Wait for the client to fund the PayPal hold (state FUNDED) before starting." : "Signed. Waiting for the other side.",
+      });
     } catch (e) {
       return fail(e);
     }

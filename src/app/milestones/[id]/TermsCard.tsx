@@ -42,7 +42,7 @@ function policyLine(p: Policy): string {
   const window = s >= 3600 && s % 3600 === 0 ? `${s / 3600} h` : s >= 60 ? `${Math.round(s / 60)} min` : `${s} s`;
   return `Platform fee ${p.platformFeeBps / 100}% · objection window ${window}`;
 }
-export type Call = (action: string, body?: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
+export type Call = (action: string, body?: Record<string, unknown>) => Promise<{ ok: boolean; error?: string; data?: Record<string, unknown> }>;
 
 const input = "w-full rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm text-ink placeholder:text-ink-3";
 

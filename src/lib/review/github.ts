@@ -18,6 +18,8 @@ export type PullRequest = {
   headSha: string;
   baseRepo: string;
   htmlUrl: string;
+  /** The account that opened the pull request. */
+  author?: string;
   /** GitHub's `changed_files`. The file list API stops at 300 files, so larger PRs can't be fully scanned. */
   changedFiles?: number;
   createdAt?: string;
@@ -109,6 +111,7 @@ export function githubClient(fetchImpl: typeof fetch = fetch, token = process.en
         html_url: string;
         changed_files: number;
         created_at?: string;
+        user?: { login: string } | null;
       }>(`/repos/${owner}/${repo}/pulls/${n}`);
       return {
         number: p.number,
@@ -120,6 +123,7 @@ export function githubClient(fetchImpl: typeof fetch = fetch, token = process.en
         baseRepo: p.base.repo.full_name,
         htmlUrl: p.html_url,
         changedFiles: p.changed_files,
+        ...(p.user?.login ? { author: p.user.login } : {}),
         ...(p.created_at ? { createdAt: p.created_at } : {}),
       };
     },

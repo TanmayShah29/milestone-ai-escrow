@@ -1,5 +1,6 @@
 import { hashToken, newToken } from "@/lib/auth";
 import { db, tx, type Queryable } from "@/lib/db";
+import { appendProof } from "@/lib/proof/chain";
 import { assertTransition, type MilestoneState } from "./states";
 
 export type Milestone = {
@@ -52,6 +53,7 @@ export type Milestone = {
   after_milestone_id: string | null;
   client_token_hash: string | null;
   worker_token_hash: string | null;
+  worker_github_login: string | null;
   closed_at: Date | null;
   erased_at: Date | null;
   created_at: Date;
@@ -109,9 +111,9 @@ type AuditEntry = {
 
 /** Money rule 5: every state change and every PayPal response writes a row here. */
 export async function audit(q: Queryable, e: AuditEntry): Promise<void> {
-  await q.query(
+  const { rows } = await q.query<{ id: string }>(
     `insert into audit_log (milestone_id, actor, event, from_state, to_state, paypal_id, paypal_debug_id, detail)
-     values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
     [
       e.milestoneId,
       e.actor,
@@ -123,6 +125,8 @@ export async function audit(q: Queryable, e: AuditEntry): Promise<void> {
       e.detail === undefined ? null : JSON.stringify(e.detail),
     ],
   );
+  // ...and becomes the next signed event of the milestone's proof chain (src/lib/proof/chain.ts).
+  await appendProof(q, rows[0]!.id, e.milestoneId);
 }
 
 export class StaleState extends Error {}

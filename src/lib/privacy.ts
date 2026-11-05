@@ -82,6 +82,7 @@ export async function eraseMilestone(id: string, actor: Actor): Promise<Mileston
         criteria: null,
         client_token_hash: null,
         worker_token_hash: null,
+        worker_github_login: null,
         erased_at: new Date(),
       });
       await c.query("delete from reviews where milestone_id = $1", [id]);

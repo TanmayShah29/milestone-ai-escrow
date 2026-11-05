@@ -8,7 +8,7 @@ import { cancelHold, defaultDeps, releaseFunds, syncMilestone, type Deps } from 
 import { privacySweep } from "@/lib/privacy";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
 import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs, signedObjectionMs } from "./deadlines";
-import { decide, humanTimeoutOutcome, type Verdict } from "./policy";
+import { decide, humanTimeoutOutcome, type Pins, type Verdict } from "./policy";
 import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifiers";
 
 // Deliver → review → decide → (objection window) → release. The verifier and the AI only produce a
@@ -49,6 +49,10 @@ export async function submitDeliverable(milestoneId: string, input: { prUrl?: st
     if (m.repo && `${ref.owner}/${ref.repo}`.toLowerCase() !== m.repo.toLowerCase()) throw new InvariantViolation(`The pull request must be in ${m.repo}, the repository named in the signed terms.`);
     const pr = await deps.github.pr(ref.owner, ref.repo, ref.number);
     if (pr.state !== "open" && !pr.merged) throw new InvariantViolation("That pull request is closed. Reopen it, or open a new one, then submit again.");
+    // The worker signed as this GitHub account: someone else's pull request isn't their delivery.
+    if (m.worker_github_login && pr.author && pr.author.toLowerCase() !== m.worker_github_login.toLowerCase()) {
+      throw new InvariantViolation(`That pull request was opened by @${pr.author}, but the worker signed the terms as @${m.worker_github_login}. Submit a pull request opened from that account.`);
+    }
     const { count } = citedTerms(pr.body);
     if (termsLineProblem(pr.body, m.criteria_hash)) {
       const line = `Milestone-Terms: ${m.criteria_hash}`;
@@ -60,7 +64,7 @@ export async function submitDeliverable(milestoneId: string, input: { prUrl?: st
             : `The pull request description cites different terms. Replace that line with this one, then submit again: ${line}`,
       );
     }
-    return transition(db(), m, "SUBMITTED", "freelancer", { pr_url: input.prUrl!.trim() }, { event: "deliverable:submitted", detail: { headSha: pr.headSha } });
+    return transition(db(), m, "SUBMITTED", "freelancer", { pr_url: input.prUrl!.trim() }, { event: "deliverable:submitted", detail: { headSha: pr.headSha, ...(pr.author ? { githubLogin: pr.author } : {}) } });
   });
 }
 
@@ -84,7 +88,8 @@ export async function reviewMilestone(milestoneId: string, deps: ReviewDeps = de
       }
     }
 
-    const result = m.verifier === "code_pr" ? await verifyCodePr(m, terms, deps, pr) : await verifyText(m, terms, deps);
+    const first = { ...deps, models: pinnedFirst(terms, deps.models ?? configuredModels()) };
+    const result = m.verifier === "code_pr" ? await verifyCodePr(m, terms, first, pr) : await verifyText(m, terms, first);
     if (result.status === "pending") {
       await db().query(
         `insert into reviews (milestone_id, head_sha, status, reasons) values ($1, $2, 'pending', $3)
@@ -97,8 +102,19 @@ export async function reviewMilestone(milestoneId: string, deps: ReviewDeps = de
   });
 }
 
+/** The models the signed terms named come first; any others only answer when none of those can. */
+function pinnedFirst(terms: Terms, models: string[]): string[] {
+  const pinned = terms.policy?.reviewModels ?? [];
+  return [...pinned, ...models.filter((x) => !pinned.includes(x))];
+}
+
+function pinsOf(criteria: unknown): Pins {
+  const p = termsSchema.safeParse(criteria);
+  return p.success ? { confidenceFloor: p.data.policy?.confidenceFloor, reviewModels: p.data.policy?.reviewModels } : {};
+}
+
 async function applyDecision(m: Milestone, verdict: Verdict, deps: ReviewDeps, fresh: boolean): Promise<Milestone> {
-  const { decision, reasons } = decide(verdict);
+  const { decision, reasons } = decide(verdict, pinsOf(m.criteria));
   // A blocked verdict is about the PR description, not the commit: keep it off the commit's key, so the
   // commit is reviewed for real once the description is fixed.
   const key = verdict.headSha && !verdict.blocked ? verdict.headSha : `${verdict.blocked ? "blocked" : "text"}-${m.id}-${Date.now()}`;
@@ -244,9 +260,10 @@ export async function resolveObjection(milestoneId: string, deps: ReviewDeps = d
     if (prior?.status === "pending" && Date.now() - prior.updated_at.getTime() < SECOND_REVIEW_RETRY_MS && Date.now() < releaseAt.getTime()) return m;
 
     // A different model than the first review; if only that one model is configured, it is used again.
-    const others = configuredModels().filter((x) => x !== first?.model);
-    const verifierDeps = { ...deps, models: others.length ? others : configuredModels() };
     const terms = termsSchema.parse(m.criteria);
+    const pool = pinnedFirst(terms, configuredModels());
+    const others = pool.filter((x) => x !== first?.model);
+    const verifierDeps = { ...deps, models: others.length ? others : pool };
 
     let waiting: string;
     try {
@@ -296,7 +313,7 @@ function movedVerdict(terms: Terms, reviewed: string, now: string): Verdict {
 }
 
 async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, releaseAt: Date, firstModel: string | null, deps: ReviewDeps, fresh: boolean): Promise<Milestone> {
-  const { decision, reasons } = decide(verdict);
+  const { decision, reasons } = decide(verdict, pinsOf(m.criteria));
   if (fresh) {
     await db().query(
       `insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, $6)

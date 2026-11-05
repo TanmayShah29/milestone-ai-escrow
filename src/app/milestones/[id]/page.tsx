@@ -163,7 +163,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
       }
       if (!r.ok || r.status === 202) setMsg(b.error);
       await load();
-      return { ok: r.ok, error: b.error as string | undefined };
+      return { ok: r.ok, error: b.error as string | undefined, data: b as Record<string, unknown> };
     },
     [id, authed, load],
   );
@@ -293,7 +293,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
           </div>
           {data.review?.status === "done" && <VerdictTable review={data.review} criteriaText={criteriaText} />}
           <TermsCard m={m} role={as!} call={call} />
-          <ProofTrail audit={data.audit} />
+          <ProofTrail audit={data.audit} milestoneId={data.milestone.id} />
         </div>
         <aside className="min-w-0 space-y-5 lg:sticky lg:top-5 lg:self-start">
           <div className="hidden space-y-5 lg:block">

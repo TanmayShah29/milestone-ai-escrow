@@ -420,6 +420,18 @@ the agent posts the bounty and the human funds it with one click.
 Each phase leaves the app working and better for the demo. Sizes are rough, for one person working with
 Claude.
 
+**Progress:**
+- **Nov 5:** Phase 0 done (`docs/SPIKES_V2.md`).
+- **Phase 2 core built:**
+  - contract pins (policy version, confidence floor, review models, verifier);
+  - the signed proof chain (`src/lib/proof/`, migration 014) with `/proof/<id>`, `/api/proof/<id>`,
+    `/.well-known/milestone-proof-keys.json` and `scripts/verify-proof.mts`;
+  - passkey and agent-key signatures on the terms (migration 015, `src/lib/contract/signatures.ts`);
+  - the worker's GitHub account, which binds who may submit.
+- **Phase 2 still open:** Rekor anchoring of chain heads. It writes to a public, permanent log, so it needs
+  your OK first.
+- **Not started:** Phase 1 (Proof Bench v2 labelling).
+
 | Phase | Builds | Depends on | Size |
 |---|---|---|---|
 | 0 | Spikes (§5) | none | 1.5 d |

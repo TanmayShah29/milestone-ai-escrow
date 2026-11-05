@@ -18,6 +18,8 @@
     "@bryntum/gantt-react": "^7.3.7",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@openrouter/ai-sdk-provider": "^1.5.4",
+    "@simplewebauthn/browser": "13.3.0",
+    "@simplewebauthn/server": "13.3.3",
     "ag-grid-community": "36.2.0",
     "ag-grid-react": "36.2.0",
     "ai": "^5.0.279",

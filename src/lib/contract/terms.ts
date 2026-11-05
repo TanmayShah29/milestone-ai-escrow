@@ -1,6 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { AiBusy, AiUnreadable, generateJson, type ModelCall } from "@/lib/ai/client";
+import { AiBusy, AiUnreadable, configuredModels, generateJson, type ModelCall } from "@/lib/ai/client";
+import { CONFIDENCE_FLOOR, POLICY_VERSION, VERIFIER_VERSION } from "@/lib/review/policy";
+import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
+import { checkAgentSignature, checkPasskeySignature, storeSignature, validLogin, type Site } from "@/lib/contract/signatures";
 import { checkTests, staticCheckTests, type TestChecker } from "@/lib/contract/testcheck";
 import { db, withMilestoneLock } from "@/lib/db";
 import { audit, getMilestone, transition, updateFields, type Milestone } from "@/lib/milestones/repo";
@@ -46,6 +49,13 @@ export const criterionSchema = z.object({
 export const policySchema = z.object({
   platformFeeBps: z.number().int().min(0).max(10_000),
   objectionWindowSeconds: z.number().int().min(0),
+  // What decides, pinned when the terms are saved, so the platform can't change what "passed" means
+  // after both sides sign (v3). Optional: contracts saved before these existed keep their hash, and
+  // decide with the defaults that were in force then.
+  policyVersion: z.string().max(40).optional(),
+  confidenceFloor: z.number().min(0).max(1).optional(),
+  reviewModels: z.array(z.string().max(120)).max(5).optional(),
+  verifier: z.string().max(60).optional(),
 });
 export type Policy = z.infer<typeof policySchema>;
 
@@ -157,10 +167,14 @@ export function contractDocument(m: Pick<Milestone, "id" | "title" | "amount_cen
 
 /** The policy in force now, for terms being saved now. */
 // The due date is not part of it: the client may still move it after signing (see setDueDate), within the hold.
-export function currentPolicy(): Policy {
+export function currentPolicy(verifier: Milestone["verifier"] = "code_pr"): Policy {
   return {
     platformFeeBps: feeBps(),
     objectionWindowSeconds: Math.round(objectionWindowMs() / 1000),
+    policyVersion: POLICY_VERSION,
+    confidenceFloor: CONFIDENCE_FLOOR,
+    reviewModels: configuredModels(),
+    verifier: `${verifier}@${VERIFIER_VERSION}`,
   };
 }
 
@@ -416,7 +430,7 @@ function withSuggestions(terms: Terms, suggestions: Suggestion[]) {
 }
 
 export async function saveTerms(m: Milestone, saved: Terms, meta: { repo: string | null; stack: string | null; model: string | null; actor: "ai" | "client"; suggestions: Suggestion[] }): Promise<Milestone> {
-  const terms: Terms = { ...saved, policy: currentPolicy(), emailSalt: storedTerms(m)?.emailSalt ?? randomBytes(16).toString("hex") };
+  const terms: Terms = { ...saved, policy: currentPolicy(m.verifier), emailSalt: storedTerms(m)?.emailSalt ?? randomBytes(16).toString("hex") };
   const withRepo = { ...m, repo: meta.repo };
   const hash = hashTerms(withRepo, terms);
   const out = await updateFields(db(), m.id, {
@@ -442,8 +456,19 @@ export async function saveTerms(m: Milestone, saved: Terms, meta: { repo: string
   return out;
 }
 
+/**
+ * How a side signs, besides holding its link: a passkey assertion, or an agent's own key (signatures.ts).
+ * The worker may name the GitHub account it will open the pull request from; once set, only that account's
+ * pull request can be submitted.
+ */
+export type SignOptions = {
+  passkey?: { site: Site; response: AuthenticationResponseJSON };
+  agent?: { jwk?: unknown; signature?: unknown };
+  githubLogin?: string;
+};
+
 /** A side signs the exact hash it saw. Both signatures on the current hash → AGREED. */
-export async function signTerms(milestoneId: string, role: "client" | "worker", hash: string): Promise<Milestone> {
+export async function signTerms(milestoneId: string, role: "client" | "worker", hash: string, opts: SignOptions = {}): Promise<Milestone> {
   return withMilestoneLock(milestoneId, async () => {
     let m = await getMilestone(milestoneId);
     if (m.state !== "DRAFT") throw new InvariantViolation("terms are already agreed");
@@ -452,8 +477,24 @@ export async function signTerms(milestoneId: string, role: "client" | "worker", 
     const current = storedTerms(m);
     const blocked = current && signBlocker(current);
     if (blocked) throw new InvariantViolation(blocked.charAt(0).toUpperCase() + blocked.slice(1));
-    m = await updateFields(db(), m.id, role === "client" ? { client_signed_hash: hash, client_signed_at: new Date() } : { worker_signed_hash: hash, worker_signed_at: new Date() });
-    await audit(db(), { milestoneId: m.id, actor: role === "client" ? "client" : "freelancer", event: `terms:signed:${role}`, detail: { hash } });
+    const checked = opts.passkey
+      ? await checkPasskeySignature(m, role, opts.passkey.site, hash, opts.passkey.response)
+      : opts.agent
+        ? await checkAgentSignature(m, role, hash, { ...opts.agent, ...(opts.githubLogin ? { githubLogin: opts.githubLogin } : {}) })
+        : undefined;
+    const login = role === "worker" ? (checked ? checked.githubLogin : validLogin(opts.githubLogin)) : null;
+    m = await updateFields(
+      db(),
+      m.id,
+      role === "client" ? { client_signed_hash: hash, client_signed_at: new Date() } : { worker_signed_hash: hash, worker_signed_at: new Date(), ...(login ? { worker_github_login: login } : {}) },
+    );
+    if (checked) await storeSignature(db(), m, role, hash, checked);
+    await audit(db(), {
+      milestoneId: m.id,
+      actor: role === "client" ? "client" : "freelancer",
+      event: `terms:signed:${role}`,
+      detail: { hash, method: checked?.kind ?? "link", ...(checked ? { credentialId: checked.credentialId } : {}), ...(login ? { githubLogin: login } : {}) },
+    });
     if (termsAgreed(m)) m = await transition(db(), m, "AGREED", role === "client" ? "client" : "freelancer", {}, { event: "terms:agreed", detail: { hash } });
     return m;
   });
