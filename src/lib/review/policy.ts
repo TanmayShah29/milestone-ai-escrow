@@ -47,6 +47,8 @@ export type Verdict = {
   headSha: string | null;
   /** Set when the AI panel judged (policy-2). */
   panel?: PanelRecord;
+  /** Set when the tested criteria came from the trusted runner (E3): its run and the Rekor log entry. */
+  runner?: { runId: number | null; rekorIndex: number | null; url: string };
 };
 
 export type Decision = "PASSED" | "CHANGES_REQUESTED" | "HUMAN_CHECK";

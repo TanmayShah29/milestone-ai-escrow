@@ -261,12 +261,24 @@ milestone to a human rather than paying out.
 | **Disputes or chargebacks after capture** | Verified dispute webhooks move the milestone to DISPUTE and store the id. Nothing moves money automatically | The platform is merchant of record and the payout has already left, so the platform absorbs the loss. Refunds are not implemented. Multiparty (below) would make the worker the merchant of record |
 
 **Biggest residual risks, stated plainly:**
-- **The tests share a process with the worker's code.** The freeze-and-sentinel harness blocks the cheap
-  tricks, but code running in the same Node process as the test can, in principle, interfere with it. Real
-  isolation would run the worker's code in a separate process or container that the tests call into.
-- **The workflow YAML comes from the PR** (`pull_request` trigger). Only the tampering flag stops a
-  rewritten workflow, and then a person has to look. A GitHub App that runs the jobs itself, or required
-  workflows set at the org level, would close this.
+- **On contracts that use the PR's own CI (E2), the tests share a process with the worker's code**, and the
+  workflow YAML comes from the PR (`pull_request` trigger). The freeze-and-sentinel harness and the
+  tampering flag catch the cheap tricks, and then a person has to look.
+- **The trusted runner (E3) closes both for policy-2 contracts** (`runner/`, run from
+  [milestone-runner](https://github.com/TanmayShah29/milestone-runner)). Milestone dispatches our own
+  workflow, never the PR's. It runs each signed test in its own container. The PR's code runs in a second
+  container, with no network, a read-only file system, no capabilities and a non-root user. It can only
+  change the values it returns over a socket. `results.json` is signed through GitHub's OIDC and
+  Sigstore, and Milestone checks the signature and the exact workflow identity before it counts the result.
+  It also checks the digest, and the nonce, commit and contract. Limits:
+  - values cross as JSON, plus `undefined`, `NaN`, `Infinity`, `Date` and thrown errors. A test that needs a
+    class instance or a callback can't run there;
+  - only JavaScript and TypeScript tests run there, not Python yet;
+  - the runner repo's `main` (force pushes and deletion blocked) is what "trusted" means;
+  - each run adds a permanent public Rekor entry. It holds the fingerprint, commit, nonce and results, and
+    no names or emails.
+  If the runner can't give a checked result, the PR's CI stands in (E2). A criterion whose floor is E3 then
+  goes to a person.
 - **Free models** (see AI above).
 
 ## Limits and the real-world path

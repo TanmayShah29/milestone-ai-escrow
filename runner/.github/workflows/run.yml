@@ -1,0 +1,66 @@
+name: run
+# Milestone finds its run by this name: the nonce it dispatched with.
+run-name: milestone ${{ inputs.nonce }}
+on:
+  workflow_dispatch:
+    inputs:
+      repo: { description: "owner/name of the PR's repository", required: true }
+      pr: { description: "pull request number", required: true }
+      head_sha: { description: "the commit to test", required: true }
+      fingerprint: { description: "SHA-256 of the signed contract", required: true }
+      nonce: { description: "caller nonce, echoed into the signed results", required: true }
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      REPO: ${{ inputs.repo }}
+      PR: ${{ inputs.pr }}
+      HEAD_SHA: ${{ inputs.head_sha }}
+      FINGERPRINT: ${{ inputs.fingerprint }}
+      NONCE: ${{ inputs.nonce }}
+      MILESTONE_API: https://milestone-ai-escrow.onrender.com
+      # Pinned by digest, and recorded in the signed results.
+      IMG: node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check inputs
+        run: |
+          [[ "$REPO" =~ ^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$ ]] || { echo "bad repo"; exit 1; }
+          [[ "$PR" =~ ^[0-9]{1,7}$ ]] || { echo "bad pr"; exit 1; }
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "bad head_sha"; exit 1; }
+          [[ "$FINGERPRINT" =~ ^[0-9a-f]{64}$ ]] || { echo "bad fingerprint"; exit 1; }
+          [[ "$NONCE" =~ ^[A-Za-z0-9-]{8,64}$ ]] || { echo "bad nonce"; exit 1; }
+      # The PR's files, as data: nothing in them runs on this machine.
+      - name: Check out the pull request
+        run: |
+          set -euo pipefail
+          git init -q pr
+          git -C pr fetch -q --depth 1 "https://github.com/$REPO" "pull/$PR/head"
+          [ "$(git -C pr rev-parse FETCH_HEAD)" = "$HEAD_SHA" ] || { echo "the PR head is no longer $HEAD_SHA"; exit 1; }
+          git -C pr -c advice.detachedHead=false checkout -q FETCH_HEAD
+          rm -rf pr/.git
+      # Dependencies, if the PR declares any, without install scripts, in a container with no secrets.
+      - name: Install the PR's dependencies
+        run: |
+          docker pull -q "$IMG"
+          if [ -f pr/package-lock.json ]; then
+            docker run --rm -v "$PWD/pr:/work" -w /work "$IMG" npm ci --ignore-scripts --omit=dev --no-audit --no-fund
+          fi
+      - name: Run the signed tests, worker and tests in separate containers
+        run: node harness/run.mjs > results.json && cat results.json
+      - uses: actions/attest@v2
+        with:
+          subject-path: results.json
+          predicate-type: https://milestone-ai-escrow.onrender.com/attestations/test-results/v2
+          predicate-path: results.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: results.json

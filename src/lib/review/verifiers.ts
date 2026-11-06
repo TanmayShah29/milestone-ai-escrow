@@ -7,6 +7,7 @@ import { GitHubError, parsePrUrl } from "./github";
 import { patchLines, textLines, type Sources } from "./grounding";
 import { addedLines, scanForInjection } from "./injection";
 import { runPanel } from "./panel";
+import { runTrusted, type RunnerApi } from "./runner";
 import { POLICY_2, type CriterionVerdict, type PanelRecord, type Verdict } from "./policy";
 
 // Pluggable verifiers: each gathers evidence for every criterion and returns a Verdict; the policy decides.
@@ -16,8 +17,12 @@ import { POLICY_2, type CriterionVerdict, type PanelRecord, type Verdict } from 
 //  - rubric_text: a text deliverable judged by the AI against the review criteria.
 // Terms that pin policy-2 are judged by the grounded AI panel (panel.ts); older terms by one model, as signed.
 
-/** `models` overrides the AI model order (the second review after an objection uses a different model). */
-export type VerifierDeps = { github: GitHub; aiCall?: ModelCall; models?: string[] };
+/**
+ * `models` overrides the AI model order (the second review after an objection uses a different model).
+ * `runner` is the trusted runner (runner.ts), used for policy-2 terms; `runKey` names this review's run
+ * (the commit, or the objection's second review), so a second review re-runs the tests.
+ */
+export type VerifierDeps = { github: GitHub; aiCall?: ModelCall; models?: string[]; runner?: RunnerApi; runKey?: string };
 export type VerifierResult = { status: "pending"; reason: string; headSha: string | null } | { status: "done"; verdict: Verdict };
 
 const PROTECTED = /^(\.github\/|acceptance\/|\.base\/)/;
@@ -174,6 +179,43 @@ async function judge(criteria: Criterion[], terms: Terms, deps: VerifierDeps, ma
   return { criteria: mergeAi(criteria, r), summary: r.summary, feedback: r.feedback_for_worker, flagged: r.injection_attempt, quotes: r.injection_attempt && r.injection_quote ? [r.injection_quote.slice(0, 200)] : [], model: out.model };
 }
 
+/** Tested criteria from the PR's own CI checks (E2), or pending while CI runs. */
+async function ciVerdicts(github: GitHub, ref: { owner: string; repo: string }, pr: PullRequest, tested: Criterion[], hash: string, untrusted: string[]): Promise<{ status: "pending"; reason: string; headSha: string } | { status: "done"; verdicts: CriterionVerdict[] }> {
+  // Only GitHub Actions jobs for this exact commit count, and only the ones named for the signed contract.
+  const runs = (await github.checkRuns(ref.owner, ref.repo, pr.headSha)).filter((r) => r.app === CI_APP && r.headSha === pr.headSha);
+  // A contract job older than this PR belongs to another PR on the same commit, so it says nothing about this one.
+  const contractJob = latest(runs.filter((r) => r.name === "contract" && !(pr.createdAt && r.startedAt && r.startedAt < pr.createdAt)));
+  const testVerdicts: CriterionVerdict[] = [];
+  const workflowRuns: WorkflowLookup = new Map();
+  for (const c of tested) {
+    const run = latest(runs.filter((r) => r.name === acceptanceCheckName(c.id, hash)));
+    if (!run && contractJob?.status === "completed" && contractJob.conclusion !== "success") {
+      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: ["CI could not load the signed contract (is exactly one `Milestone-Terms:` line in the PR description?)"] });
+      continue;
+    }
+    if (!run || run.status !== "completed") {
+      const started = run?.startedAt ?? contractJob?.startedAt;
+      if (!started || Date.now() - new Date(started).getTime() < CI_TIMEOUT_MS) {
+        return { status: "pending", reason: `waiting for CI: acceptance (${c.id}) ${run ? run.status : "not started"}`, headSha: pr.headSha };
+      }
+      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: ["CI did not run the signed tests within 20 minutes"] });
+      continue;
+    }
+    // A result we can't tie to the milestone workflow counts neither way (a forged failure mustn't block
+    // the worker either), and a person decides.
+    const binding = await ciBindingProblem(github, ref.owner, ref.repo, run, pr.headSha, workflowRuns);
+    if (binding) {
+      untrusted.push(`CI result for ${c.id} not trusted: ${binding}`);
+      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: [`CI result not trusted: ${binding} (${run.url})`] });
+      continue;
+    }
+    const verdict = run.conclusion === "success" ? "pass" : run.conclusion === "failure" ? "fail" : "unclear";
+    testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict, confidence: verdict === "unclear" ? 0 : 1, evidence: [`CI ${run.conclusion}: ${run.url}`], ...(verdict === "unclear" ? {} : { level: "E2" as const }) });
+  }
+
+  return { status: "done", verdicts: testVerdicts };
+}
+
 // ---------------------------------------------------------------------------------------------
 // code_pr
 
@@ -203,37 +245,29 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
   }
   const hash = m.criteria_hash!;
 
-  // Only GitHub Actions jobs for this exact commit count, and only the ones named for the signed contract.
-  const runs = (await deps.github.checkRuns(ref.owner, ref.repo, pr.headSha)).filter((r) => r.app === CI_APP && r.headSha === pr.headSha);
-  // A contract job older than this PR belongs to another PR on the same commit, so it says nothing about this one.
-  const contractJob = latest(runs.filter((r) => r.name === "contract" && !(pr.createdAt && r.startedAt && r.startedAt < pr.createdAt)));
-  const testVerdicts: CriterionVerdict[] = [];
+  // policy-2 terms run the signed tests on the trusted runner (E3). If it can't give a checked result, the
+  // PR's own CI stands in (E2), and the reason shows on each tested criterion.
+  let trusted: Extract<Awaited<ReturnType<typeof runTrusted>>, { status: "done" }> | undefined;
+  let runnerNote: string | undefined;
+  if (deps.runner && tested.length && terms.policy?.policyVersion === POLICY_2) {
+    const out = await runTrusted(m, pr, deps.runKey ?? pr.headSha, deps.runner);
+    if (out.status === "pending") return { status: "pending", reason: `waiting for the trusted runner: ${out.reason}`, headSha: pr.headSha };
+    if (out.status === "done") trusted = out;
+    else runnerNote = out.reason;
+  }
+  let testVerdicts: CriterionVerdict[];
   const untrusted: string[] = []; // CI results that couldn't be tied to the milestone workflow
-  const workflowRuns: WorkflowLookup = new Map();
-  for (const c of tested) {
-    const run = latest(runs.filter((r) => r.name === acceptanceCheckName(c.id, hash)));
-    if (!run && contractJob?.status === "completed" && contractJob.conclusion !== "success") {
-      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: ["CI could not load the signed contract (is exactly one `Milestone-Terms:` line in the PR description?)"] });
-      continue;
-    }
-    if (!run || run.status !== "completed") {
-      const started = run?.startedAt ?? contractJob?.startedAt;
-      if (!started || Date.now() - new Date(started).getTime() < CI_TIMEOUT_MS) {
-        return { status: "pending", reason: `waiting for CI: acceptance (${c.id}) ${run ? run.status : "not started"}`, headSha: pr.headSha };
-      }
-      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: ["CI did not run the signed tests within 20 minutes"] });
-      continue;
-    }
-    // A result we can't tie to the milestone workflow counts neither way (a forged failure mustn't block
-    // the worker either), and a person decides.
-    const binding = await ciBindingProblem(deps.github, ref.owner, ref.repo, run, pr.headSha, workflowRuns);
-    if (binding) {
-      untrusted.push(`CI result for ${c.id} not trusted: ${binding}`);
-      testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: [`CI result not trusted: ${binding} (${run.url})`] });
-      continue;
-    }
-    const verdict = run.conclusion === "success" ? "pass" : run.conclusion === "failure" ? "fail" : "unclear";
-    testVerdicts.push({ id: c.id, kind: c.kind, source: "test", verdict, confidence: verdict === "unclear" ? 0 : 1, evidence: [`CI ${run.conclusion}: ${run.url}`], ...(verdict === "unclear" ? {} : { level: "E2" as const }) });
+  if (trusted) {
+    testVerdicts = tested.map((c): CriterionVerdict => {
+      const r = trusted.results.criteria.find((x) => x.id === c.id);
+      const where = `${trusted.url}${trusted.rekorIndex !== null ? `, Rekor ${trusted.rekorIndex}` : ""}`;
+      if (!r || r.error) return { id: c.id, kind: c.kind, source: "test", verdict: "unclear", confidence: 0, evidence: [`trusted runner could not run it: ${r?.error ?? "no result"} (${where})`] };
+      return { id: c.id, kind: c.kind, source: "test", verdict: r.pass ? "pass" : "fail", confidence: 1, level: "E3", evidence: [`trusted runner ${r.pass ? "passed" : `failed ${r.failed} of ${r.tests}`}, signed: ${where}`] };
+    });
+  } else {
+    const ci = await ciVerdicts(deps.github, ref, pr, tested, hash, untrusted);
+    if (ci.status === "pending") return ci;
+    testVerdicts = runnerNote ? ci.verdicts.map((v) => ({ ...v, evidence: [...v.evidence, `trusted runner unavailable: ${runnerNote}`] })) : ci.verdicts;
   }
 
   // Everything below runs once per commit, after CI is final.
@@ -241,9 +275,11 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
   // Past 300 files the scan below is incomplete, so a person looks (changedFiles is GitHub's own count).
   const changed = Math.max(pr.changedFiles ?? 0, files.length);
   const tooBig = changed > MAX_SCANNED_FILES || (pr.changedFiles === undefined && files.length >= MAX_SCANNED_FILES);
+  // Under the trusted runner the PR's workflow and tests count for nothing and its code ran only in the
+  // worker container, so protected files and harness escapes aren't tampering there.
   const tampering = [
-    ...files.filter((f) => PROTECTED.test(f.filename)).map((f) => f.filename),
-    ...harnessEscapes(files),
+    ...(trusted ? [] : files.filter((f) => PROTECTED.test(f.filename)).map((f) => f.filename)),
+    ...(trusted ? [] : harnessEscapes(files)),
     ...(tooBig ? [`the pull request changes ${pr.changedFiles ?? `${files.length}+`} files; only the first ${MAX_SCANNED_FILES} can be scanned`] : []),
     ...untrusted,
   ];
@@ -280,6 +316,7 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
       model: judged?.model ?? null,
       headSha: pr.headSha,
       ...(judged?.panel ? { panel: judged.panel } : {}),
+      ...(trusted ? { runner: { runId: trusted.runId, rekorIndex: trusted.rekorIndex, url: trusted.url } } : {}),
     },
   };
 }

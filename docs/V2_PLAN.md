@@ -428,6 +428,28 @@ Claude.
     `/.well-known/milestone-proof-keys.json` and `scripts/verify-proof.mts`;
   - passkey and agent-key signatures on the terms (migration 015, `src/lib/contract/signatures.ts`);
   - the worker's GitHub account, which binds who may submit.
+- **Phase 3 built locally (Nov 6), not yet live:**
+  - `runner/` holds the production `run.yml` and harness for `milestone-runner`. Each tested criterion
+    runs in a fresh pair of containers. The tests call the worker's exports **synchronously** through
+    proxies (a worker thread plus `Atomics.wait`), so contracts signed before this run unchanged. Checked
+    locally in Docker: the honest worker passes; the evil one can't patch `assert`, fake the report,
+    rewrite the harness or reach the network; the one that calls `process.exit` fails the test;
+  - `src/lib/review/runner.ts`: dispatch with a random nonce, find the run by name, download
+    `results.json`, then check the Sigstore signature, workflow identity, digest, predicate, nonce,
+    commit, PR and contract (migration 016 `runner_runs`);
+  - the verifier uses the runner for policy-2 terms (E3) and falls back to the PR's CI (E2). Under the
+    runner, `.github/` and `acceptance/` edits are not tampering. An objection's second review re-runs
+    the tests. The proof chain carries `runnerRunId` and `rekorLogIndex`;
+  - `RUNNER_GITHUB_TOKEN` is set locally and on Render (expires Jan 5, 2027). The `milestone-runner`
+    ruleset blocks force pushes and deletion of `main`, with no bypass;
+  - tests: `tests/runner.test.ts`, 16 cases;
+  - **live [VERIFIED Nov 6]:** `runner/` is pushed to `milestone-runner` `main` (`0566545`). One run against
+    milestone-demo PR #1 (contract `48a51380…`), dispatched by the app's own `runnerApi()`:
+    - run `42166461492` finished in 33 s: C1, C2 and C3 passed;
+    - `checkAttested` verified it with real Sigstore in 1.2 s (Rekor log index 3709803464);
+    - an edited copy and a replay under another nonce were both rejected;
+    - `gh attestation verify` passed on it too;
+  - **open:** deploy (merge `v2-build` into `main`).
 - **Phase 4 core built (Nov 6):**
   - the AI panel (`src/lib/review/panel.ts`): up to `AI_PANEL_SIZE` (default 3) different models, a random
     order each, and at most that many calls per review;

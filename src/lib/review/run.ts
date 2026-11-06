@@ -9,15 +9,17 @@ import { privacySweep } from "@/lib/privacy";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
 import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs, signedObjectionMs } from "./deadlines";
 import { decide, humanTimeoutOutcome, type PanelRecord, type Pins, type Verdict } from "./policy";
+import { runnerApi, type RunnerApi } from "./runner";
 import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifiers";
 
 // Deliver → review → decide → (objection window) → release. The verifier and the AI only produce a
 // Verdict; `decide` (fixed code) picks the outcome, and only releaseFunds moves money (money rule 1).
 
-export type ReviewDeps = { github: GitHub; aiCall?: ModelCall; models?: string[]; money: Deps };
+export type ReviewDeps = { github: GitHub; aiCall?: ModelCall; models?: string[]; runner?: RunnerApi; money: Deps };
 
 export function defaultReviewDeps(): ReviewDeps {
-  return { github: githubClient(), money: defaultDeps() };
+  const runner = runnerApi();
+  return { github: githubClient(), money: defaultDeps(), ...(runner ? { runner } : {}) };
 }
 
 export { humanCheckDeadline, objectionReleaseMs, objectionWindowMs };
@@ -120,6 +122,12 @@ function pinsOf(criteria: unknown): Pins {
  * quotes). `panelModels` and `panelVotes` are short strings the public chain body carries as facts:
  * "C2:P,P,u" is pass, pass, unclear in member order; a lower-case letter is a vote that wasn't grounded.
  */
+/** The trusted runner's run and Rekor entry, as public facts (proof chain), when it supplied the tests. */
+function runnerDetail(v: Verdict): Record<string, unknown> {
+  if (!v.runner) return {};
+  return { ...(v.runner.runId ? { runnerRunId: v.runner.runId } : {}), ...(v.runner.rekorIndex !== null ? { rekorLogIndex: v.runner.rekorIndex } : {}) };
+}
+
 function panelDetail(panel: PanelRecord | undefined): Record<string, unknown> {
   if (!panel) return {};
   const ids = [...new Set(panel.members.flatMap((m) => m.order))];
@@ -152,7 +160,7 @@ async function applyDecision(m: Milestone, verdict: Verdict, deps: ReviewDeps, f
   const set = decision === "PASSED" ? { release_after: new Date(Date.now() + signedObjectionMs(m.criteria)) } : decision === "CHANGES_REQUESTED" ? { changes_reason: null } : {};
   const out = await transition(db(), m, decision, "system", set, {
     event: `review:${decision.toLowerCase()}`,
-    detail: { reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, policyVersion: pins.policyVersion ?? "policy-1", injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel) },
+    detail: { reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, policyVersion: pins.policyVersion ?? "policy-1", injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel), ...runnerDetail(verdict) },
   });
   if (fresh && m.verifier === "code_pr" && m.pr_url) await postComment(m, verdict, decision, reasons, deps);
   return out;
@@ -249,8 +257,9 @@ export async function expireHumanCheck(milestoneId: string, deps: ReviewDeps = d
 }
 
 /**
- * The one second review after an objection: the same commit, CI results re-read (not re-run: the GitHub
- * token has no Actions permission), the PR description re-checked, and the review-only criteria judged
+ * The one second review after an objection: the same commit, the signed tests re-run on the trusted
+ * runner (policy-2; otherwise the PR's CI results are re-read, since the demo repo's token can't re-run
+ * them), the PR description re-checked, and the review-only criteria judged
  * by a different model than the first review. It bypasses the per-commit cache and is stored under its
  * own key. `decide` (fixed code) picks the outcome:
  *  - PASSED → back to PASSED with release_after = objection + 72 h; tick then releases as usual.
@@ -285,7 +294,8 @@ export async function resolveObjection(milestoneId: string, deps: ReviewDeps = d
     const terms = termsSchema.parse(m.criteria);
     const pool = pinnedFirst(terms, configuredModels());
     const others = pool.filter((x) => x !== first?.model);
-    const verifierDeps = { ...deps, models: others.length ? others : pool };
+    // runKey: the second review re-runs the signed tests on the trusted runner, not just re-reads them.
+    const verifierDeps = { ...deps, models: others.length ? others : pool, runKey: key };
 
     let waiting: string;
     try {
@@ -350,7 +360,7 @@ async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, 
   const set = decision === "PASSED" ? { release_after: releaseAt } : decision === "CHANGES_REQUESTED" ? { contested_at: null, changes_reason: null } : {};
   const out = await transition(db(), m, decision, "system", set, {
     event: "review:second",
-    detail: { decision, reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, firstModel, policyVersion: pins.policyVersion ?? "policy-1", injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel) },
+    detail: { decision, reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, firstModel, policyVersion: pins.policyVersion ?? "policy-1", injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel), ...runnerDetail(verdict) },
   });
   if (fresh && m.verifier === "code_pr" && m.pr_url) await postComment(m, verdict, decision, reasons, deps, "Second review after the client's objection");
   return out;
