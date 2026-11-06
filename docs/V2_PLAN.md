@@ -455,6 +455,16 @@ Claude.
     2. create a third sandbox personal account and set its email as `ARBITRATOR_PAYPAL_EMAIL`, on Render
        and locally;
     3. your OK to make an undecided HUMAN_CHECK lock instead of voiding. It's unchanged until then;
+  - **live end-to-end run [VERIFIED Nov 6]** on milestone `6c339a15…` ($20, milestone-demo PR #17):
+    - the terms pinned policy-2 and the desk;
+    - test-card hold `3L210557SR9793746`;
+    - the review passed at E3 on the trusted runner (run 42196865986, Rekor 3714238852);
+    - the client locked, the worker matched, and the pack froze as `bfa24034…`;
+    - the AI drafted 95%: it wrongly subtracted the platform fee, and the prompt is now fixed;
+    - the award was signed with the arbitrator's key at 100%;
+    - settlement: the $20 capture `8U75459516038431S` and the worker payout of $17.63 (SUCCESS); the
+      client's $5 fee captured and $4.29 paid out to the arbitrator (`HJCQG7NP4FMZQ`, SUCCESS); the
+      worker's fee hold `8PF37759AP812603M` VOIDED. PayPal's own API confirmed each of these;
   - **not built yet:** sending the evidence pack to PayPal disputes (`provide-evidence`), renaming
     `HUMAN_CHECK` to `ESCALATED`, and a registry of several arbitrators.
 - **Phase 5 (partial pay) built (Nov 6):**
