@@ -191,11 +191,74 @@ Applies to every op above (all use data from the milestone row). One mapper, `to
 `{ sender_batch_header: { sender_batch_id: <claim id>, recipient_type: "EMAIL", email_subject }, items: [{ recipient_type: "EMAIL", receiver: freelancer email, amount: { value, currency: "USD" }, sender_item_id: milestoneId }] }`.
 201 → `batch_header.payout_batch_id`, `batch_status`. Status: `GET /v1/payments/payouts/{batch_id}` → `items[0].payout_item_id`, `items[0].transaction_status` (SUCCESS → milestone `PAID_OUT`). Token: own client-credentials fetch with cache in `src/lib/paypal/token.ts`. [VERIFIED Oct 20: $1 payouts reached SUCCESS in about 15 s.]
 
+## v2 Phase 8: spending mandates (vault + merchant-initiated holds)
+
+Scope: a mandate's owner vaults PayPal's **sandbox test card** once; code then funds open-bounty holds on it,
+within the passkey-signed mandate, with no buyer present (spike H3 [VERIFIED Nov 5]). Host and client: unchanged
+(the one long-lived client in `src/lib/paypal/client.ts`, sandbox base URL, refuses live). Logging stays off
+(`logging: { level: "off" }` already set): these request bodies carry a card number.
+
+**Operations** (from `map/operations/vault.md`, `orders.md`):
+- `client.vault.createSetupToken(request: Vault.CreateSetupTokenRequest)` → `SetupTokenResponse` · `POST /v3/vault/setup-tokens` · fields `payPalRequestId` (header `PayPal-Request-Id`, optional), `body: SetupTokenRequest` (required) · SDK-sent `Idempotency-Key` (per call).
+- `client.vault.createPaymentToken(request: Vault.CreatePaymentTokenRequest)` → `PaymentTokenResponse` · `POST /v3/vault/payment-tokens` · same two fields, `body: PaymentTokenRequest`.
+- `client.orders.createOrder` (as in **Operations** above) with `body.paymentSource.card = { vaultId, storedCredential }`.
+
+**Models** (members set; source files under `node_modules/paypal/src/models/`):
+- `SetupTokenRequest { paymentSource: SetupTokenRequestPaymentSource (required); customer?: … (not set) }`; `SetupTokenRequestPaymentSource { card?: SetupTokenRequestCard }`; `SetupTokenRequestCard { name?, number?, expiry?, securityCode?, billingAddress?: Address }` (all optional).
+- `PaymentTokenRequest { paymentSource: { token?: VaultTokenRequest } }`; `VaultTokenRequest { id: string; type: VaultTokenRequestType }` (both required; `VaultTokenRequestType.SetupToken = "SETUP_TOKEN"`).
+- `SetupTokenResponse { id?, status?: PaymentTokenStatus }`; `PaymentTokenResponse { id?, paymentSource?: { card?: CardPaymentTokenEntity { lastDigits? } } }`. Every member optional: the code asserts `id` and treats its absence as an unknown outcome.
+- `CardRequest { vaultId?: string; storedCredential?: CardStoredCredential }`; `CardStoredCredential { paymentInitiator: PaymentInitiator (required); paymentType: StoredPaymentSourcePaymentType (required); usage?: StoredPaymentSourceUsageType }`. Values: `PaymentInitiator.Merchant = "MERCHANT"`, `StoredPaymentSourcePaymentType.Unscheduled = "UNSCHEDULED"`, `StoredPaymentSourceUsageType.Subsequent = "SUBSEQUENT"`.
+
+**Error arms** (schema-derived, per operation; never shared): `createSetupToken`: `"error"` [400] · `"error2"` [403] · `"error3"` [422] · `"error4"` [500] · `"undeclared"`. `createPaymentToken`: `"error"` [400] · `"error2"` [403] · `"error3"` [404] · `"error4"` [422] · `"error5"` [500] · `"undeclared"`. Both go through the existing `classify()` (`src/lib/paypal/errors.ts`), which reads `err.status`, never a tag.
+
+**DUPLICATE CLAIMS**
+
+| Write | Where the claim is stored | What rejects the second one | Where that rejection is caught | Where in the code |
+| --- | --- | --- | --- | --- |
+| createSetupToken + createPaymentToken (one vaulting) | `mandates.vault_status` set `'pending'` | conditional `UPDATE mandates SET vault_status='pending' WHERE id=$1 AND vault_status='none'` (0 rows → lost) | `vaultCard` reads the row back: `done` → return it; `pending` → `InProgress` (409) | `src/lib/mandates/vault.ts` `vaultCard` |
+| createOrder (fund a bounty from the vault) | `money_actions` action `create_order` | `money_actions_live_uq` | as for createOrder above (`runWrite`) | `src/lib/mandates/vault.ts` `fundFromMandate` → `flow.ts runWrite` |
+
+Request ids: `md_<mandateId>_setup_<n>` and `md_<mandateId>_ptoken_<n>` (n = `mandates.vault_attempt`, bumped only when a claim is released); the bounty order uses the milestone's `create_order` request id like every other hold.
+
+**UNKNOWN OUTCOMES**
+
+| Write | The operation you re-read with | The reference you search by | Where in the code | The test that fails the connection |
+| --- | --- | --- | --- | --- |
+| createSetupToken | replay `createSetupToken` with the same `PayPal-Request-Id` | `md_<id>_setup_<n>` | `vault.ts` `vaultCard` (status stays `pending`, retried with the same ids) | `tests/mandates.test.ts` "save the sandbox card once, with derived request ids, and keep a dropped call's claim for a replay" |
+| createPaymentToken | replay with the same `PayPal-Request-Id` | `md_<id>_ptoken_<n>` | same | same |
+| createOrder (vault) | replay `createOrder` with the same `PayPal-Request-Id` | claim `request_id` | `runWrite` spec `reread` | covered by the `runWrite` path; `tests/mandates.test.ts` "funds the hold from the saved card as a merchant-initiated charge, and opens it" asserts the body; live sandbox check Nov 6 (PayPal_Sandbox_Guide.md, last section) |
+
+Never-sent failures (`auth`, `encode`) and refusals (4xx): vault claim released (`vault_status='none'`, attempt +1).
+
+**CROSS-OPERATION INVARIANTS**
+
+| Invariant | Where the legal set comes from | Enforced where | The test that proves it |
+| --- | --- | --- | --- |
+| A bounty's amount, repository, verifier, open-bounty count and total stay inside the mandate | the mandate document the owner signed with a passkey (`mandates.document`, hash `document_hash`) | `src/lib/mandates/mandate.ts` `checkLimits`, before the milestone and before the `create_order` claim | `tests/mandates.test.ts` "refuses a bounty outside the signed limits, before any PayPal call" |
+| Only an active, unexpired, signed mandate funds anything | `mandates.status = 'active'`, `expires_at` | `checkLimits` | same file, "a revoked or expired mandate funds nothing" |
+
+**OPTIONAL FIELDS**
+
+| Field | What requires it | Set it? |
+| --- | --- | --- |
+| `payPalRequestId` (vault ops) | DUPLICATE CLAIMS / UNKNOWN OUTCOMES rows above | ✅ |
+| `SetupTokenRequest.customer` | nothing | ❌ |
+| `SetupTokenRequestCard.name/number/expiry/securityCode/billingAddress` | the task (PayPal's published sandbox test card, the same one `fundWithTestCard` uses) | ✅ |
+| `SetupTokenRequestCard.brand/verificationMethod/experienceContext` | nothing | ❌ |
+| `CardRequest.vaultId` | the task (fund from the vault) | ✅ |
+| `CardRequest.storedCredential` (`MERCHANT`, `UNSCHEDULED`, `SUBSEQUENT`) | the task (no buyer present) and spike H3 | ✅ |
+| `OrderRequest.applicationContext` | nothing (no buyer redirect) | ❌ |
+
+**WHEN THE API SAYS NO**: same mapping as 1b.4 (`toHttp`): a vault 4xx returns that status with PayPal's reason.
+
+**REQUIRED READING** (loaded Nov 6): `typescript-getting-started`, `typescript-error-handling`, `typescript-testing`.
+
 ## Assumptions & Blockers
 
 - Minor: platform fee defaults to 5% (`PLATFORM_FEE_BPS=500`), overridable by env.
 - Minor (H2, Oct 22): payout fee is an estimate, deducted from the worker's share: `PAYOUT_FEE_BPS` (200) of the amount before the payout fee, capped at `PAYOUT_FEE_CAP_CENTS` (100 = PayPal's US cap). PayPal's US fee page also lists a flat $0.25 per US payout sent through the Payouts API [DOCS]; set `PAYOUT_FEE_BPS=10000` + `PAYOUT_FEE_CAP_CENTS=25` to model that instead.
 - Minor: objection window, AI review and webhooks are later steps. Until then a dev-only route (`ALLOW_DEV_ACTIONS=1`) moves SUBMITTED → PASSED so the release can be tested.
+- Minor (Phase 8): mandates vault only PayPal's published sandbox test card; production needs PayPal's hosted card fields, so the card number never reaches this server.
 - No blockers.
 
 ## REQUIRED READING

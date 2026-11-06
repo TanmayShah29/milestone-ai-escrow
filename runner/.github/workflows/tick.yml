@@ -13,4 +13,6 @@ jobs:
     timeout-minutes: 4
     steps:
       - name: Tick
-        run: curl -sS --max-time 180 -o /dev/null -w "tick: HTTP %{http_code} in %{time_total}s\n" https://milestone-ai-escrow.onrender.com/api/tick || true
+        # A block scalar: a plain YAML value can't contain ": " (the format string below has one).
+        run: |
+          curl -sS --max-time 180 -o /dev/null -w "tick: HTTP %{http_code} in %{time_total}s\n" https://milestone-ai-escrow.onrender.com/api/tick || true

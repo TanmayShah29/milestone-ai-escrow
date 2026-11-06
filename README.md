@@ -192,8 +192,12 @@ The code is in `src/lib/resolution/`, and the case page is `/milestones/<id>/cou
    given back.
 
 ### Money rules (enforced in code)
-1. **The AI never moves money.** Model output is data. Only deterministic code applies the policy and calls
-   capture, void or payout. No AI tool and no MCP tool can fund, capture, release or refund.
+1. **The AI never moves money; code may fund only within a mandate a human signed.** Model output is data.
+   Only deterministic code applies the policy and calls capture, void or payout. No AI tool or MCP tool can
+   capture, release, void or refund. The one funding path an agent can reach is `post_bounty`, and only with
+   a mandate key. A person signs the mandate's limits with a passkey (most per bounty, total budget, open
+   bounties at once, allowed repositories, expiry). `checkLimits` then checks every bounty against that
+   signed document before any hold is created on the mandate's vaulted card.
 2. **Idempotency.** Every money-moving POST sends a `PayPal-Request-Id` derived from the milestone and the
    action. The action is first **claimed** in the database, so a double click or a retry can't move money
    twice.
@@ -379,6 +383,28 @@ Useful scripts: `scripts/sandbox-check.sh [--deep]` (which PayPal features your 
 To verify PRs in your own repo, copy `.github/workflows/milestone.yml` and `.github/milestone/` from
 [milestone-demo](https://github.com/TanmayShah29/milestone-demo/tree/main/.github) to its default branch,
 and point `MILESTONE_API` at your deployment.
+
+## For agents with a budget: mandates, open bounties, passports
+- **Mandates** (`/mandates/new`, `src/lib/mandates/`): a person sets limits for an agent, saves a card in
+  PayPal's vault (the sandbox test card here), and signs the exact limits with a passkey. The agent gets a
+  key (`mmd_…`) that adds one MCP tool, `post_bounty`.
+  - Every bounty is checked against the **signed document**, not against editable settings, and then funded
+    as a merchant-initiated charge with no buyer present: an AUTHORIZE order with
+    `payment_source.card.vault_id` and a `MERCHANT`/`UNSCHEDULED` stored credential.
+  - Anyone can check the mandate at `GET /api/mandates/<id>`, and the owner can revoke it.
+- **Open bounties** (`/bounties`, MCP `list_bounties` and `claim_bounty`): a funded bounty waits in
+  `OFFERED`.
+  - The first valid claim takes it into the normal flow. A claim signs the terms as the GitHub account the
+    pull request will come from, optionally with an agent's own key, and names the PayPal email for the
+    payout.
+  - A claim with no pull request in 3 days lapses, and the bounty reopens.
+  - A bounty nobody delivers by its due date is voided, and the mandate's budget comes back.
+- **Passports:** they're built from the ledger and signed with the proof key.
+  - A worker's (`/passport/<login>`, JSON at `/api/passport/worker/<login>`, plus a README badge): paid work,
+    the on-time rate, the evidence behind each pass (E3, E2, E1), changes asked for, disputes, lapsed claims
+    and awards.
+  - A client's (`/api/passport/client/<mandateId>`): objections, decisions left to time out, and awards
+    against it. Fairness runs both ways.
 
 ## For platforms: the API, signed webhooks, policy hooks
 - **OpenAPI 3.1:** `GET /api/openapi` describes every endpoint and the webhook. Its action list is the

@@ -475,7 +475,7 @@ async function cancelHoldLocked(milestoneId: string, deps: Deps, opts: CancelOpt
 // Capture works without it inside the 29 days; the due-date cap (lib/timeline.ts latestDueAt) keeps the
 // work inside them.
 
-const HOLD_STATES: MilestoneState[] = ["FUNDED", "SUBMITTED", "IN_REVIEW", "CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CONTESTED", "LOCKED", "ARBITRATION"];
+const HOLD_STATES: MilestoneState[] = ["FUNDED", "SUBMITTED", "IN_REVIEW", "CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CONTESTED", "LOCKED", "ARBITRATION", "OFFERED"];
 
 type ReauthInfo = { authorizationId: string; expiresAt: string | null };
 

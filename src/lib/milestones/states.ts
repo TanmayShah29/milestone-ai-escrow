@@ -18,6 +18,8 @@ export const STATES = [
   // The resolution desk (resolution/desk.ts): a decision locked for the arbitrator by a funded fee hold.
   "LOCKED",
   "ARBITRATION",
+  // An open bounty (bounties/bounty.ts): funded from a mandate, waiting for a worker to claim it.
+  "OFFERED",
 ] as const;
 
 export type MilestoneState = (typeof STATES)[number];
@@ -26,9 +28,9 @@ export type MilestoneState = (typeof STATES)[number];
 // HUMAN_CHECK (flow.ts cancelHold checks which), and a hold PayPal voided or expired ends the milestone
 // from any of them (flow.ts endHoldIfGone). Never after a capture.
 const TRANSITIONS: Record<MilestoneState, readonly MilestoneState[]> = {
-  DRAFT: ["AGREED", "CANCELLED"],
+  DRAFT: ["AGREED", "CANCELLED", "OFFERED"],
   AGREED: ["FUNDED", "CANCELLED"],
-  FUNDED: ["SUBMITTED", "CANCELLED"],
+  FUNDED: ["SUBMITTED", "CANCELLED", "OFFERED"], // OFFERED: a bounty claim lapsed with no work submitted
   SUBMITTED: ["IN_REVIEW", "PASSED", "CANCELLED"], // PASSED directly only via the dev route until the reviewer exists
   IN_REVIEW: ["CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CANCELLED"],
   CHANGES_REQUESTED: ["SUBMITTED", "CANCELLED"],
@@ -46,6 +48,8 @@ const TRANSITIONS: Record<MilestoneState, readonly MilestoneState[]> = {
   LOCKED: ["ARBITRATION", "PASSED", "HUMAN_CHECK", "CANCELLED"],
   // A signed award: PASSED at its share, or CANCELLED (void) at 0%. A silent arbitrator: the earlier decision.
   ARBITRATION: ["PASSED", "HUMAN_CHECK", "CANCELLED"],
+  // Claimed: the worker signed and takes the hold (FUNDED). Unclaimed past its deadline: voided.
+  OFFERED: ["FUNDED", "CANCELLED"],
 };
 
 export function canTransition(from: MilestoneState, to: MilestoneState): boolean {

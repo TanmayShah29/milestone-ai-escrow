@@ -424,3 +424,13 @@ Full write-up in `docs/SPIKES_V2.md`; script `spikes/paypal_spikes.py`. Test Vis
   - `provide-evidence` (multipart `input` JSON + `file1` PDF, `PROOF_OF_FULFILLMENT`) returned 200 at the inquiry stage and again at the claim stage.
   - A seller `escalate` returned 200 and moved the dispute to stage `CHARGEBACK` within about 3 min.
   - Sandbox `adjudicate` returned 400 `ACTION_NOT_ALLOWED_IN_CURRENT_DISPUTE_STATE` at every stage tried, including `UNDER_REVIEW` in the claim stage.
+
+## Vault-funded holds through the SDK (Nov 6, Phase 8) [VERIFIED]
+- `client.vault.createSetupToken` (card: the published test Visa `…1881`, `PayPal-Request-Id`
+  `md_<mandate>_setup_<n>`), then `client.vault.createPaymentToken` with `{ token: { id, type: "SETUP_TOKEN" } }`.
+  This returned a payment token, and `payment_source.card.last_digits` was `1881`.
+- `client.orders.createOrder` with intent AUTHORIZE and
+  `payment_source.card = { vault_id, stored_credential: { payment_initiator: "MERCHANT", payment_type: "UNSCHEDULED", usage: "SUBSEQUENT" } }`
+  returned authorization `4EN656571W7590806` for $10.00 in one call, with no buyer and no approval. It was
+  voided after the check (`VOIDED` on re-read). The same flow over raw REST passed spike H3 on Nov 5; this
+  confirms the SDK's field names (`vaultId`, `storedCredential`) on the wire.

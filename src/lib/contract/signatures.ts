@@ -109,7 +109,7 @@ export async function passkeyOptions(m: Milestone, role: Role, site: Site, githu
   return { mode: "sign" as const, options, statement };
 }
 
-function coseToJwk(coseKey: Uint8Array): JsonWebKey {
+export function coseToJwk(coseKey: Uint8Array): JsonWebKey {
   const k = decodeCredentialPublicKey(coseKey as Uint8Array<ArrayBuffer>) as unknown as Map<number, unknown>;
   if (k.get(cose.COSEKEYS.kty) !== cose.COSEKTY.EC2 || k.get(cose.COSEKEYS.alg) !== cose.COSEALG.ES256 || k.get(cose.COSEKEYS.crv) !== cose.COSECRV.P256) {
     throw new InvariantViolation("This passkey doesn't use ES256 (P-256). Try a different device or browser.");

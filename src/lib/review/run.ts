@@ -10,6 +10,7 @@ import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./githu
 import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs, signedObjectionMs } from "./deadlines";
 import { decide, earnedShare, humanTimeoutOutcome, type PanelRecord, type Pins, type Verdict } from "./policy";
 import { tickDesk } from "@/lib/resolution/desk";
+import { tickBounty } from "@/lib/bounties/bounty";
 import { deliverDue } from "@/lib/platform/outbound";
 import { pruneIdempotencyKeys } from "@/lib/platform/idempotency";
 import { runnerApi, type RunnerApi } from "./runner";
@@ -401,6 +402,8 @@ async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, 
 export async function tick(milestoneId: string, deps: ReviewDeps = defaultReviewDeps()): Promise<Milestone> {
   // The resolution desk's clock first: an award or a standing decision can put the milestone back in PASSED.
   let m = await tickDesk(milestoneId, { money: deps.money, ...(deps.aiCall ? { aiCall: deps.aiCall } : {}) });
+  // Open bounties: a claim with no pull request lapses; an unclaimed bounty past its date is voided.
+  if (m.open_bounty) m = await tickBounty(m.id, deps.money);
   if (m.state === "SUBMITTED" || m.state === "IN_REVIEW") m = await reviewMilestone(m.id, deps);
   if (m.state === "CONTESTED") m = await resolveObjection(m.id, deps);
   if (m.state === "HUMAN_CHECK") m = await expireHumanCheck(m.id, deps);
@@ -413,6 +416,9 @@ export async function tickAll(deps: ReviewDeps = defaultReviewDeps()): Promise<{
   const { rows } = await db().query<{ id: string }>(
     `select id from milestones
      where (state in ('SUBMITTED','IN_REVIEW','PASSED','CONTESTED','RELEASED','LOCKED','ARBITRATION') and updated_at > now() - interval '7 days')
+        -- Open bounties: unclaimed ones may be voided, claimed ones may lapse (bounties/bounty.ts tickBounty).
+        or state = 'OFFERED'
+        or (state = 'FUNDED' and open_bounty and pr_url is null and claim_expires_at <= now())
         -- Locks whose fees still need settling, or that may lapse (resolution/desk.ts tickDesk).
         or id in (select milestone_id from locks where status in ('opening','awarded','stood','ended') and updated_at > now() - interval '7 days')
         -- A HUMAN_CHECK whose decision deadline has passed, however long ago (see humanCheckDeadline).

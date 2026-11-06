@@ -428,6 +428,33 @@ Claude.
     `/.well-known/milestone-proof-keys.json` and `scripts/verify-proof.mts`;
   - passkey and agent-key signatures on the terms (migration 015, `src/lib/contract/signatures.ts`);
   - the worker's GitHub account, which binds who may submit.
+- **Phase 8 (mandates, open bounties, passports) built (Nov 6):**
+  - **money rule 1 amended**, with your OK: "the AI never moves money; code may fund only within a mandate
+    a human signed" (CLAUDE.md, README);
+  - **mandates** (`src/lib/mandates/`, migration 020): limits, the sandbox card vaulted through the SDK,
+    and a passkey signature over the exact limits document. `checkLimits` enforces the *signed document*
+    (its hash is re-checked), not the editable columns. Posts for one mandate run under one lock, so two
+    can't share the remaining budget;
+  - **vault-funded holds:** AUTHORIZE with `vault_id` and a `MERCHANT`/`UNSCHEDULED`/`SUBSEQUENT` stored
+    credential, under the milestone's `create_order` claim. **Verified live in the sandbox on Nov 6**:
+    authorization `4EN656571W7590806`, voided after;
+  - **open bounties** (`src/lib/bounties/`, state `OFFERED`):
+    - the contract commits to no worker email (`openBounty`) until the claim;
+    - the first valid claim (GitHub login, PayPal email, optionally an agent key signature) moves it to
+      FUNDED;
+    - a claim with no PR in 3 days lapses back to OFFERED;
+    - an unclaimed bounty past its due date is voided;
+  - **passports:** a worker's and a client's, signed with the proof key, plus a README badge;
+  - **MCP:** `list_bounties`, `claim_bounty`, and `post_bounty` with a mandate key only. The tool test
+    checks that a mandate key adds exactly that one tool;
+  - **UI:** `/mandates/new`, `/bounties` (a claim tested in the browser) and `/passport/<login>`;
+  - tests: `tests/mandates.test.ts`, 15 cases. The passkey helper moved to `tests/webauthn.ts`;
+  - **not built:**
+    - "the first passing PR wins" racing between candidates: the first valid claim takes the bounty
+      instead, which is simpler and spam-proof;
+    - counter-offers;
+    - mandate events in the proof chain;
+    - a live passkey sign of a mandate. That needs you in a browser on the deployed app.
 - **Phase 7 (platform API and liveness) built (Nov 6):**
   - migration 019 adds `platforms.webhook_url`, `webhook_secret` and `hooks`, plus `outbound_events` and
     `idempotency_keys`;

@@ -41,6 +41,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             <Link href="/ledger" className="text-[#b9c7cf] no-underline hover:text-white">
               Ledger
             </Link>
+            <Link href="/bounties" className="text-[#b9c7cf] no-underline hover:text-white">
+              Bounties
+            </Link>
             <Link href="/bench" className="hidden text-[#b9c7cf] no-underline hover:text-white sm:inline">
               Proof Bench
             </Link>

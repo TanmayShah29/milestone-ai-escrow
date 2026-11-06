@@ -80,7 +80,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - **Open user actions:** (1) set up a free keep-awake pinger (cron-job.org, every 10 min) on `/api/tick`; (2) post the Bryntum hackathon-license request in the PayPal Discord (https://discord.gg/sJ2G6DyvSK); remind them before the video; (3) around Nov 9–11, submit APIMatic's usage form (link in the checklist below).
 
 ## Money rules (do not break these)
-1. **The AI never moves money.** Model output is a recommendation. Only deterministic code applies the decision policy and calls capture, void, payout or refund. Never expose those calls as tools the model can use.
+1. **The AI never moves money; code may fund only within a mandate a human signed.** Model output is a recommendation. Only deterministic code applies the decision policy and calls capture, void, payout or refund. Never expose those calls as tools the model can use. (Amended Nov 6 with the user's OK: an agent holding a passkey-signed spending mandate may post bounties, and fixed code funds each hold on the vaulted card only within the signed limits, `src/lib/mandates/`.)
 2. Every money-moving POST sends a `PayPal-Request-Id` idempotency key, derived from the milestone id and the action.
 3. Never capture more than the authorized amount. Payout = captured amount minus the platform fee.
 4. Store every PayPal id (order, authorization, capture, payout batch and item, refund, dispute) on the milestone row.

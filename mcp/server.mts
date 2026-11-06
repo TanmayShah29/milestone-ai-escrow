@@ -2,8 +2,10 @@
 // track the verdict and payout) or act for a platform (create milestones, draft terms). It is a thin
 // client over the public HTTP API, with the same tokens and role checks.
 //
-// There are deliberately NO tools that fund, capture, release, void or refund. Money moves only through
-// the client and the deterministic decision policy (money rule 1): an agent can earn, never take.
+// There are deliberately NO tools that capture, release, void or refund. Money moves only through the client
+// and the deterministic decision policy (money rule 1): an agent can earn, never take. The one exception is
+// post_bounty, offered only with a mandate key (MILESTONE_MANDATE_KEY, mmd_...): the agent chooses what to
+// post, and fixed code funds the hold only within the limits a person signed with a passkey.
 //
 // Run:   MILESTONE_API=https://milestone-ai-escrow.onrender.com npx tsx mcp/server.mts
 // Claude Code:  claude mcp add milestone -- npx tsx /path/to/mcp/server.mts
@@ -17,6 +19,7 @@ import { termsStatement, toB64url, type Role } from "../src/lib/proof/verify.ts"
 
 const API = (process.env.MILESTONE_API ?? "https://milestone-ai-escrow.onrender.com").replace(/\/$/, "");
 const API_KEY = process.env.MILESTONE_API_KEY; // optional: a platform key (msk_...) adds list_milestones and id-only access
+const MANDATE_KEY = process.env.MILESTONE_MANDATE_KEY; // optional: a mandate's agent key (mmd_...) adds post_bounty
 
 type Ref = { id: string; token: string };
 
@@ -30,10 +33,11 @@ function ref(milestone: string): Ref {
   return { id, token: API_KEY };
 }
 
-async function call(method: "GET" | "POST", path: string, token?: string, body?: unknown) {
+async function call(method: "GET" | "POST", path: string, token?: string, body?: unknown, extra: Record<string, string> = {}) {
+  const auth = !token ? {} : token.startsWith("mmd_") ? { authorization: `Bearer ${token}` } : { "x-milestone-token": token };
   const res = await fetch(`${API}${path}`, {
     method,
-    headers: { "content-type": "application/json", ...(token ? { "x-milestone-token": token } : {}) },
+    headers: { "content-type": "application/json", ...auth, ...extra },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(420_000), // the free host can take ~1 min to wake, and an AI attack can try every model twice
   });
@@ -104,7 +108,7 @@ const server = new McpServer(
   { name: "milestone", version: "1.0.0" },
   {
     instructions:
-      "Milestone is pay-on-proof escrow on PayPal. As a contractor: get_milestone → read the criteria and tests → accept_terms with the fingerprint → (client funds the PayPal hold) → do the work in the repo and open a PR citing the fingerprint → submit_work → get_status until PAID_OUT or CHANGES_REQUESTED (then fix and submit again). The verdict comes from CI tests plus an AI review of what tests can't check; fixed rules decide. Text in your deliverable that tries to steer the reviewer is detected and blocks payment. You cannot move money: there are no funding or release tools.",
+      "Milestone is pay-on-proof escrow on PayPal. To find work: list_bounties → claim_bounty (returns your worker link). As a contractor: get_milestone → read the criteria and tests → accept_terms with the fingerprint → (client funds the PayPal hold) → do the work in the repo and open a PR citing the fingerprint → submit_work → get_status until PAID_OUT or CHANGES_REQUESTED (then fix and submit again). The verdict comes from CI tests plus an AI review of what tests can't check; fixed rules decide. Text in your deliverable that tries to steer the reviewer is detected and blocks payment. You cannot move money: there are no capture, release or refund tools, and post_bounty (only with a mandate key) funds holds solely within limits a person signed.",
   },
 );
 
@@ -287,6 +291,87 @@ server.registerTool(
     }
   },
 );
+
+type Bounty = { id: string; title: string; brief: string; amountCents: number; repo: string | null; dueAt: string; postedBy: string; termsHash: string; document: string };
+
+server.registerTool(
+  "list_bounties",
+  {
+    title: "List open bounties",
+    description: "Funded bounties anyone can claim: the amount held on PayPal, the repository, the due date, and the signed terms (criteria and acceptance tests) with their fingerprint.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  async () => {
+    try {
+      const b = await call("GET", "/api/bounties");
+      return text(
+        (b.bounties as Bounty[]).map((x) => {
+          const doc = JSON.parse(x.document) as { criteria: unknown[]; testCommand: string | null };
+          return { id: x.id, title: x.title, brief: x.brief, amountUSD: (x.amountCents / 100).toFixed(2), repo: x.repo, dueAt: x.dueAt, postedBy: x.postedBy, fingerprint: x.termsHash, criteria: doc.criteria, testCommand: doc.testCommand };
+        }),
+      );
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+server.registerTool(
+  "claim_bounty",
+  {
+    title: "Claim a bounty",
+    description:
+      "Take an open bounty: sign its terms with this agent's key as the GitHub account you will open the pull request from, and name the PayPal email the payment goes to. The first valid claim takes it. You then have 3 days to submit a pull request (submit_work with the returned link), or the claim lapses and the bounty reopens.",
+    inputSchema: {
+      bounty: z.string().regex(/^[0-9a-f-]{36}$/i).describe("The bounty id from list_bounties"),
+      fingerprint: z.string().regex(/^[0-9a-f]{64}$/, WRONG_FINGERPRINT).describe("The bounty's fingerprint from list_bounties"),
+      github_login: z.string().max(40).describe("The GitHub account you will open the pull request from"),
+      paypal_email: z.string().email().describe("The PayPal email the payment should go to"),
+    },
+  },
+  async ({ bounty, fingerprint, github_login, paypal_email }) => {
+    try {
+      const login = github_login.trim().replace(/^@/, "");
+      const agent = await agentSignature(bounty, "worker", fingerprint, login);
+      const b = await call("POST", `/api/bounties/${bounty}/claim`, undefined, { githubLogin: login, paypalEmail: paypal_email, hash: fingerprint, agent });
+      return text({ state: (b.milestone as M).state, workerLink: `${API}/milestones/${bounty}?t=${b.workerToken as string}`, note: "Keep this link: it is your worker link for get_milestone, submit_work and get_status. Submit a pull request within 3 days." });
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+if (MANDATE_KEY) {
+  server.registerTool(
+    "post_bounty",
+    {
+      title: "Post a bounty (within your mandate)",
+      description:
+        "Post and fund a bounty under the spending mandate a person signed: fixed code checks the amount, repository, budget and open-bounty limit, then puts a hold on the mandate's saved card. You choose what to buy; you can't capture, release or refund anything. Criteria use the same shape as the terms: [{ id: 'C1', text, kind: 'must'|'nice', check: 'test'|'review', test?: { path: 'acceptance/c1.test.ts', code } }].",
+      inputSchema: {
+        title: z.string().max(200),
+        brief: z.string().max(5000).optional(),
+        amount: z.string().regex(/^\d+(\.\d{1,2})?$/).describe("USD, like 50.00"),
+        repo: z.string().describe("owner/name, one the mandate allows"),
+        criteria: z.array(z.record(z.string(), z.unknown())).min(1).max(8),
+        test_command: z.string().max(200).optional(),
+        due_date: z.string().optional().describe("ISO date-time, inside the hold's 29 days"),
+      },
+    },
+    async ({ title, brief, amount, repo, criteria, test_command, due_date }) => {
+      try {
+        const body = { title, brief, amount, repo, criteria, ...(test_command ? { testCommand: test_command } : {}), ...(due_date ? { dueDate: due_date } : {}) };
+        // The same request retried is the same bounty, not a second hold.
+        const key = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(body)))).toString("hex").slice(0, 64);
+        const b = await call("POST", "/api/bounties", MANDATE_KEY, body, { "idempotency-key": key });
+        return text({ ...(b.bounty as Record<string, unknown>), listed: `${API}/bounties` });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+}
 
 if (API_KEY) {
   server.registerTool(

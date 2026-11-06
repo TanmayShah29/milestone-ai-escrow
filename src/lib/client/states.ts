@@ -58,6 +58,7 @@ export const STATUS: Record<string, { label: string; tone: Tone }> = {
   CANCELLED: { label: "Cancelled", tone: "blocked" },
   LOCKED: { label: "Locked for arbitration", tone: "held" },
   ARBITRATION: { label: "With the arbitrator", tone: "held" },
+  OFFERED: { label: "Open bounty, funded", tone: "held" },
 };
 
 export const STEPS = ["Agree", "Fund", "Deliver", "Verify", "Release"] as const;
@@ -68,6 +69,7 @@ export function stepIndex(state: string): number {
     case "DRAFT":
       return 0;
     case "AGREED":
+    case "OFFERED":
       return 1;
     case "FUNDED":
     case "CHANGES_REQUESTED":

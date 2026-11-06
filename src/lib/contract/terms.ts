@@ -85,6 +85,9 @@ const termsObject = z.object({
   // Written by the server (never trusted from input). Its presence makes this a version 2 contract, whose
   // public document carries a salted hash of the worker's PayPal email. The salt itself is never in it.
   emailSalt: z.string().regex(/^[0-9a-f]{32}$/).optional(),
+  // Written by the server for an open bounty (bounties/bounty.ts): no worker is known when the terms are
+  // signed, so the document commits to no email; the worker who claims it signs these terms with theirs.
+  openBounty: z.literal(true).optional(),
 });
 
 function refineTerms(t: z.infer<typeof termsObject>, ctx: z.RefinementCtx) {
@@ -177,9 +180,11 @@ export function contractDocument(m: Pick<Milestone, "id" | "title" | "amount_cen
   return {
     // The document is public (CI fetches it by hash), so version 2 commits to the email without showing it.
     // Version 1 contracts are already signed and cited on PRs, and must keep hashing as they did.
-    ...(terms.emailSalt
-      ? { version: 2, workerPayPalEmailHash: createHash("sha256").update(`${terms.emailSalt}:${m.freelancer_email}`).digest("hex") }
-      : { version: 1, workerPayPalEmail: m.freelancer_email }),
+    ...(terms.openBounty
+      ? { version: 2, openBounty: true }
+      : terms.emailSalt
+        ? { version: 2, workerPayPalEmailHash: createHash("sha256").update(`${terms.emailSalt}:${m.freelancer_email}`).digest("hex") }
+        : { version: 1, workerPayPalEmail: m.freelancer_email }),
     milestoneId: m.id,
     title: m.title,
     amountCents: m.amount_cents,
@@ -263,6 +268,7 @@ export function markStale(prev: Terms | undefined, next: Terms): Terms {
   return {
     ...next,
     policy: prev?.policy, // server-written (saveTerms); whatever the input carried is ignored
+    openBounty: prev?.openBounty, // the same
     emailSalt: prev?.emailSalt, // the same
     // Undefined keys are left out of both the stored JSON and the hash (see canonical).
     criteria: next.criteria.map((input) => {
@@ -463,7 +469,9 @@ function withSuggestions(terms: Terms, suggestions: Suggestion[]) {
 }
 
 export async function saveTerms(m: Milestone, saved: Terms, meta: { repo: string | null; stack: string | null; model: string | null; actor: "ai" | "client"; suggestions: Suggestion[] }): Promise<Milestone> {
-  const terms: Terms = { ...saved, policy: currentPolicy(m.verifier), emailSalt: storedTerms(m)?.emailSalt ?? randomBytes(16).toString("hex") };
+  const { openBounty: _ignored, ...input } = saved; // server-written: only a bounty's own milestone row sets it
+  void _ignored;
+  const terms: Terms = { ...input, policy: currentPolicy(m.verifier), emailSalt: storedTerms(m)?.emailSalt ?? randomBytes(16).toString("hex"), ...(m.open_bounty ? { openBounty: true as const } : {}) };
   const withRepo = { ...m, repo: meta.repo };
   const hash = hashTerms(withRepo, terms);
   const out = await updateFields(db(), m.id, {

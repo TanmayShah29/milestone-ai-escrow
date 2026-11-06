@@ -25,6 +25,10 @@ export type Milestone = {
   captured_cents: number | null;
   /** The earned share a PASSED decision pays, in basis points (policy-2 pay schedule); null = all of it. */
   share_bps: number | null;
+  /** Open bounties (bounties/bounty.ts): the mandate that posted and funded it, and the claim's deadline. */
+  mandate_id: string | null;
+  open_bounty: boolean;
+  claim_expires_at: Date | null;
   fee_cents: number | null;
   payout_cents: number | null;
   paypal_payout_batch_id: string | null;
