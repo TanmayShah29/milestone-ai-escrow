@@ -89,6 +89,8 @@ export type PanelInput = {
   call?: ModelCall;
   size?: number;
   maxChars?: number;
+  /** Fixed criteria orders per member (Proof Bench measures position bias with them); random otherwise. */
+  orders?: string[][];
 };
 
 export type PanelOutput = {
@@ -120,7 +122,7 @@ export async function runPanel(input: PanelInput): Promise<PanelOutput> {
   if (data.length > max) data = `${data.slice(0, max)}\n[data truncated at ${max} characters]`;
 
   const byId = new Map(input.criteria.map((c) => [c.id, c]));
-  const orders = panelOrders(input.criteria.map((c) => c.id), models.length);
+  const orders = input.orders ?? panelOrders(input.criteria.map((c) => c.id), models.length);
   const members: PanelRecord["members"] = [];
   const replies: PanelReply[] = [];
   let busy = 0;

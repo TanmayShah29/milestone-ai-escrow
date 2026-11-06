@@ -45,7 +45,7 @@ export function PayOnProofCheque() {
   const cleared = passed > CONDITIONS.length;
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-rule-strong bg-panel shadow-[0_2px_6px_rgb(19_35_58/0.06),0_24px_60px_-28px_rgb(19_35_58/0.35)]">
+    <div className="relative overflow-hidden rounded-xl border border-rule-strong bg-panel shadow-[0_2px_6px_rgb(10_22_40/0.05),0_32px_64px_-32px_rgb(10_22_40/0.35)]">
       {/* Guilloche border bands, top and bottom, like a cheque's security print. */}
       <svg
         className="pointer-events-none absolute inset-x-0 top-0 h-6 w-full"

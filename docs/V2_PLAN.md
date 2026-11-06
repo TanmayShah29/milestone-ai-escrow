@@ -428,6 +428,26 @@ Claude.
     `/.well-known/milestone-proof-keys.json` and `scripts/verify-proof.mts`;
   - passkey and agent-key signatures on the terms (migration 015, `src/lib/contract/signatures.ts`);
   - the worker's GitHub account, which binds who may submit.
+- **Phase 1 (Proof Bench v2) started (Nov 6):**
+  - 27 hand-labelled panel cases in `bench/panel/cases.ts`: good, subtly wrong, padded, ignores the spec,
+    injections in seven languages, and invisible characters. Two review criteria each;
+  - `npm run bench:panel` runs the production `runPanel` in fixed criteria orders (ab, then ba, for
+    position bias), cached forever under a small daily budget;
+  - `src/lib/bench-panel.ts` scores it: per-model accuracy, Cohen's κ, grounding rate, injection flags and
+    order flips; the panel's correct criteria, false passes, escalations and wrong payouts;
+  - the bench version (`PANEL_BENCH_VERSION`, a digest of the cases) is pinned as `policy.benchVersion` in
+    new terms;
+  - `/bench` has a section that shows whatever has been judged so far;
+  - the deterministic scan flags all 9 injection cases and none of the 18 clean ones (a test checks this);
+  - tests: `tests/bench-panel.test.ts`;
+  - **ongoing:** about 160 calls in all, run a day at a time with `npm run bench:panel -- --budget 24`.
+- **UI refresh "Clear ledger" (Nov 6):** Geist; a cool canvas with white surfaces and ink actions; a
+  translucent sticky header; radius by hierarchy; a receipt-style money split. `DESIGN.md` is rewritten.
+  Checked at desktop and 375 px in both themes (this also fixed `/bench` and the header overflowing on
+  phones).
+- **Phase 9 (in progress):** the README has the v2 summary, a v2 judge row and built-with rows. The Devpost
+  text has the v2 section, next steps and the v2 video outline. Still to do: the video, the Proof Bench v2
+  numbers in the README once enough cases are judged, the Bryntum license, and APIMatic's form.
 - **Phase 8 (mandates, open bounties, passports) built (Nov 6):**
   - **money rule 1 amended**, with your OK: "the AI never moves money; code may fund only within a mandate
     a human signed" (CLAUDE.md, README);

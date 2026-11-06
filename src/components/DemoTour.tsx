@@ -36,7 +36,7 @@ export function DemoTour({ currentId, state, onTimeline = false }: { currentId?:
   };
 
   return (
-    <aside aria-label="Guided demo" className="fixed inset-x-3 bottom-3 z-50 rounded-lg border border-ink/30 bg-panel p-4 shadow-[0_2px_4px_rgb(19_35_58/0.08),0_16px_40px_-12px_rgb(19_35_58/0.35)] sm:inset-x-auto sm:right-5 sm:bottom-5 sm:w-96">
+    <aside aria-label="Guided demo" className="fixed inset-x-3 bottom-3 z-50 rounded-lg border border-ink/30 bg-panel p-4 shadow-[var(--shadow-card)] sm:inset-x-auto sm:right-5 sm:bottom-5 sm:w-96">
       <div className="flex items-start justify-between gap-3">
         <p className="text-xs text-ink-2">
           Guided demo · {current + 1} of {STEPS.length}

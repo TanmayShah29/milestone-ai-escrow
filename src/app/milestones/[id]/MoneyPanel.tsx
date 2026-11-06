@@ -92,27 +92,23 @@ export function MoneyPanel({ m }: { m: MilestoneView }) {
         </p>
       ) : (
         <>
-          <dl className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-            <div>
-              <dt className="text-xs text-ink-2">Client pays</dt>
-              <dd className="font-semibold">{usd(fees.pays)}</dd>
+          {/* A receipt: what the client pays, what comes off, and what reaches the worker. */}
+          <dl className="mt-4 text-sm">
+            <div className="flex items-baseline justify-between py-1">
+              <dt className="text-ink-2">Client pays</dt>
+              <dd className="font-medium">{usd(fees.pays)}</dd>
             </div>
-            <div>
-              <dt className="text-xs text-ink-2">PayPal fees</dt>
-              <dd className="font-semibold">
-                {fees.paypalFees == null ? "—" : <>{about && <span className="font-normal text-ink-2">{about}</span>}{usd(fees.paypalFees)}</>}
-              </dd>
+            <div className="flex items-baseline justify-between py-1">
+              <dt className="text-ink-2">PayPal fees{about ? " (estimate)" : ""}</dt>
+              <dd className="font-medium">{fees.paypalFees == null ? "n/a" : `− ${usd(fees.paypalFees)}`}</dd>
             </div>
-            <div>
-              <dt className="text-xs text-ink-2">Platform fee</dt>
-              <dd className="font-semibold">{usd(fees.platformFee)}</dd>
+            <div className="flex items-baseline justify-between py-1">
+              <dt className="text-ink-2">Platform fee</dt>
+              <dd className="font-medium">− {usd(fees.platformFee)}</dd>
             </div>
-            <div>
-              <dt className="text-xs text-ink-2">Worker receives</dt>
-              <dd className="font-semibold">
-                {about && <span className="font-normal text-ink-2">{about}</span>}
-                {usd(fees.receives)}
-              </dd>
+            <div className="mt-1 flex items-baseline justify-between border-t border-current/15 pt-2">
+              <dt className="font-medium">Worker receives{about ? " about" : ""}</dt>
+              <dd className="money text-lg font-semibold">{usd(fees.receives)}</dd>
             </div>
           </dl>
           <p className="mt-2 text-xs text-ink-3">

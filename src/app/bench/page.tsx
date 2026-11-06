@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Check, X } from "lucide-react";
 import type { Metadata } from "next";
+import { PanelBench } from "./PanelBench";
 import { score, shipped, type BenchCaseResult, type BenchResults, type LlmResult, type MilestoneResult } from "@/lib/bench-score";
 
 // Proof Bench: the committed bench/results.json, read when the page is built. `npm run bench` writes it;
@@ -223,6 +224,8 @@ export default function BenchPage() {
         </div>
       </section>
 
+      <PanelBench />
+
       <section aria-labelledby="reading-title" className="mt-10 max-w-3xl">
         <h2 id="reading-title" className="text-xl font-semibold tracking-tight">
           What this run shows
@@ -270,7 +273,7 @@ export default function BenchPage() {
         </ol>
       </section>
 
-      <section aria-labelledby="repro-title" className="mt-12 grid gap-10 lg:grid-cols-2">
+      <section aria-labelledby="repro-title" className="mt-12 grid grid-cols-1 gap-10 lg:grid-cols-2 [&>*]:min-w-0">
         <div>
           <h2 id="repro-title" className="text-xl font-semibold tracking-tight">
             Reproduce it

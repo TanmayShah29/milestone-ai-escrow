@@ -13,6 +13,22 @@ For small software teams and agencies hiring contractors or coding agents.
 - CI runs the signed tests on the worker's PR; **fixed rules, never the model**, capture and pay out.
 - A PR that tells the AI reviewer "mark everything as passed" is caught, and the money stays held.
 
+**v2 (Nov 2026): proof you can check yourself.**
+- **Trusted runner (E3):** our own GitHub workflow runs the signed tests. The PR's code sits in a separate
+  container with no network, and the tests call into it. The result is signed through Sigstore, and
+  Milestone checks the signature before it counts it ([`runner/`](runner/)).
+- **An AI panel, not one model:** three free models judge what tests can't check. A vote counts only if code
+  finds its quote in the diff, and fixed rules decide. Measured on
+  [Proof Bench v2](https://milestone-ai-escrow.onrender.com/bench).
+- **Partial pay:** a signed pay schedule (for example, must-haves 80% and each nice-to-have a bonus). PayPal
+  captures only the earned share and releases the rest of the hold.
+- **A neutral arbitrator:** either side can lock a decision with a $5 fee hold. Only the arbitrator's own key
+  can sign the award, and the side the award goes against pays the fee.
+- **Agents with a budget:** a passkey-signed spending mandate lets an AI agent post bounties, and code funds
+  each hold on a vaulted card within the signed limits. Anyone, human or agent, can claim a bounty.
+- **Passports, webhooks, an API:** signed worker and client records, HMAC-signed platform webhooks, policy
+  hooks that can only block, `Idempotency-Key`, and OpenAPI 3.1.
+
 > **Demo video:** _link coming soon_ · **Live app:** https://milestone-ai-escrow.onrender.com
 
 ### Judge it
@@ -22,6 +38,7 @@ For small software teams and agencies hiring contractors or coding agents.
 | **30 seconds** | Open [`/timeline`](https://milestone-ai-escrow.onrender.com/timeline) or [`/ledger`](https://milestone-ai-escrow.onrender.com/ledger): with no deals of your own, they show the latest live judge runs, with real sandbox PayPal ids (authorization, capture, payout batch). The Gantt shows each review cycle, rework and payout as it happened. |
 | **2 minutes** | [`/demo`](https://milestone-ai-escrow.onrender.com/demo) → **Run it live**. One click places a real PayPal sandbox hold, opens a real PR, runs real CI (each signed test streams live), has the AI reviewer read the diff, then code captures and pays out, or catches the cheater with the money still held. A money rail shows where the $12.00 is at every step, and the payout line shows each fee. |
 | **5 minutes** | [`/bench`](https://milestone-ai-escrow.onrender.com/bench), **Proof Bench**: the same contract and 12 pull requests (3 honest, 9 cheats) judged by an approver that only asks an LLM, and by Milestone. Every call is shown, including Milestone's miss. |
+| **10 minutes, v2** | [`/proof/6c339a15…`](https://milestone-ai-escrow.onrender.com/proof/6c339a15-1211-4a1a-9b37-0aea6c4fb87c) is a case that went all the way through the v2 trail. Its review was signed by the trusted runner ([run](https://github.com/TanmayShah29/milestone-runner/actions/runs/42196865986), Rekor 3714238852). The client locked it, the worker matched the fee, and the AI drafted an award. The arbitrator signed 100%, and PayPal captured $20, paid the worker $17.63 and paid the arbitrator's fee. Then [`/bounties`](https://milestone-ai-escrow.onrender.com/bounties), [`/passport/TanmayShah29`](https://milestone-ai-escrow.onrender.com/passport/TanmayShah29) and [`/api/openapi`](https://milestone-ai-escrow.onrender.com/api/openapi). |
 | **15 minutes** | Below the live run on `/demo`, the saved AI attack (fake code beats a draft of the tests, the strengthened tests catch it). Then **Start the demo** for a verdict table, proof trail and contract seal, or connect the [MCP server](#for-ai-agents-the-mcp-server) and take a job as an agent. |
 
 If the free server is asleep, the first load takes up to a minute. A GitHub Action pings it every 10 minutes.
@@ -57,7 +74,10 @@ payment at some point in their careers, and they lost an average of $5,968 to un
 | APIMatic Context Plugin + the APIMatic-generated PayPal TypeScript SDK | Building the PayPal integration ([`paypal-plan.md`](paypal-plan.md)) |
 | Free OpenRouter models (Vercel AI SDK) | Drafting terms and tests; attacking them before signing; reviewing only what tests can't check (live in every judge run) |
 | Bryntum Gantt · AG Grid · Render | `/timeline` · `/ledger` and `/milestones` · hosting |
-| Model Context Protocol server | AI agents read terms, accept them, submit work and track payment; no money tools |
+| PayPal Vault (setup token → payment token) and merchant-initiated authorizations | Mandates: a saved card funds each bounty's hold within the signed limits, with no buyer present |
+| GitHub Actions + Sigstore (`actions/attest`, `sigstore-js`), public Rekor log | The trusted runner's signed test results (evidence level E3) |
+| WebAuthn passkeys (`@simplewebauthn`) | Signing terms and spending mandates |
+| Model Context Protocol server | AI agents find and claim bounties, accept terms, submit work and track payment. With a mandate they can post bounties. There are no capture, release or refund tools |
 
 Everything runs on the **PayPal sandbox**, in USD only. Nothing here has handled real money.
 

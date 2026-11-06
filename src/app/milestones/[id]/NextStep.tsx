@@ -530,7 +530,7 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
   }
 
   return (
-    <section aria-labelledby="next-h" className="rounded-lg border border-ink/25 bg-panel p-4 shadow-[0_1px_2px_rgb(19_35_58/0.06),0_8px_24px_-12px_rgb(19_35_58/0.18)] sm:p-5">
+    <section aria-labelledby="next-h" className="rounded-lg border border-rule-strong bg-panel p-5 shadow-[var(--shadow-card)] sm:p-6">
       <h2 id="next-h" className="text-xl font-semibold text-ink">
         {title}
       </h2>

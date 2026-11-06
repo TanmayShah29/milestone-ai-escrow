@@ -11,7 +11,8 @@
     "agents": "tsx --env-file=.env scripts/agent-run.mts",
     "test": "DATABASE_URL=${TEST_DATABASE_URL:-postgres://localhost:5432/milestone_test} tsx scripts/migrate.ts >/dev/null && TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://localhost:5432/milestone_test} tsx --test --test-concurrency=1 tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "bench": "tsx --env-file=.env scripts/bench.ts"
+    "bench": "tsx --env-file=.env scripts/bench.ts",
+    "bench:panel": "tsx --env-file=.env scripts/bench-panel.ts"
   },
   "dependencies": {
     "@bryntum/gantt": "npm:@bryntum/gantt-trial@^7.3.7",

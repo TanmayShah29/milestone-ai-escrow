@@ -11,6 +11,7 @@ import { InvariantViolation } from "@/lib/errors";
 import { feeBps, MIN_AMOUNT_CENTS } from "@/lib/money/amounts";
 import { objectionWindowMs } from "@/lib/review/deadlines";
 import { arbitrator } from "@/lib/resolution/config";
+import { PANEL_BENCH_VERSION } from "@/lib/bench-version";
 
 // The contract both sides sign: acceptance criteria, compiled into tests where they can be checked by
 // code, fingerprinted by a SHA-256 hash over everything that matters. The AI drafts it; people edit and
@@ -59,6 +60,8 @@ export const policySchema = z.object({
   policyVersion: z.string().max(40).optional(),
   confidenceFloor: z.number().min(0).max(1).optional(),
   reviewModels: z.array(z.string().max(120)).max(5).optional(),
+  // Which Proof Bench v2 measured those models (bench/panel/cases.ts digest), so a deal says how well its judges were measured.
+  benchVersion: z.string().max(60).optional(),
   verifier: z.string().max(60).optional(),
   // Who settles a locked decision, and each side's fee to lock or match (resolution/), pinned when this
   // server offers an arbitrator at signing. Without it, the terms can't be locked.
@@ -209,6 +212,7 @@ export function currentPolicy(verifier: Milestone["verifier"] = "code_pr"): Poli
     policyVersion: POLICY_VERSION,
     confidenceFloor: CONFIDENCE_FLOOR,
     reviewModels: configuredModels(),
+    benchVersion: PANEL_BENCH_VERSION,
     verifier: `${verifier}@${VERIFIER_VERSION}`,
     ...(desk ? { arbitrator: { name: desk.name, keyId: desk.keyId, feeCents: desk.feeCents } } : {}),
   };

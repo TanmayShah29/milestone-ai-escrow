@@ -1,52 +1,54 @@
 @import "tailwindcss";
 
-/* Security print: security-paper ground, intaglio ink, money states. See docs/design/deal-room.brief.md. */
+/* Clear ledger: a cool canvas, white surfaces, ink actions, money states. See DESIGN.md. */
 :root {
-  --paper: #eef3f1;
-  --panel: #f8fbfa;
-  --ink: #13233a;
-  --ink-2: #4a5b6e;
-  --ink-3: #56656f;
-  --rule: #c9d6d2;
-  --rule-strong: #a9bbb6;
-  --accent: #13233a;
-  --accent-ink: #f8fbfa;
-  --held: #8a5a12;
-  --held-field: #f3e3c3;
-  --paid: #1e6b4e;
-  --paid-field: #d6eadf;
-  --failed: #b4232c;
-  --failed-field: #f6dcdd;
-  --blocked: #56656f;
-  --blocked-field: #e2e9ec;
-  --focus: #2e6db4;
-  --seal: #1e6b4e;
-  --seal-2: #13233a;
+  --paper: #f5f6f8;
+  --panel: #ffffff;
+  --ink: #0a1628;
+  --ink-2: #475467;
+  --ink-3: #5e6878;
+  --rule: #e3e7ed;
+  --rule-strong: #cdd3dc;
+  --accent: #0a1628;
+  --accent-ink: #ffffff;
+  --held: #9a5b05;
+  --held-field: #fdf1dc;
+  --paid: #0b7a53;
+  --paid-field: #dff4ea;
+  --failed: #c0262d;
+  --failed-field: #fde4e4;
+  --blocked: #5e6878;
+  --blocked-field: #eceff3;
+  --focus: #2d5bd6;
+  --seal: #0b7a53;
+  --seal-2: #0a1628;
+  --shadow-card: 0 1px 2px rgb(10 22 40 / 0.04), 0 8px 24px -12px rgb(10 22 40 / 0.12);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #0f1a24;
-    --panel: #15222e;
-    --ink: #e4ecea;
-    --ink-2: #a7b6c0;
-    --ink-3: #8597a3;
-    --rule: #2a3a46;
-    --rule-strong: #3a4d5a;
-    --accent: #e4ecea;
-    --accent-ink: #0f1a24;
-    --held: #e7b766;
-    --held-field: #3b2e17;
-    --paid: #7fcfa6;
-    --paid-field: #183a2c;
-    --failed: #f19197;
-    --failed-field: #3d1c20;
-    --blocked: #8597a3;
-    --blocked-field: #213039;
-    --focus: #8ab8ef;
-    --seal: #7fcfa6;
-    --seal-2: #c7d4dc;
+    --paper: #0a0f18;
+    --panel: #111827;
+    --ink: #eef1f6;
+    --ink-2: #a8b2c2;
+    --ink-3: #8c97a8;
+    --rule: #1f2937;
+    --rule-strong: #2f3b4d;
+    --accent: #eef1f6;
+    --accent-ink: #0a0f18;
+    --held: #f0b45b;
+    --held-field: #33240c;
+    --paid: #5fd3a3;
+    --paid-field: #0f2f24;
+    --failed: #f59a9e;
+    --failed-field: #3a1518;
+    --blocked: #8c97a8;
+    --blocked-field: #1a2230;
+    --focus: #8fb0ff;
+    --seal: #5fd3a3;
+    --seal-2: #c8d2e0;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -16px rgb(0 0 0 / 0.6);
     color-scheme: dark;
   }
 }
@@ -70,8 +72,12 @@
   --color-blocked: var(--blocked);
   --color-blocked-field: var(--blocked-field);
   --color-focus: var(--focus);
-  --font-sans: var(--font-public-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* Hierarchy by radius: controls 10px, sections 14px, the landing cheque 20px. */
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
 }
 
 html {
@@ -81,9 +87,22 @@ html {
 body {
   background: var(--paper);
   color: var(--ink);
-  font-family: var(--font-public-sans), system-ui, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "ss01", "cv11";
+  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Display type and money: tighter, so large figures read as one shape. */
+h1,
+h2,
+.money {
+  letter-spacing: -0.022em;
+}
+h1 {
+  letter-spacing: -0.032em;
 }
 
 /* Browser surfaces carry the design too. */
