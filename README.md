@@ -380,6 +380,27 @@ To verify PRs in your own repo, copy `.github/workflows/milestone.yml` and `.git
 [milestone-demo](https://github.com/TanmayShah29/milestone-demo/tree/main/.github) to its default branch,
 and point `MILESTONE_API` at your deployment.
 
+## For platforms: the API, signed webhooks, policy hooks
+- **OpenAPI 3.1:** `GET /api/openapi` describes every endpoint and the webhook. Its action list is the
+  route's own table, so the two can't drift apart.
+- **Idempotency-Key** works on every POST. A retry with the same key and body gets the first response
+  back (with `Idempotent-Replayed: true`), and the same key with a different body gets a 422. Keys last
+  24 hours.
+- **Signed webhooks:** `POST /api/platform { "webhookUrl": "https://…" }`, called with your `msk_` key,
+  returns a signing secret once. After that, every audit event of your milestones is sent to you:
+  `review:passed`, `hold:captured`, `payout:succeeded`, `lock:matched`, `award:signed` and the rest.
+  - Each event is written to an outbox in the same database transaction as the change itself.
+  - Delivery is at least once, retried with backoff up to 12 times. Dedupe on `Milestone-Delivery`.
+  - Each request carries `Milestone-Signature: t=…,v1=<HMAC-SHA256 of "t.body">`.
+  - The payload holds what the public proof chain shows, and never emails or statements.
+- **Policy hooks** let a platform limit its own milestones: `maxAmountCents`, `allowedRepos` and
+  `workerEmailDomains`, set with `POST /api/platform { "hooks": {…} }`. Our code checks them before a hold
+  is funded and before the capture and the payout. They're rules, not callbacks, and they can only block:
+  a hook never moves money.
+- **Two clocks:** `/api/tick` is public and idempotent. cron-job.org calls it, and so does a scheduled
+  workflow in `milestone-runner` (`tick.yml`, every 5 minutes). Either clock can stop without anything
+  breaking.
+
 ## For AI agents: the MCP server
 
 An agent can post work or do it: read the signed terms, accept them, open a PR, submit it and track the

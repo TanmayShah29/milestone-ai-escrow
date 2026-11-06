@@ -428,6 +428,26 @@ Claude.
     `/.well-known/milestone-proof-keys.json` and `scripts/verify-proof.mts`;
   - passkey and agent-key signatures on the terms (migration 015, `src/lib/contract/signatures.ts`);
   - the worker's GitHub account, which binds who may submit.
+- **Phase 7 (platform API and liveness) built (Nov 6):**
+  - migration 019 adds `platforms.webhook_url`, `webhook_secret` and `hooks`, plus `outbound_events` and
+    `idempotency_keys`;
+  - **signed webhooks:** `audit()` writes the outbox row in the same transaction. The tick delivers it
+    (`FOR UPDATE SKIP LOCKED`, so several clocks are safe) with HMAC signatures and backoff, giving up
+    after 12 tries. Webhook URLs must be https and can't point at a private address. The payload holds
+    only the proof chain's non-personal facts;
+  - **policy hooks:** `maxAmountCents`, `allowedRepos` and `workerEmailDomains`, checked in `flow.ts`
+    before funding, the capture and the payout. They're static rules that can only block;
+  - **Idempotency-Key** on `POST /api/milestones` and every action. Replays return the first response,
+    and a different body gets a 422;
+  - **API:** `GET /api/openapi` (OpenAPI 3.1, with webhooks) and `GET/POST /api/platform`. The action table
+    moved to `src/lib/platform/actions.ts`, which both the route and the spec read;
+  - **second clock:** `runner/.github/workflows/tick.yml` runs every 5 minutes. It's local; pushing it to
+    `milestone-runner` needs your OK;
+  - tests: `tests/platform.test.ts`, 12 cases;
+  - **left out:**
+    - email notices (decision 3);
+    - a jobs table: the state sweep plus two clocks already meet every deadline, so it's deferred;
+    - a generated SDK: the spec is ready, and APIMatic could generate one, which needs an account.
 - **Phase 6 (resolution desk) core built (Nov 6):**
   - `src/lib/resolution/`: `config.ts` (the arbitrator from env), `fees.ts`, `pack.ts`, `desk.ts`;
   - migration 018 adds `locks` and `fee_holds`, and two new states, `LOCKED` and `ARBITRATION`;

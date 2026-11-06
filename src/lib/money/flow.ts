@@ -8,6 +8,7 @@ import { paypal } from "@/lib/paypal/client";
 import { createPayout, getPayout } from "@/lib/paypal/payouts";
 import { centsToValue, estimatePaypalFee, scheduleFor, splitCapture, valueToCents } from "./amounts";
 import { assertTermsAgreed } from "@/lib/contract/terms";
+import { checkHooks } from "@/lib/platform/hooks";
 import { stateLabel } from "@/lib/client/states";
 import { InProgress, InvariantViolation, OutcomeUnknown } from "@/lib/errors";
 import { claimAction, isStalePending, liveClaim, settleClaim, unknownClaims, type Claim, type MoneyAction } from "./claims";
@@ -131,6 +132,7 @@ async function createHoldLocked(milestoneId: string, deps: Deps, opts: { mock?: 
   let m = await getMilestone(milestoneId);
   requireState(m, "AGREED");
   assertTermsAgreed(m); // the client funds exactly the terms both sides signed
+  await checkHooks(m, "beforeFund");
   if (m.paypal_order_id) {
     // Reuse a live order; replace one that expired (unapproved orders lapse after a few hours) or was voided.
     const status = await orderStatus(deps, m.paypal_order_id);
@@ -204,6 +206,7 @@ async function fundWithTestCardLocked(milestoneId: string, deps: Deps, opts: { m
   const m = await getMilestone(milestoneId);
   requireState(m, "AGREED");
   assertTermsAgreed(m);
+  await checkHooks(m, "beforeFund");
   if (m.paypal_order_id) throw new InvariantViolation("A PayPal checkout is already open for this milestone. Finish it, or cancel it first.");
   const send = async (requestId: string): Promise<CardHold> => {
     const o = await deps.paypal.orders.createOrder({
@@ -344,6 +347,7 @@ async function releaseFundsLocked(milestoneId: string, deps: Deps, opts: { mock?
   let m = await getMilestone(milestoneId);
   if (m.state === "PASSED") {
     if (!m.paypal_authorization_id || !m.paypal_order_id || m.authorized_cents == null) throw new InvariantViolation("This milestone has no PayPal hold to capture.");
+    await checkHooks(m, "beforeSettle");
     // The earned share (policy-2 pay schedule), or all of it. finalCapture releases the rest of the hold in
     // the same call [VERIFIED H1]: a $10 hold captured at $8 went straight to CAPTURED.
     const captureCents = captureFor(m);
@@ -394,6 +398,7 @@ type PayoutInfo = { batchId: string; batchStatus: string };
 
 async function payoutFreelancer(m: Milestone, deps: Deps): Promise<Milestone> {
   requireState(m, "RELEASED");
+  await checkHooks(m, "beforeSettle");
   if (!m.payout_cents || m.payout_cents <= 0 || m.captured_cents == null || m.payout_cents > m.captured_cents) {
     throw new InvariantViolation("The payout doesn't match the captured amount, so it was stopped.");
   }

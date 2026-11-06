@@ -23,7 +23,8 @@ type AuditRow = {
 // Detail keys whose values are facts about the deal rather than about people, copied into the public body.
 const FACT_KEYS = ["hash", "headSha", "decision", "model", "outcome", "policyVersion", "shareBps", "credentialId", "githubLogin", "method", "panelModels", "panelVotes", "runnerRunId", "rekorLogIndex"] as const;
 
-function factsOf(detail: unknown): ProofBody["facts"] {
+/** The non-personal facts of an audit detail: the proof chain body, and the platform webhooks, carry these. */
+export function factsOf(detail: unknown): ProofBody["facts"] {
   const out: ProofBody["facts"] = {};
   if (!detail || typeof detail !== "object") return out;
   for (const k of FACT_KEYS) {

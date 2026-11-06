@@ -1,5 +1,6 @@
 import { platformFrom, publicMilestone, Unauthorized } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { withIdempotency } from "@/lib/platform/idempotency";
 import { json, toHttp } from "@/lib/http";
 import { MIN_AMOUNT_CENTS, valueToCents } from "@/lib/money/amounts";
 import { createMilestone, type Milestone } from "@/lib/milestones/repo";
@@ -28,6 +29,10 @@ export async function GET(req: Request) {
 const CREATE_PER_IP_HOUR = 10;
 
 export async function POST(req: Request) {
+  return withIdempotency(req, "create", () => create(req));
+}
+
+async function create(req: Request) {
   try {
     const platform = await platformFrom(req);
     if (!platform) {

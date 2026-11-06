@@ -1,4 +1,6 @@
-import { platformFrom, publicMilestone, requireRole, roleOn, type Role } from "@/lib/auth";
+import { ACTION_ROLES } from "@/lib/platform/actions";
+import { withIdempotency } from "@/lib/platform/idempotency";
+import { platformFrom, publicMilestone, requireRole, roleOn } from "@/lib/auth";
 import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
 import { cancelHold, createHold, defaultDeps, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
@@ -16,32 +18,6 @@ export const runtime = "nodejs";
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-// Which side may trigger each action.
-const ALLOWED: Record<string, Role[]> = {
-  "draft-terms": ["client"],
-  "attack-terms": ["client"],
-  "edit-terms": ["client"],
-  "sign-terms": ["client", "worker"],
-  "passkey-options": ["client", "worker"],
-  "passkey-register": ["client", "worker"],
-  submit: ["worker"],
-  check: ["client", "worker"],
-  approve: ["client"],
-  "request-changes": ["client"],
-  object: ["client"],
-  fund: ["client"],
-  "fund-card": ["client"],
-  cancel: ["client"],
-  release: ["client"],
-  "refresh-hold": ["client"],
-  schedule: ["client"],
-  "dev-pass": ["client"],
-  sync: ["client", "worker"],
-  "rotate-link": ["client", "worker"],
-  erase: ["client"],
-  lock: ["client", "worker"],
-  "match-lock": ["client", "worker"],
-};
 
 // AI drafting spends the shared free-model budget: 5 per hour per IP (platform keys are exempt) and
 // 3 per day per milestone (for everyone).
@@ -60,10 +36,15 @@ async function draftLimit(req: Request, id: string) {
 }
 
 // POST /api/milestones/:id/:action  (auth: the milestone's client/worker link token, or the owning platform's API key)
+// An Idempotency-Key header makes a retry return the first response instead of acting again.
 export async function POST(req: Request, ctx: { params: Promise<{ id: string; action: string }> }) {
+  const { id, action } = await ctx.params;
+  return withIdempotency(req, `${id}:${action}`, () => act(req, id, action));
+}
+
+async function act(req: Request, id: string, action: string) {
   try {
-    const { id, action } = await ctx.params;
-    const allowed = ALLOWED[action];
+    const allowed = ACTION_ROLES[action];
     if (!allowed) return json(404, { error: `unknown action ${action}` });
     const role = await roleOn(req, await getMilestone(id));
     requireRole(role, ...allowed);

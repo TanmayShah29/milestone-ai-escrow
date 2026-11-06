@@ -1,6 +1,7 @@
 import { hashToken, newToken } from "@/lib/auth";
 import { db, tx, type Queryable } from "@/lib/db";
-import { appendProof } from "@/lib/proof/chain";
+import { appendProof, factsOf } from "@/lib/proof/chain";
+import { enqueueOutbound } from "@/lib/platform/outbound";
 import { assertTransition, type MilestoneState } from "./states";
 
 export type Milestone = {
@@ -127,8 +128,10 @@ export async function audit(q: Queryable, e: AuditEntry): Promise<void> {
       e.detail === undefined ? null : JSON.stringify(e.detail),
     ],
   );
-  // ...and becomes the next signed event of the milestone's proof chain (src/lib/proof/chain.ts).
+  // ...and becomes the next signed event of the milestone's proof chain (src/lib/proof/chain.ts), and an
+  // outbound webhook when a platform listens (platform/outbound.ts), in the same transaction.
   await appendProof(q, rows[0]!.id, e.milestoneId);
+  await enqueueOutbound(q, rows[0]!.id, e, factsOf(e.detail));
 }
 
 export class StaleState extends Error {}

@@ -10,6 +10,8 @@ import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./githu
 import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs, signedObjectionMs } from "./deadlines";
 import { decide, earnedShare, humanTimeoutOutcome, type PanelRecord, type Pins, type Verdict } from "./policy";
 import { tickDesk } from "@/lib/resolution/desk";
+import { deliverDue } from "@/lib/platform/outbound";
+import { pruneIdempotencyKeys } from "@/lib/platform/idempotency";
 import { runnerApi, type RunnerApi } from "./runner";
 import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifiers";
 
@@ -442,6 +444,13 @@ export async function tickAll(deps: ReviewDeps = defaultReviewDeps()): Promise<{
     } catch (err) {
       out.push({ id, error: String(err).slice(0, 200) });
     }
+  }
+  // Platform webhooks due (delivered once each, retried with backoff), and expired Idempotency-Keys.
+  try {
+    await deliverDue();
+    await pruneIdempotencyKeys();
+  } catch (err) {
+    console.warn(`webhook delivery failed: ${String(err).slice(0, 200)}`);
   }
   // Retention: prune old webhook payloads, erase closed milestones past their dispute window.
   try {
