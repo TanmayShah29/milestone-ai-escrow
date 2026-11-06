@@ -53,10 +53,14 @@ function feeRow(m: MilestoneView): FeeRow {
   }
   // The signed platform fee (terms policy) wins over the server's schedule, which wins over the defaults.
   const schedule = scheduleFor(m.criteria, (m.fee_schedule as FeeSchedule | undefined) ?? DEFAULT_FEE_SCHEDULE);
-  const e = estimateSplit(m.amount_cents, schedule);
+  // An earned share (policy-2 pay schedule) captures only that part; PayPal releases the rest of the hold.
+  const share = typeof m.share_bps === "number" ? m.share_bps : null;
+  const pays = share == null ? m.amount_cents : Math.floor((m.amount_cents * share) / 10_000);
+  const e = estimateSplit(pays, schedule);
   const payout = `${schedule.payoutBps / 100}%${schedule.payoutCapCents == null ? "" : ` (at most ${usd(schedule.payoutCapCents)})`}`;
-  const note = `PayPal fees are estimated: its 3.49% + $0.49 checkout fee, plus a ${payout} payout fee. The exact amounts show once the money is captured.`;
-  return { pays: m.amount_cents, paypalFees: e.paypalFeeCents + e.payoutFeeCents, platformFee: e.feeCents, receives: e.payoutCents, estimate: true, note };
+  const partial = share != null && share < 10_000 ? ` The work earned ${share / 100}% under the signed pay schedule, so ${usd(m.amount_cents - pays)} of the hold goes back to the client.` : "";
+  const note = `PayPal fees are estimated: its 3.49% + $0.49 checkout fee, plus a ${payout} payout fee. The exact amounts show once the money is captured.${partial}`;
+  return { pays, paypalFees: e.paypalFeeCents + e.payoutFeeCents, platformFee: e.feeCents, receives: e.payoutCents, estimate: true, note };
 }
 
 /** Where the money is, what it's worth to the worker, and the PayPal references that prove it. */

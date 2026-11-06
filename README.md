@@ -157,7 +157,7 @@ is calling it.
 | Create the hold | Orders v2 `POST /v2/checkout/orders` (`intent: AUTHORIZE`, wallet or `payment_source.card`) | APIMatic-generated TypeScript SDK (`paypal`), `orders.createOrder` |
 | Authorize | `POST /v2/checkout/orders/{id}/authorize` | SDK `orders.authorizeOrder` |
 | Read state | `GET /v2/checkout/orders/{id}`, `GET /v2/payments/authorizations/{id}`, `GET /v2/payments/captures/{id}` | SDK |
-| Release | `POST /v2/payments/authorizations/{id}/capture` (`final_capture`, amount = authorized amount) | SDK `payments.captureAuthorizedPayment` |
+| Release | `POST /v2/payments/authorizations/{id}/capture` (`final_capture`; the amount is the earned share, at most the authorized amount) | SDK `payments.captureAuthorizedPayment` |
 | Cancel | `POST /v2/payments/authorizations/{id}/void` | SDK `payments.voidPayment` |
 | Renew honor period | `POST /v2/payments/authorizations/{id}/reauthorize` | SDK `payments.reauthorizePayment` (client-triggered, see limits) |
 | Pay the worker | Payouts `POST /v1/payments/payouts`, `GET /v1/payments/payouts/{batch}` | Small typed REST functions (`src/lib/paypal/payouts.ts`); the SDK has no payouts |
@@ -181,6 +181,11 @@ The integration contract (every field, header and error arm, looked up in the SD
    retried (`src/lib/money/flow.ts`).
 5. Capture never exceeds the authorized amount. Payout = captured amount minus the fee. Amounts are integer
    cents in the DB and decimal strings on the wire.
+   - **Partial pay** (policy-2): the terms may sign a pay schedule. For example, the must-haves pay 80%, and
+     each nice-to-have adds its bonus when it's met at its evidence floor. The fixed rules work out the
+     earned share (`earnedShare` in `policy.ts`), and the release captures only that share with
+     `final_capture: true`. PayPal releases the rest of the hold in the same call; spike H1 verified this
+     with a $10 hold captured at $8. The must-haves alone must still pay at least $10.
 6. Every PayPal id (order, authorization, capture, payout batch and item, dispute) is stored on the
    milestone, and every state change writes an audit row with who or what caused it.
 

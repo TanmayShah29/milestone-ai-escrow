@@ -428,7 +428,23 @@ Claude.
     `/.well-known/milestone-proof-keys.json` and `scripts/verify-proof.mts`;
   - passkey and agent-key signatures on the terms (migration 015, `src/lib/contract/signatures.ts`);
   - the worker's GitHub account, which binds who may submit.
-- **Phase 3 built locally (Nov 6), not yet live:**
+- **Phase 5 (partial pay) built (Nov 6):**
+  - a signed `paySchedule` in the terms (`mustBaseBps` plus `niceBonusBps` per nice-to-have). It must add
+    up to 100% and give the must-haves at least half, and the must-haves alone must pay at least $10. Terms
+    without one hash as before;
+  - `decide2` returns `shareBps`: the base, plus each nice-to-have met at its evidence floor. The share is
+    stored as `share_bps` (migration 017) on every PASSED: a review, a second review, the client's
+    approval, or a HUMAN_CHECK timeout;
+  - the release captures `floor(amount × share)` with `final_capture: true`, which releases the rest of the
+    hold [VERIFIED H1]. The payout is split from what was captured, as before;
+  - the money panel and the PR comment show the share. The audit rows (`review:passed`, `hold:captured`)
+    carry `shareBps`, which is already a proof-chain fact;
+  - tests: `tests/shares.test.ts`, 11 cases;
+  - **left for later:**
+    - `captured` mode needs your decision (§ Decisions, item 2);
+    - fee holds belong with the lock and arbitration flow (Phase 6), where they're used;
+    - a second capture for bonuses (H1b) isn't needed while bonuses are decided in the same review.
+- **Phase 3 built (Nov 6), live since `ef2104f`:**
   - `runner/` holds the production `run.yml` and harness for `milestone-runner`. Each tested criterion
     runs in a fresh pair of containers. The tests call the worker's exports **synchronously** through
     proxies (a worker thread plus `Atomics.wait`), so contracts signed before this run unchanged. Checked
@@ -449,7 +465,7 @@ Claude.
     - `checkAttested` verified it with real Sigstore in 1.2 s (Rekor log index 3709803464);
     - an edited copy and a replay under another nonce were both rejected;
     - `gh attestation verify` passed on it too;
-  - **open:** deploy (merge `v2-build` into `main`).
+  - deployed Nov 6 (`ef2104f`).
 - **Phase 4 core built (Nov 6):**
   - the AI panel (`src/lib/review/panel.ts`): up to `AI_PANEL_SIZE` (default 3) different models, a random
     order each, and at most that many calls per review;

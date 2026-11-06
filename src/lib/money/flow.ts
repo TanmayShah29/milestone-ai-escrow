@@ -332,11 +332,20 @@ function splitFor(m: Pick<Milestone, "criteria">, capturedCents: number, paypalF
   return { split: { ...split, platformBps: schedule.platformBps }, source, set: { paypal_fee_cents: split.paypalFeeCents, payout_fee_cents: split.payoutFeeCents, fee_cents: split.feeCents, payout_cents: split.payoutCents } };
 }
 
+/** What the release captures: share_bps of the amount (rounded down to the cent), or the whole amount. */
+export function captureFor(m: Pick<Milestone, "amount_cents" | "share_bps">): number {
+  if (m.share_bps == null) return m.amount_cents;
+  if (!Number.isInteger(m.share_bps) || m.share_bps < 1 || m.share_bps > 10_000) throw new InvariantViolation("The earned share is out of range, so the capture was stopped.");
+  return Math.floor((m.amount_cents * m.share_bps) / 10_000);
+}
+
 async function releaseFundsLocked(milestoneId: string, deps: Deps, opts: { mock?: string }): Promise<Milestone> {
   let m = await getMilestone(milestoneId);
   if (m.state === "PASSED") {
     if (!m.paypal_authorization_id || !m.paypal_order_id || m.authorized_cents == null) throw new InvariantViolation("This milestone has no PayPal hold to capture.");
-    const captureCents = m.amount_cents;
+    // The earned share (policy-2 pay schedule), or all of it. finalCapture releases the rest of the hold in
+    // the same call [VERIFIED H1]: a $10 hold captured at $8 went straight to CAPTURED.
+    const captureCents = captureFor(m);
     // Money rule 3: never capture more than was authorized.
     if (captureCents > m.authorized_cents) throw new InvariantViolation("The capture would be more than the amount held, so it was stopped.");
     const authorizationId = m.paypal_authorization_id;
@@ -370,7 +379,7 @@ async function releaseFundsLocked(milestoneId: string, deps: Deps, opts: { mock?
           capture_status: cap.status,
           captured_cents: cap.cents,
           ...set,
-        }, { paypalId: cap.captureId, event: "hold:captured", detail: { status: cap.status, cents: cap.cents, ...split, paypalFeeSource: source } });
+        }, { paypalId: cap.captureId, event: "hold:captured", detail: { status: cap.status, cents: cap.cents, ...(cur.share_bps != null ? { shareBps: cur.share_bps } : {}), ...split, paypalFeeSource: source } });
       },
     });
   }

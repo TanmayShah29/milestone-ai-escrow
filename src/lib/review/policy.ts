@@ -65,10 +65,19 @@ export const VERIFIER_VERSION = "2";
  * What the signed terms pinned (their `policy`, plus each criterion's evidenceFloor); absent on
  * contracts saved before pins existed, which decide by policy-1.
  */
-export type Pins = { policyVersion?: string; confidenceFloor?: number; reviewModels?: string[]; floors?: Record<string, EvidenceLevel> };
+export type Pins = {
+  policyVersion?: string;
+  confidenceFloor?: number;
+  reviewModels?: string[];
+  floors?: Record<string, EvidenceLevel>;
+  paySchedule?: { mustBaseBps: number; niceBonusBps: Record<string, number> };
+};
+
+/** `shareBps` (policy-2, PASSED only): the earned share of the amount the release captures. */
+export type Outcome = { decision: Decision; reasons: string[]; shareBps?: number };
 
 /** The decision, by the policy version the signed terms pinned. Terms that pin none decide by policy-1. */
-export function decide(v: Verdict, pins: Pins = {}): { decision: Decision; reasons: string[] } {
+export function decide(v: Verdict, pins: Pins = {}): Outcome {
   const version = pins.policyVersion ?? POLICY_1;
   if (version === POLICY_2) return decide2(v, pins);
   if (version === POLICY_1) return decide1(v, pins);
@@ -88,7 +97,7 @@ export function defaultFloor(source: CriterionVerdict["source"]): EvidenceLevel 
  *  - every must-have passed at or above its floor → PASSED.
  * Self-reported confidence plays no part, and neither do models the terms don't name (panel.ts tally).
  */
-function decide2(v: Verdict, pins: Pins): { decision: Decision; reasons: string[] } {
+function decide2(v: Verdict, pins: Pins): Outcome {
   if (v.blocked) return { decision: "CHANGES_REQUESTED", reasons: [v.blocked, ...flags(v)] };
   const floorOf = (c: CriterionVerdict) => pins.floors?.[c.id] ?? defaultFloor(c.source);
   const atFloor = (c: CriterionVerdict) => c.level !== undefined && rank(c.level) >= rank(floorOf(c));
@@ -106,7 +115,30 @@ function decide2(v: Verdict, pins: Pins): { decision: Decision; reasons: string[
       reasons: short.map((c) => (c.verdict === "unclear" ? `${c.id} unclear` : `${c.id} ${c.verdict === "pass" ? "passed" : "failed"} on ${c.level ?? "unlevelled"} evidence, below its ${floorOf(c)} floor`)),
     };
   }
-  return { decision: "PASSED", reasons: ["every must-have criterion passed at or above its evidence floor"] };
+  const { shareBps, missed } = earnedShare(v, pins);
+  return {
+    decision: "PASSED",
+    reasons: ["every must-have criterion passed at or above its evidence floor", ...(missed.length ? [`pays ${shareBps / 100}%: ${missed.join(", ")} not met`] : [])],
+    shareBps,
+  };
+}
+
+/**
+ * The share the must-haves earn plus the bonus of each nice-to-have met at its floor (policy-2 pay
+ * schedule). Without a schedule: all of it. Assumes the must-haves are met; decide2 checks that first.
+ */
+export function earnedShare(v: Pick<Verdict, "criteria">, pins: Pins): { shareBps: number; missed: string[] } {
+  const s = pins.paySchedule;
+  if (!s) return { shareBps: 10_000, missed: [] };
+  let share = s.mustBaseBps;
+  const missed: string[] = [];
+  for (const [id, bonus] of Object.entries(s.niceBonusBps)) {
+    const c = v.criteria.find((x) => x.id === id);
+    const met = !!c && c.verdict === "pass" && c.level !== undefined && rank(c.level) >= rank(pins.floors?.[id] ?? defaultFloor(c.source));
+    if (met) share += bonus;
+    else missed.push(id);
+  }
+  return { shareBps: Math.min(share, 10_000), missed };
 }
 
 /** policy-1, exactly as signed before Nov 5: one model, its confidence against the floor. */

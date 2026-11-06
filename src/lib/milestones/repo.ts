@@ -22,6 +22,8 @@ export type Milestone = {
   paypal_capture_id: string | null;
   capture_status: string | null;
   captured_cents: number | null;
+  /** The earned share a PASSED decision pays, in basis points (policy-2 pay schedule); null = all of it. */
+  share_bps: number | null;
   fee_cents: number | null;
   payout_cents: number | null;
   paypal_payout_batch_id: string | null;

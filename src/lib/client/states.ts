@@ -16,6 +16,7 @@ export type MilestoneView = Record<string, unknown> & {
   authorized_cents?: number | null;
   authorization_expires_at?: string | null;
   captured_cents?: number | null;
+  share_bps?: number | null;
   fee_cents?: number | null;
   payout_cents?: number | null;
   payout_status?: string | null;

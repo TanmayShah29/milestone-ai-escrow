@@ -8,7 +8,7 @@ import { checkTests, staticCheckTests, type TestChecker } from "@/lib/contract/t
 import { db, withMilestoneLock } from "@/lib/db";
 import { audit, getMilestone, transition, updateFields, type Milestone } from "@/lib/milestones/repo";
 import { InvariantViolation } from "@/lib/errors";
-import { feeBps } from "@/lib/money/amounts";
+import { feeBps, MIN_AMOUNT_CENTS } from "@/lib/money/amounts";
 import { objectionWindowMs } from "@/lib/review/deadlines";
 
 // The contract both sides sign: acceptance criteria, compiled into tests where they can be checked by
@@ -62,8 +62,20 @@ export const policySchema = z.object({
 });
 export type Policy = z.infer<typeof policySchema>;
 
+/**
+ * Earned shares (policy-2): the must-haves together pay `mustBaseBps` of the amount, and each nice-to-have
+ * named in `niceBonusBps` adds its bonus when it is met at its evidence floor. They add up to 100%. Absent:
+ * all or nothing, as before, and the hash doesn't change.
+ */
+export const payScheduleSchema = z.object({
+  mustBaseBps: z.number().int().min(5000).max(10_000),
+  niceBonusBps: z.record(z.string().regex(/^C\d{1,2}$/), z.number().int().min(1).max(5000)).default({}),
+});
+export type PaySchedule = z.infer<typeof payScheduleSchema>;
+
 const termsObject = z.object({
   criteria: z.array(criterionSchema).min(1).max(8),
+  paySchedule: payScheduleSchema.optional(),
   testCommand: z.string().trim().max(200).optional(),
   policy: policySchema.optional(),
   // Written by the server (never trusted from input). Its presence makes this a version 2 contract, whose
@@ -85,6 +97,14 @@ function refineTerms(t: z.infer<typeof termsObject>, ctx: z.RefinementCtx) {
     });
     if (!t.criteria.some((c) => c.kind === "must")) ctx.addIssue({ code: "custom", path: ["criteria"], message: "at least one criterion must be a must-have" });
     if (t.criteria.some((c) => c.test) && !t.testCommand) ctx.addIssue({ code: "custom", path: ["testCommand"], message: "tests need a testCommand" });
+    if (t.paySchedule) {
+      const s = t.paySchedule;
+      for (const id of Object.keys(s.niceBonusBps)) {
+        if (!t.criteria.some((c) => c.id === id && c.kind === "nice")) ctx.addIssue({ code: "custom", path: ["paySchedule", "niceBonusBps", id], message: `${id} is not a nice-to-have criterion` });
+      }
+      const total = s.mustBaseBps + Object.values(s.niceBonusBps).reduce((a, b) => a + b, 0);
+      if (total !== 10_000) ctx.addIssue({ code: "custom", path: ["paySchedule"], message: `the pay schedule adds up to ${total / 100}%, not 100%` });
+    }
 }
 
 export const termsSchema = termsObject.superRefine(refineTerms);
@@ -163,6 +183,8 @@ export function contractDocument(m: Pick<Milestone, "id" | "title" | "amount_cen
     repo: m.repo ?? null,
     criteria: terms.criteria,
     testCommand: terms.testCommand ?? null,
+    // Left out when absent, like the policy below.
+    ...(terms.paySchedule ? { paySchedule: terms.paySchedule } : {}),
     // Left out (not null) when absent, so contracts signed before the policy existed keep their hash.
     ...(terms.policy ? { policy: terms.policy } : {}),
   };
@@ -396,6 +418,8 @@ export async function editTerms(milestoneId: string, raw: unknown, opts: { repo?
   return withMilestoneLock(milestoneId, async () => {
     const m = await getMilestone(milestoneId);
     if (m.state !== "DRAFT") throw new InvariantViolation("terms are locked once both sides agree");
+    const base = parsed.data.paySchedule && Math.floor((m.amount_cents * parsed.data.paySchedule.mustBaseBps) / 10_000);
+    if (base !== undefined && base < MIN_AMOUNT_CENTS) throw new InvariantViolation(`The must-haves alone would pay $${(base / 100).toFixed(2)}. The smallest payment is $${(MIN_AMOUNT_CENTS / 100).toFixed(2)}, so raise their share.`);
     const prev = storedTerms(m);
     const terms = await checkClientTests(prev, markStale(prev, parsed.data), opts.check ?? staticCheckTests);
     const nextRepo = repo === undefined ? m.repo : repo || null;

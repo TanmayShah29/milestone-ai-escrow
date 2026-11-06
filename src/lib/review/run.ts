@@ -8,7 +8,7 @@ import { cancelHold, defaultDeps, releaseFunds, syncMilestone, type Deps } from 
 import { privacySweep } from "@/lib/privacy";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
 import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs, signedObjectionMs } from "./deadlines";
-import { decide, humanTimeoutOutcome, type PanelRecord, type Pins, type Verdict } from "./policy";
+import { decide, earnedShare, humanTimeoutOutcome, type PanelRecord, type Pins, type Verdict } from "./policy";
 import { runnerApi, type RunnerApi } from "./runner";
 import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifiers";
 
@@ -114,7 +114,19 @@ function pinsOf(criteria: unknown): Pins {
   const p = termsSchema.safeParse(criteria);
   if (!p.success) return {};
   const floors = Object.fromEntries(p.data.criteria.flatMap((c) => (c.evidenceFloor ? [[c.id, c.evidenceFloor]] : [])));
-  return { policyVersion: p.data.policy?.policyVersion, confidenceFloor: p.data.policy?.confidenceFloor, reviewModels: p.data.policy?.reviewModels, floors };
+  return { policyVersion: p.data.policy?.policyVersion, confidenceFloor: p.data.policy?.confidenceFloor, reviewModels: p.data.policy?.reviewModels, floors, ...(p.data.paySchedule ? { paySchedule: p.data.paySchedule } : {}) };
+}
+
+/**
+ * The share a PASSED that no review decided (the client's approval, a HUMAN_CHECK timeout) settles on:
+ * the must-haves' base plus each nice-to-have the latest verdict met at its floor. Null (all of it) when
+ * the terms have no pay schedule.
+ */
+async function settledShare(m: Milestone): Promise<number | null> {
+  const pins = pinsOf(m.criteria);
+  if (!pins.paySchedule) return null;
+  const { rows } = await db().query<{ verdict: Verdict }>("select verdict from reviews where milestone_id = $1 and status = 'done' and verdict is not null order by updated_at desc, id desc limit 1", [m.id]);
+  return earnedShare(rows[0]?.verdict ?? { criteria: [] }, pins).shareBps;
 }
 
 /**
@@ -144,7 +156,7 @@ function panelDetail(panel: PanelRecord | undefined): Record<string, unknown> {
 
 async function applyDecision(m: Milestone, verdict: Verdict, deps: ReviewDeps, fresh: boolean): Promise<Milestone> {
   const pins = pinsOf(m.criteria);
-  const { decision, reasons } = decide(verdict, pins);
+  const { decision, reasons, shareBps } = decide(verdict, pins);
   // A blocked verdict is about the PR description, not the commit: keep it off the commit's key, so the
   // commit is reviewed for real once the description is fixed.
   const key = verdict.headSha && !verdict.blocked ? verdict.headSha : `${verdict.blocked ? "blocked" : "text"}-${m.id}-${Date.now()}`;
@@ -157,21 +169,26 @@ async function applyDecision(m: Milestone, verdict: Verdict, deps: ReviewDeps, f
     );
   }
   // A failed review speaks for itself: drop any earlier client reason so the worker doesn't read a stale one.
-  const set = decision === "PASSED" ? { release_after: new Date(Date.now() + signedObjectionMs(m.criteria)) } : decision === "CHANGES_REQUESTED" ? { changes_reason: null } : {};
+  const set =
+    decision === "PASSED"
+      ? { release_after: new Date(Date.now() + signedObjectionMs(m.criteria)), share_bps: shareBps ?? null }
+      : decision === "CHANGES_REQUESTED"
+        ? { changes_reason: null, share_bps: null }
+        : {};
   const out = await transition(db(), m, decision, "system", set, {
     event: `review:${decision.toLowerCase()}`,
-    detail: { reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, policyVersion: pins.policyVersion ?? "policy-1", injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel), ...runnerDetail(verdict) },
+    detail: { reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, policyVersion: pins.policyVersion ?? "policy-1", ...(shareBps !== undefined ? { shareBps } : {}), injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel), ...runnerDetail(verdict) },
   });
-  if (fresh && m.verifier === "code_pr" && m.pr_url) await postComment(m, verdict, decision, reasons, deps);
+  if (fresh && m.verifier === "code_pr" && m.pr_url) await postComment(m, verdict, decision, reasons, deps, undefined, shareBps);
   return out;
 }
 
-async function postComment(m: Milestone, v: Verdict, decision: string, reasons: string[], deps: ReviewDeps, heading = "Milestone review") {
+async function postComment(m: Milestone, v: Verdict, decision: string, reasons: string[], deps: ReviewDeps, heading = "Milestone review", shareBps?: number) {
   const ref = parsePrUrl(m.pr_url!)!;
   const icon = (x: string) => (x === "pass" ? "✅" : x === "fail" ? "❌" : "❔");
   const body = [
     `### ${heading}: **${decision.replace("_", " ")}**`,
-    `$${(m.amount_cents / 100).toFixed(2)} held on PayPal · terms \`${m.criteria_hash?.slice(0, 12)}\` · commit \`${v.headSha?.slice(0, 7)}\``,
+    `$${(m.amount_cents / 100).toFixed(2)} held on PayPal${shareBps !== undefined && shareBps < 10_000 ? ` · earns ${shareBps / 100}% ($${(Math.floor((m.amount_cents * shareBps) / 10_000) / 100).toFixed(2)})` : ""} · terms \`${m.criteria_hash?.slice(0, 12)}\` · commit \`${v.headSha?.slice(0, 7)}\``,
     "",
     "| | Criterion | Checked by | Evidence |",
     "|---|---|---|---|",
@@ -197,7 +214,10 @@ export async function humanDecision(milestoneId: string, approve: boolean, opts:
   return withMilestoneLock(milestoneId, async () => {
     const m = await getMilestone(milestoneId);
     if (m.state !== "HUMAN_CHECK") throw new InvariantViolation("There's nothing waiting for your decision right now.");
-    if (approve) return transition(db(), m, "PASSED", "client", { release_after: new Date(Date.now() + signedObjectionMs(m.criteria)) }, { event: "review:approved_by_client" });
+    if (approve) {
+      const share = await settledShare(m);
+      return transition(db(), m, "PASSED", "client", { release_after: new Date(Date.now() + signedObjectionMs(m.criteria)), share_bps: share }, { event: "review:approved_by_client", ...(share !== null ? { detail: { shareBps: share } } : {}) });
+    }
     const reason = cleanReason(opts.reason);
     if (m.contested_at && !reason) throw new InvariantViolation("You already objected once, so say what needs to change. The worker reads it before fixing the work.");
     return transition(db(), m, "CHANGES_REQUESTED", "client", { changes_reason: reason }, { event: "review:changes_by_client", detail: { reason, afterObjection: !!m.contested_at } });
@@ -243,7 +263,10 @@ export async function expireHumanCheck(milestoneId: string, deps: ReviewDeps = d
     const { outcome, reasons } = humanTimeoutOutcome(rows[0]?.verdict, pinsOf(m.criteria));
     const why = m.contested_at ? "within 72 hours of the objection's second review" : "3 days before the PayPal hold expires";
     const detail = { outcome, reasons: [`the client didn't decide ${why}`, ...reasons], deadline: deadline.toISOString(), afterObjection: !!m.contested_at };
-    if (outcome === "release") return transition(db(), m, "PASSED", "system", { release_after: new Date() }, { event: "review:human_timeout", detail });
+    if (outcome === "release") {
+      const share = await settledShare(m);
+      return transition(db(), m, "PASSED", "system", { release_after: new Date(), share_bps: share }, { event: "review:human_timeout", detail: { ...detail, ...(share !== null ? { shareBps: share } : {}) } });
+    }
     if (outcome === "wait") {
       const { rows: seen } = await db().query("select 1 from audit_log where milestone_id = $1 and event = 'review:human_timeout' and created_at >= $2 limit 1", [m.id, m.human_check_at ?? m.updated_at]);
       if (!seen[0]) await audit(db(), { milestoneId: m.id, actor: "system", event: "review:human_timeout", fromState: "HUMAN_CHECK", toState: "HUMAN_CHECK", detail });
@@ -346,7 +369,7 @@ function movedVerdict(terms: Terms, reviewed: string, now: string): Verdict {
 
 async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, releaseAt: Date, firstModel: string | null, deps: ReviewDeps, fresh: boolean): Promise<Milestone> {
   const pins = pinsOf(m.criteria);
-  const { decision, reasons } = decide(verdict, pins);
+  const { decision, reasons, shareBps } = decide(verdict, pins);
   if (fresh) {
     await db().query(
       `insert into reviews (milestone_id, head_sha, status, verdict, decision, reasons, model) values ($1, $2, 'done', $3, $4, $5, $6)
@@ -357,12 +380,12 @@ async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, 
   }
   // Pass: release at objection + 72 h, and keep contested_at so the client can't object a second time.
   // Fail: clear it, so a fixed resubmission gets a normal objection window again.
-  const set = decision === "PASSED" ? { release_after: releaseAt } : decision === "CHANGES_REQUESTED" ? { contested_at: null, changes_reason: null } : {};
+  const set = decision === "PASSED" ? { release_after: releaseAt, share_bps: shareBps ?? null } : decision === "CHANGES_REQUESTED" ? { contested_at: null, changes_reason: null, share_bps: null } : {};
   const out = await transition(db(), m, decision, "system", set, {
     event: "review:second",
-    detail: { decision, reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, firstModel, policyVersion: pins.policyVersion ?? "policy-1", injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel), ...runnerDetail(verdict) },
+    detail: { decision, reasons, summary: verdict.summary, headSha: verdict.headSha, model: verdict.model, firstModel, policyVersion: pins.policyVersion ?? "policy-1", ...(shareBps !== undefined ? { shareBps } : {}), injection: verdict.injection.detected, tampering: verdict.tampering, ...panelDetail(verdict.panel), ...runnerDetail(verdict) },
   });
-  if (fresh && m.verifier === "code_pr" && m.pr_url) await postComment(m, verdict, decision, reasons, deps, "Second review after the client's objection");
+  if (fresh && m.verifier === "code_pr" && m.pr_url) await postComment(m, verdict, decision, reasons, deps, "Second review after the client's objection", shareBps);
   return out;
 }
 
