@@ -15,6 +15,9 @@ export const STATES = [
   "PAYOUT_FAILED",
   "DISPUTE",
   "CANCELLED",
+  // The resolution desk (resolution/desk.ts): a decision locked for the arbitrator by a funded fee hold.
+  "LOCKED",
+  "ARBITRATION",
 ] as const;
 
 export type MilestoneState = (typeof STATES)[number];
@@ -29,8 +32,8 @@ const TRANSITIONS: Record<MilestoneState, readonly MilestoneState[]> = {
   SUBMITTED: ["IN_REVIEW", "PASSED", "CANCELLED"], // PASSED directly only via the dev route until the reviewer exists
   IN_REVIEW: ["CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CANCELLED"],
   CHANGES_REQUESTED: ["SUBMITTED", "CANCELLED"],
-  HUMAN_CHECK: ["PASSED", "CHANGES_REQUESTED", "CANCELLED"],
-  PASSED: ["RELEASED", "CONTESTED", "CANCELLED"],
+  HUMAN_CHECK: ["PASSED", "CHANGES_REQUESTED", "CANCELLED", "LOCKED"],
+  PASSED: ["RELEASED", "CONTESTED", "CANCELLED", "LOCKED"],
   // One second review on the same commit: pass → back to PASSED with release_after = objection + 72 h
   // (releaseFunds only runs from PASSED); fail → CHANGES_REQUESTED; no usable verdict in 72 h → HUMAN_CHECK.
   CONTESTED: ["PASSED", "CHANGES_REQUESTED", "HUMAN_CHECK", "CANCELLED"],
@@ -39,6 +42,10 @@ const TRANSITIONS: Record<MilestoneState, readonly MilestoneState[]> = {
   PAYOUT_FAILED: [],
   DISPUTE: [],
   CANCELLED: [],
+  // Not matched in 72 h: the earlier decision (PASSED or HUMAN_CHECK) stands. Matched: ARBITRATION.
+  LOCKED: ["ARBITRATION", "PASSED", "HUMAN_CHECK", "CANCELLED"],
+  // A signed award: PASSED at its share, or CANCELLED (void) at 0%. A silent arbitrator: the earlier decision.
+  ARBITRATION: ["PASSED", "HUMAN_CHECK", "CANCELLED"],
 };
 
 export function canTransition(from: MilestoneState, to: MilestoneState): boolean {

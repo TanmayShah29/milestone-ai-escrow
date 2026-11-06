@@ -9,6 +9,7 @@ import { privacySweep } from "@/lib/privacy";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
 import { HOLD_DECIDE_MARGIN_MS, humanCheckDeadline, objectionReleaseMs, objectionWindowMs, signedObjectionMs } from "./deadlines";
 import { decide, earnedShare, humanTimeoutOutcome, type PanelRecord, type Pins, type Verdict } from "./policy";
+import { tickDesk } from "@/lib/resolution/desk";
 import { runnerApi, type RunnerApi } from "./runner";
 import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifiers";
 
@@ -396,7 +397,8 @@ async function applySecondDecision(m: Milestone, key: string, verdict: Verdict, 
  * (page polling, a cron ping): every step is idempotent.
  */
 export async function tick(milestoneId: string, deps: ReviewDeps = defaultReviewDeps()): Promise<Milestone> {
-  let m = await getMilestone(milestoneId);
+  // The resolution desk's clock first: an award or a standing decision can put the milestone back in PASSED.
+  let m = await tickDesk(milestoneId, { money: deps.money, ...(deps.aiCall ? { aiCall: deps.aiCall } : {}) });
   if (m.state === "SUBMITTED" || m.state === "IN_REVIEW") m = await reviewMilestone(m.id, deps);
   if (m.state === "CONTESTED") m = await resolveObjection(m.id, deps);
   if (m.state === "HUMAN_CHECK") m = await expireHumanCheck(m.id, deps);
@@ -408,7 +410,9 @@ export async function tick(milestoneId: string, deps: ReviewDeps = defaultReview
 export async function tickAll(deps: ReviewDeps = defaultReviewDeps()): Promise<{ id: string; state?: string; error?: string }[]> {
   const { rows } = await db().query<{ id: string }>(
     `select id from milestones
-     where (state in ('SUBMITTED','IN_REVIEW','PASSED','CONTESTED','RELEASED') and updated_at > now() - interval '7 days')
+     where (state in ('SUBMITTED','IN_REVIEW','PASSED','CONTESTED','RELEASED','LOCKED','ARBITRATION') and updated_at > now() - interval '7 days')
+        -- Locks whose fees still need settling, or that may lapse (resolution/desk.ts tickDesk).
+        or id in (select milestone_id from locks where status in ('opening','awarded','stood','ended') and updated_at > now() - interval '7 days')
         -- A HUMAN_CHECK whose decision deadline has passed, however long ago (see humanCheckDeadline).
         or (state = 'HUMAN_CHECK' and contested_at is not null and coalesce(human_check_at, updated_at) <= now() - make_interval(secs => $1))
         or (state = 'HUMAN_CHECK' and contested_at is null and authorization_expires_at <= now() + make_interval(secs => $2))

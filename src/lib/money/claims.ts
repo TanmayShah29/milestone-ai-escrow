@@ -3,7 +3,16 @@ import { isUniqueViolation, type Queryable } from "@/lib/db";
 // The claim for a money-moving write (paypal-plan.md 1b.1, DUPLICATE CLAIMS). Inserted before the
 // PayPal call; `money_actions_live_uq` rejects a second live claim for the same (milestone, action).
 
-export type MoneyAction = "create_order" | "authorize" | "capture" | "void" | "payout" | `reauthorize_${number}`;
+export type MoneyAction =
+  | "create_order"
+  | "authorize"
+  | "capture"
+  | "void"
+  | "payout"
+  | `reauthorize_${number}`
+  // The resolution desk's fee holds, one set per side (resolution/fees.ts).
+  | `fee_${"order" | "authorize" | "capture" | "void"}_${"client" | "worker"}`
+  | "fee_payout";
 
 export type ClaimStatus = "pending" | "succeeded" | "failed" | "unknown";
 

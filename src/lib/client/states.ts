@@ -56,6 +56,8 @@ export const STATUS: Record<string, { label: string; tone: Tone }> = {
   PAYOUT_FAILED: { label: "Payout returned", tone: "failed" },
   DISPUTE: { label: "PayPal dispute open", tone: "failed" },
   CANCELLED: { label: "Cancelled", tone: "blocked" },
+  LOCKED: { label: "Locked for arbitration", tone: "held" },
+  ARBITRATION: { label: "With the arbitrator", tone: "held" },
 };
 
 export const STEPS = ["Agree", "Fund", "Deliver", "Verify", "Release"] as const;
@@ -73,6 +75,8 @@ export function stepIndex(state: string): number {
     case "SUBMITTED":
     case "IN_REVIEW":
     case "HUMAN_CHECK":
+    case "LOCKED":
+    case "ARBITRATION":
       return 3;
     case "PASSED":
     case "CONTESTED":

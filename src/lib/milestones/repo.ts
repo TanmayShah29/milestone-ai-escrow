@@ -62,7 +62,7 @@ export type Milestone = {
   updated_at: Date;
 };
 
-export type Actor = "client" | "freelancer" | "system" | "paypal" | "ai" | "dev";
+export type Actor = "client" | "freelancer" | "system" | "paypal" | "ai" | "dev" | "arbitrator";
 
 export class NotFound extends Error {}
 

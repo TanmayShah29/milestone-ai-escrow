@@ -168,6 +168,29 @@ The integration contract (every field, header and error arm, looked up in the SD
 [`paypal-plan.md`](paypal-plan.md). Sandbox behaviour we verified with live calls is in
 [`PayPal_Sandbox_Guide.md`](PayPal_Sandbox_Guide.md).
 
+### The resolution desk (a neutral party at the end)
+When either side disagrees with a decision, they can take it to the arbitrator the signed terms name.
+That's possible while approved work waits in its objection window, or while a decision waits for a person.
+The code is in `src/lib/resolution/`, and the case page is `/milestones/<id>/court`.
+1. **Lock:** the side that locks funds a small PayPal fee hold ($5 by default). The lock takes effect once
+   the hold is authorized, and the money for the work stays held.
+2. **Match:** the other side has 72 hours to match the fee. If they don't, the decision so far stands and
+   the locker's fee is given back. Silence is never an automatic win for the client.
+3. **Evidence pack:** matching freezes everything the arbitrator rules on: the contract, the signatures,
+   every review with its panel votes and runner results, the decision trace and both statements. Its
+   SHA-256 goes into the proof chain.
+4. **Draft:** one AI call drafts an award, citing evidence ids. It's shown as a draft and settles nothing.
+5. **Award:** the arbitrator signs it with their own ES256 key, the one the terms pin, using
+   `scripts/sign-award.mts`. The private key never reaches the server. The signature covers the milestone,
+   the terms, the pack hash, the share and the reasons, and **the signed award is the only input to
+   settlement**:
+   - the work's hold is captured at the award's share, and 0% voids it;
+   - the side the award goes against (below 50% the worker, from 50% the client) has its fee captured and
+     paid out to the arbitrator;
+   - the other side's fee hold is voided.
+   An arbitrator who doesn't rule within 72 hours leaves the earlier decision standing, and both fees are
+   given back.
+
 ### Money rules (enforced in code)
 1. **The AI never moves money.** Model output is data. Only deterministic code applies the policy and calls
    capture, void or payout. No AI tool and no MCP tool can fund, capture, release or refund.

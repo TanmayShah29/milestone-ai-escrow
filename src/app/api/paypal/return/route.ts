@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { toHttp } from "@/lib/http";
 import { authorizeHold, InProgress } from "@/lib/money/flow";
+import { feeApproved } from "@/lib/resolution/desk";
 
 export const runtime = "nodejs";
 
@@ -11,9 +12,12 @@ export async function GET(req: Request) {
   const base = process.env.APP_URL ?? url.origin; // behind Render's proxy req.url's host can be internal
   const milestoneId = url.searchParams.get("milestone") ?? "";
   const token = url.searchParams.get("token") ?? "";
-  const back = new URL(`/milestones/${encodeURIComponent(milestoneId)}`, base);
+  // ?fee=client|worker: an arbitration fee hold (resolution/desk.ts), not the milestone's own hold.
+  const fee = url.searchParams.get("fee");
+  const back = new URL(`/milestones/${encodeURIComponent(milestoneId)}${fee ? "/court" : ""}`, base);
   try {
-    await authorizeHold(milestoneId, token);
+    if (fee === "client" || fee === "worker") await feeApproved(milestoneId, fee, token);
+    else await authorizeHold(milestoneId, token);
     back.searchParams.set("funded", "1");
   } catch (err) {
     if (err instanceof InProgress) {

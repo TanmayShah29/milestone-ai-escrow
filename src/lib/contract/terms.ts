@@ -10,6 +10,7 @@ import { audit, getMilestone, transition, updateFields, type Milestone } from "@
 import { InvariantViolation } from "@/lib/errors";
 import { feeBps, MIN_AMOUNT_CENTS } from "@/lib/money/amounts";
 import { objectionWindowMs } from "@/lib/review/deadlines";
+import { arbitrator } from "@/lib/resolution/config";
 
 // The contract both sides sign: acceptance criteria, compiled into tests where they can be checked by
 // code, fingerprinted by a SHA-256 hash over everything that matters. The AI drafts it; people edit and
@@ -59,6 +60,9 @@ export const policySchema = z.object({
   confidenceFloor: z.number().min(0).max(1).optional(),
   reviewModels: z.array(z.string().max(120)).max(5).optional(),
   verifier: z.string().max(60).optional(),
+  // Who settles a locked decision, and each side's fee to lock or match (resolution/), pinned when this
+  // server offers an arbitrator at signing. Without it, the terms can't be locked.
+  arbitrator: z.object({ name: z.string().max(80), keyId: z.string().max(100), feeCents: z.number().int().min(100).max(10_000) }).optional(),
 });
 export type Policy = z.infer<typeof policySchema>;
 
@@ -193,6 +197,7 @@ export function contractDocument(m: Pick<Milestone, "id" | "title" | "amount_cen
 /** The policy in force now, for terms being saved now. */
 // The due date is not part of it: the client may still move it after signing (see setDueDate), within the hold.
 export function currentPolicy(verifier: Milestone["verifier"] = "code_pr"): Policy {
+  const desk = arbitrator();
   return {
     platformFeeBps: feeBps(),
     objectionWindowSeconds: Math.round(objectionWindowMs() / 1000),
@@ -200,6 +205,7 @@ export function currentPolicy(verifier: Milestone["verifier"] = "code_pr"): Poli
     confidenceFloor: CONFIDENCE_FLOOR,
     reviewModels: configuredModels(),
     verifier: `${verifier}@${VERIFIER_VERSION}`,
+    ...(desk ? { arbitrator: { name: desk.name, keyId: desk.keyId, feeCents: desk.feeCents } } : {}),
   };
 }
 

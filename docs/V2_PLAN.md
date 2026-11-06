@@ -428,6 +428,35 @@ Claude.
     `/.well-known/milestone-proof-keys.json` and `scripts/verify-proof.mts`;
   - passkey and agent-key signatures on the terms (migration 015, `src/lib/contract/signatures.ts`);
   - the worker's GitHub account, which binds who may submit.
+- **Phase 6 (resolution desk) core built (Nov 6):**
+  - `src/lib/resolution/`: `config.ts` (the arbitrator from env), `fees.ts`, `pack.ts`, `desk.ts`;
+  - migration 018 adds `locks` and `fee_holds`, and two new states, `LOCKED` and `ARBITRATION`;
+  - **lock and match:** either side locks a PASSED in its window, or a HUMAN_CHECK, by funding a fee hold
+    (PayPal checkout or the sandbox test card). The other side matches within 72 h, or the earlier decision
+    stands;
+  - **fee holds:** every fee call (order, authorize, capture, void, payout to the arbitrator) runs through
+    `flow.ts runWrite`, so each has its own claim and `PayPal-Request-Id`;
+  - **evidence pack:** frozen when the lock is matched. Its hash is in the proof chain (`lock:matched`);
+  - **AI draft award:** one call, with evidence ids checked against the pack. It's shown only;
+  - **award:** signed by the arbitrator's **ES256 key** (pinned in the terms as
+    `policy.arbitrator.keyId`), from `scripts/sign-award.mts`. The private key stays on your machine. A
+    passkey would need an arbitrator account; the key does the same job and keeps the server unable to
+    forge an award. The arbitrator reads a case with a signed, time-limited request;
+  - **settlement:** a partial capture at the award's share (or a void at 0%), the paying side's fee
+    captured and paid out to the arbitrator, the other side's fee voided. A silent arbitrator leaves the
+    earlier decision standing and both fees are voided;
+  - **UI:** `/milestones/<id>/court`, a link from the milestone page, and next-step text for the new
+    states. Checked in the browser against a seeded local case: no console errors, and no sideways
+    scrolling at 375 px;
+  - tests: `tests/resolution.test.ts`, 12 cases;
+  - **needs you:**
+    1. make the arbitrator key (`npx tsx scripts/sign-award.mts keygen ~/arbitrator.jwk`) and set
+       `ARBITRATOR_PUBLIC_JWK`;
+    2. create a third sandbox personal account and set its email as `ARBITRATOR_PAYPAL_EMAIL`, on Render
+       and locally;
+    3. your OK to make an undecided HUMAN_CHECK lock instead of voiding. It's unchanged until then;
+  - **not built yet:** sending the evidence pack to PayPal disputes (`provide-evidence`), renaming
+    `HUMAN_CHECK` to `ESCALATED`, and a registry of several arbitrators.
 - **Phase 5 (partial pay) built (Nov 6):**
   - a signed `paySchedule` in the terms (`mustBaseBps` plus `niceBonusBps` per nice-to-have). It must add
     up to 100% and give the must-haves at least half, and the must-haves alone must pay at least $10. Terms

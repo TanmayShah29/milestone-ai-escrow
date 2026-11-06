@@ -1,13 +1,14 @@
 import { platformFrom, publicMilestone, requireRole, roleOn, type Role } from "@/lib/auth";
 import { db, withMilestoneLock } from "@/lib/db";
 import { devActionsAllowed, json, toHttp } from "@/lib/http";
-import { cancelHold, createHold, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
+import { cancelHold, createHold, defaultDeps, fundWithTestCard, refreshHold, releaseFunds, syncMilestone } from "@/lib/money/flow";
 import { attackTerms } from "@/lib/contract/attack";
 import { passkeyOptions, passkeyRegister, siteFor } from "@/lib/contract/signatures";
 import { draftTerms, editTerms, signTerms, type SignOptions } from "@/lib/contract/terms";
 import { eraseMilestone, rotateLink } from "@/lib/privacy";
 import { setDueDate } from "@/lib/schedule";
 import { humanDecision, objectToRelease, submitDeliverable, tick } from "@/lib/review/run";
+import { matchLock, openLock } from "@/lib/resolution/desk";
 import { getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
 import { DAY, HOUR, hit, ipKey, tooMany, waitText, type Rule } from "@/lib/ratelimit";
 
@@ -38,6 +39,8 @@ const ALLOWED: Record<string, Role[]> = {
   sync: ["client", "worker"],
   "rotate-link": ["client", "worker"],
   erase: ["client"],
+  lock: ["client", "worker"],
+  "match-lock": ["client", "worker"],
 };
 
 // AI drafting spends the shared free-model budget: 5 per hour per IP (platform keys are exempt) and
@@ -144,6 +147,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; ac
       }
       case "erase":
         return done(await eraseMilestone(id, "client"));
+      case "lock":
+      case "match-lock": {
+        // The sandbox test card funds the fee with no PayPal login (the judge path); otherwise approve at PayPal.
+        const input = { statement: str(body.statement), card: body.card === true, ...(mock ? { mock } : {}) };
+        const { milestone, fee } = await (action === "lock" ? openLock : matchLock)(id, role, input, { money: defaultDeps() });
+        return done(milestone, { approveUrl: fee.status === "open" ? fee.approve_url : null });
+      }
       default:
         return done(await syncMilestone(id));
     }

@@ -19,6 +19,23 @@ type Data = { role: Role; milestone: MilestoneView; audit: AuditRow[]; review: R
 
 const ROLE_LABEL: Record<Role, string> = { client: "Client", worker: "Worker" };
 
+/** The way to the resolution desk, when the signed terms name an arbitrator (src/lib/resolution/desk.ts). */
+function CourtLink({ m }: { m: MilestoneView }) {
+  const desk = (m.criteria as { policy?: { arbitrator?: { name: string; feeCents: number } } } | null | undefined)?.policy?.arbitrator;
+  if (!desk) return null;
+  const inCourt = m.state === "LOCKED" || m.state === "ARBITRATION";
+  const canLock = (m.state === "PASSED" && !m.contested_at) || m.state === "HUMAN_CHECK";
+  if (!inCourt && !canLock) return null;
+  return (
+    <div className="rounded-lg border border-rule bg-panel p-4 text-sm text-ink-2">
+      {inCourt ? "This decision is with the resolution desk. " : `Disagree with this decision? Either side can take it to ${desk.name} for a ${usd(desk.feeCents)} fee hold. `}
+      <Link href={`/milestones/${m.id}/court`} className="font-medium text-ink underline">
+        {inCourt ? "Open the case" : "Resolution desk"}
+      </Link>
+    </div>
+  );
+}
+
 /** The page can't open the milestone: no link in this browser, or a link that isn't for it. */
 function LinkCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -147,7 +164,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
   // While CI runs, the objection window ticks or a payout settles, nudge the milestone forward.
   const state = data?.milestone.state;
   useEffect(() => {
-    if (!token || !state || !["SUBMITTED", "IN_REVIEW", "PASSED", "CONTESTED", "RELEASED"].includes(state)) return;
+    if (!token || !state || !["SUBMITTED", "IN_REVIEW", "PASSED", "CONTESTED", "RELEASED", "LOCKED", "ARBITRATION"].includes(state)) return;
     const t = setInterval(() => fetch(`/api/milestones/${id}/check`, authed({ method: "POST" })).then(() => load()), 15_000);
     return () => clearInterval(t);
   }, [id, token, state, authed, load]);
@@ -288,6 +305,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="min-w-0 space-y-5">
           <NextStep m={m} role={as!} review={data.review} call={call} workerLink={workerLink} />
+          <CourtLink m={m} />
           <div className="lg:hidden">
             <MoneyPanel m={m} />
           </div>

@@ -519,6 +519,14 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
       title = "Cancelled";
       body = <p className="text-sm text-ink-2">The hold was released; nothing was charged.</p>;
       break;
+    case "LOCKED":
+      title = "Locked for the arbitrator";
+      body = <p className="text-sm text-ink-2">The money stays held. The other side has 72 hours to match the fee; if they don&apos;t, the decision so far stands. Details are on the resolution desk.</p>;
+      break;
+    case "ARBITRATION":
+      title = "With the arbitrator";
+      body = <p className="text-sm text-ink-2">The money stays held until the arbitrator signs an award, which decides how much of it the worker is paid.</p>;
+      break;
   }
 
   return (

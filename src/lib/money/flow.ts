@@ -22,14 +22,14 @@ export function defaultDeps(): Deps {
   return { paypal: paypal(), fetch, appUrl: process.env.APP_URL ?? "http://localhost:3000" };
 }
 
-const PREFER = "return=representation"; // the SDK default "return=minimal" omits the ids we store
+export const PREFER = "return=representation"; // the SDK default "return=minimal" omits the ids we store
 
 export { InProgress, InvariantViolation, OutcomeUnknown };
 
 /** Returned by a re-read that proves PayPal did not act: the claim is released and a retry is safe. */
 export const NOT_DONE = Symbol("not done");
 
-type WriteSpec<T> = {
+export type WriteSpec<T> = {
   action: MoneyAction;
   actor: Actor;
   /** The PayPal call. Throw PaypalFailure("unknown") if a 2xx lacks the members we depend on. */
@@ -41,7 +41,8 @@ type WriteSpec<T> = {
   paypalId: (result: T) => string;
 };
 
-async function runWrite<T>(m: Milestone, spec: WriteSpec<T>): Promise<Milestone> {
+/** A money-moving write under its claim (money rules 2, 4): also used by the resolution desk's fee holds. */
+export async function runWrite<T>(m: Milestone, spec: WriteSpec<T>): Promise<Milestone> {
   const claimed = await claimAction(db(), m.id, spec.action);
   if (!claimed.won) {
     if (claimed.claim.status === "succeeded") return getMilestone(m.id);
@@ -107,7 +108,7 @@ async function settle<T>(m: Milestone, spec: WriteSpec<T>, claim: Claim): Promis
   return commit(m, spec, found, claim);
 }
 
-function mockHeader(mock?: string) {
+export function mockHeader(mock?: string) {
   return mock ? { payPalMockResponse: JSON.stringify({ mock_application_codes: mock }) } : {};
 }
 
@@ -118,9 +119,9 @@ function requireState(m: Milestone, ...states: MilestoneState[]) {
 // ---------------------------------------------------------------------------------------------
 // 6. Create the hold order (intent AUTHORIZE). The client approves it at PayPal next.
 
-type CreatedOrder = { orderId: string; approveUrl: string };
+export type CreatedOrder = { orderId: string; approveUrl: string };
 
-function readCreatedOrder(o: Order): CreatedOrder {
+export function readCreatedOrder(o: Order): CreatedOrder {
   const approveUrl = o.links?.find((l) => l.rel === "approve" || l.rel === "payer-action")?.href;
   if (!o.id || !approveUrl) throw new PaypalFailure("unknown", "createOrder returned no id or approve link");
   return { orderId: o.id, approveUrl };
@@ -186,7 +187,7 @@ async function createHoldLocked(milestoneId: string, deps: Deps, opts: { mock?: 
 // PayPal-Request-Id always sends the same body.
 const SANDBOX_TEST_CARD_NUMBERS = ["4012888888881881", "4111111111111111", "4005519200000004"];
 
-function sandboxTestCard(requestId: string) {
+export function sandboxTestCard(requestId: string) {
   const attempt = Number(requestId.split("_").pop()) || 1;
   return {
     name: "Milestone Demo Client",
@@ -261,9 +262,9 @@ async function supersedeOrder(m: Milestone, status: string): Promise<Milestone> 
 // ---------------------------------------------------------------------------------------------
 // 8. Authorize after the client approved. The return URL carries ?token=<order id>.
 
-type AuthInfo = { authorizationId: string; status: string; cents: number; expiresAt: string | null };
+export type AuthInfo = { authorizationId: string; status: string; cents: number; expiresAt: string | null };
 
-function readAuthorization(units: Order["purchaseUnits"]): AuthInfo | undefined {
+export function readAuthorization(units: Order["purchaseUnits"]): AuthInfo | undefined {
   const a = units?.[0]?.payments?.authorizations?.[0];
   if (!a?.id || !a.amount) return undefined;
   return { authorizationId: a.id, status: a.status ?? "UNKNOWN", cents: valueToCents(a.amount.value), expiresAt: a.expirationTime ?? null };
@@ -311,7 +312,7 @@ async function authorizeHoldLocked(milestoneId: string, returnedOrderId: string,
 // SDK model, and the sandbox may omit it); null when absent, and the record step estimates it.
 type CaptureInfo = { captureId: string; status: string; cents: number; paypalFeeCents: number | null };
 
-function paypalFeeOf(b: SellerReceivableBreakdown | undefined): number | null {
+export function paypalFeeOf(b: SellerReceivableBreakdown | undefined): number | null {
   const fee = b?.paypalFee;
   if (!fee || fee.currencyCode !== "USD") return null;
   try {
@@ -469,7 +470,7 @@ async function cancelHoldLocked(milestoneId: string, deps: Deps, opts: CancelOpt
 // Capture works without it inside the 29 days; the due-date cap (lib/timeline.ts latestDueAt) keeps the
 // work inside them.
 
-const HOLD_STATES: MilestoneState[] = ["FUNDED", "SUBMITTED", "IN_REVIEW", "CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CONTESTED"];
+const HOLD_STATES: MilestoneState[] = ["FUNDED", "SUBMITTED", "IN_REVIEW", "CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CONTESTED", "LOCKED", "ARBITRATION"];
 
 type ReauthInfo = { authorizationId: string; expiresAt: string | null };
 
@@ -578,6 +579,8 @@ const PAYOUT_FAILED_STATUSES = new Set(["FAILED", "RETURNED", "BLOCKED", "DENIED
 
 /** Re-running the action finds its own unknown claim and settles it by re-read (see runWrite). */
 function resumeAction(m: Milestone, claim: Claim, deps: Deps): Promise<Milestone> {
+  // Fee holds settle their own unknown outcomes (resolution/fees.ts), from the resolution tick.
+  if (claim.action.startsWith("fee_")) return Promise.resolve(m);
   if (claim.action === "create_order") return createHold(m.id, deps);
   if (claim.action === "authorize") return authorizeHold(m.id, m.paypal_order_id ?? "", deps);
   if (claim.action === "capture" || claim.action === "payout") return releaseFunds(m.id, deps);
