@@ -27,7 +27,7 @@ export type MilestoneState = (typeof STATES)[number];
 // CANCELLED from every pre-capture hold state: the client may void from FUNDED, CHANGES_REQUESTED and
 // HUMAN_CHECK (flow.ts cancelHold checks which), and a hold PayPal voided or expired ends the milestone
 // from any of them (flow.ts endHoldIfGone). Never after a capture.
-const TRANSITIONS: Record<MilestoneState, readonly MilestoneState[]> = {
+export const TRANSITIONS: Record<MilestoneState, readonly MilestoneState[]> = {
   DRAFT: ["AGREED", "CANCELLED", "OFFERED"],
   AGREED: ["FUNDED", "CANCELLED"],
   FUNDED: ["SUBMITTED", "CANCELLED", "OFFERED"], // OFFERED: a bounty claim lapsed with no work submitted

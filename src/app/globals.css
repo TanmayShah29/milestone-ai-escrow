@@ -128,11 +128,78 @@ select {
   caret-color: var(--focus);
 }
 
+/* Motion follows the money (DESIGN.md): it shows where the money is, what was proven, or what an attack did. */
+:root {
+  --t-tap: 120ms;
+  --t-state: 220ms;
+  --t-travel: 480ms;
+  --t-focal: 700ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+}
+
+/* A seal's threads draw in when the terms are sealed (paths carry pathLength="1"). */
+.seal-ink {
+  stroke-dasharray: 1;
+  animation: seal-ink var(--t-focal) var(--ease-out) both;
+}
+@keyframes seal-ink {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The cheque's stamp lands: slight overshoot in size, no bounce. */
+.stamp-land {
+  animation: stamp-land var(--t-focal) var(--ease-out) both;
+}
+@keyframes stamp-land {
+  from {
+    opacity: 0;
+    transform: rotate(-6deg) scale(1.12);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-6deg) scale(1);
+  }
+}
+
+/* A detail appears under the row it explains. */
+.detail-in {
+  animation: detail-in var(--t-state) var(--ease-out) both;
+}
+@keyframes detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* Reduced motion: keep colour, opacity and order; drop travel and scale. Feedback stays readable. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+    transition-property: color, background-color, border-color, opacity, fill, stroke !important;
+  }
+  .seal-ink {
+    animation: fade-in var(--t-state) linear both;
+    stroke-dasharray: none;
+  }
+  .stamp-land {
+    animation: fade-in var(--t-state) linear both;
+    transform: rotate(-6deg);
+  }
+  .detail-in {
+    animation: fade-in var(--t-state) linear both;
   }
 }

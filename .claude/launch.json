@@ -6,6 +6,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["next", "start", "-p", "3130"],
       "port": 3130
+    },
+    {
+      "name": "milestone-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev", "-p", "3131"],
+      "port": 3131
     }
   ]
 }

@@ -54,6 +54,10 @@ The landing cheque borrows the same thread language for its border bands.
   panel moved directly under the next step.
 - Borders are 1px hairlines; radius `md` for controls, `lg` for sections, `xl` only for the landing cheque.
 - One shadowed element per screen (the next-step panel, or the cheque on the landing page).
-- Motion: one moment per page (the landing cheque's conditions passing and its stamp); everything else is
-  instant. `prefers-reduced-motion` shows final states.
+- **Motion follows the money** (amended Nov 7, 2026, with the user's OK; plan in `docs/design/experience-plan.md`).
+  Motion only shows where the money is, what was proven, or what an attack did. No scroll-reveal fades, hover
+  lifts, parallax, count-ups or looping decoration, and nothing is lost if a motion is removed. Tokens in
+  `globals.css`: `--t-tap` 120 ms, `--t-state` 220 ms, `--t-travel` 480 ms, `--t-focal` 700 ms (one focal moment
+  per page), `--ease-out`, stagger 140 ms capped at five items. Animate transform, opacity, stroke-dashoffset,
+  clip-path and colour only. `prefers-reduced-motion` keeps colour, opacity and order, and drops travel and scale.
 - Refused: eyebrow labels, card grids as page structure, gradient text, emoji icons (lucide only).

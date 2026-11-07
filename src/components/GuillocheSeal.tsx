@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import { sealRings } from "@/lib/client/seal";
 
 // The terms fingerprint as a banknote seal. Pale and dashed until both sides sign; inked once sealed.
-export function GuillocheSeal({ hash, sealed, size = 168, label = true }: { hash: string | null; sealed: boolean; size?: number; label?: boolean }) {
+// `ink` draws the threads in on mount (key the seal by hash to redraw it when the terms change).
+export function GuillocheSeal({ hash, sealed, size = 168, label = true, ink = false }: { hash: string | null; sealed: boolean; size?: number; label?: boolean; ink?: boolean }) {
   const rings = useMemo(() => sealRings(hash ?? "", 200), [hash]);
   const short = hash ? `${hash.slice(0, 6)}…${hash.slice(-4)}` : "no terms yet";
   return (
@@ -12,7 +13,16 @@ export function GuillocheSeal({ hash, sealed, size = 168, label = true }: { hash
         <circle cx="100" cy="100" r="93" fill="none" stroke="var(--seal-2)" strokeWidth="0.4" />
         {hash &&
           rings.map((r, i) => (
-            <path key={i} d={r.d} fill="none" stroke={r.tone === 0 ? "var(--seal)" : "var(--seal-2)"} strokeWidth={r.width} strokeLinejoin="round" opacity={sealed ? 0.9 : 0.6} />
+            <path
+              key={i}
+              d={r.d}
+              fill="none"
+              stroke={r.tone === 0 ? "var(--seal)" : "var(--seal-2)"}
+              strokeWidth={r.width}
+              strokeLinejoin="round"
+              opacity={sealed ? 0.9 : 0.6}
+              {...(ink ? { pathLength: 1, className: "seal-ink", style: { animationDelay: `${Math.min(i * 18, 360)}ms` } } : {})}
+            />
           ))}
         <circle cx="100" cy="100" r="22" fill="var(--panel)" stroke="var(--seal-2)" strokeWidth="0.6" />
         <text x="100" y="98" textAnchor="middle" fontSize="7.5" fontFamily="var(--font-geist-mono)" fill="var(--ink)">
