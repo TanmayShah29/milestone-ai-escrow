@@ -52,7 +52,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               Proof Bench
             </Link>
             <Link href="/new" className="ml-auto inline-flex min-h-11 items-center whitespace-nowrap rounded-md bg-accent px-3.5 font-medium text-accent-ink no-underline shadow-sm transition-opacity hover:opacity-90">
-              New<span className="hidden sm:inline"> milestone</span>
+              New<span className="hidden sm:inline">&nbsp;milestone</span>
             </Link>
           </nav>
         </header>

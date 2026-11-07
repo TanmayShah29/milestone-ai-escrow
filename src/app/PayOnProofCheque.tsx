@@ -1,7 +1,6 @@
 "use client";
 
 import { Circle, CircleCheck, CircleX, RotateCcw, ShieldAlert } from "lucide-react";
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { GuillocheSeal } from "@/components/GuillocheSeal";
 
@@ -167,29 +166,37 @@ export function PayOnProofCheque() {
       <Band position="top-0" shift={0} />
       <Band position="bottom-0" shift={0.6} />
 
-      <div className="grid gap-6 px-5 pb-10 pt-10 sm:px-10 md:grid-cols-[1fr_auto] md:gap-10 lg:pb-8 lg:pt-8">
+      <div className="px-5 pb-6 pt-7 sm:px-8 sm:pb-8 sm:pt-8">
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-rule-strong pb-3">
             <p className="text-sm text-ink-2">
               Pay to the order of <span className="font-semibold text-ink">the worker</span>
             </p>
-            <p className="font-mono text-sm text-ink-2">No. {run.no} · PayPal sandbox</p>
+            <p className="hidden font-mono text-sm text-ink-2 sm:block">No. {run.no} · PayPal sandbox</p>
           </div>
-          <div className="mt-4 flex flex-wrap items-end justify-between gap-4 lg:mt-3">
-            <p className="text-sm text-ink-2">
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+            <p className="hidden text-sm text-ink-2 sm:block">
               Held on PayPal until every condition below passes.
               <span className="block text-ink-3">Released by fixed rules, never by the AI.</span>
             </p>
-            <p className="sm:text-right">
-              <span className="block text-xs text-ink-2">Amount</span>
-              <span className="money text-4xl font-semibold sm:text-5xl">$25.00</span>
-            </p>
+            <div className="flex items-center gap-4">
+              <p className="sm:text-right">
+                <span className="block text-xs text-ink-2">Amount</span>
+                <span className="money text-4xl font-semibold sm:text-5xl">$25.00</span>
+              </p>
+              <div className="flex flex-col items-center" title={`Terms sealed by both sides: ${run.hash.slice(0, 6)}…${run.hash.slice(-4)}`}>
+                <GuillocheSeal key={`${run.hash}-${play}`} hash={run.hash} sealed size={52} label={false} ink={play > 0} />
+                <span className="font-mono text-[10px] text-ink-3">
+                  {run.hash.slice(0, 6)}…{run.hash.slice(-4)}
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="mt-6 flex flex-col lg:mt-4">
+          <div className="mt-4 flex flex-col">
             <div>
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <p className="text-sm font-medium text-ink" id="who-label">
+                <p className="sr-only text-sm font-medium text-ink sm:not-sr-only" id="who-label">
                   Who did the work?
                 </p>
                 <div className="flex w-full items-center gap-2 sm:w-auto">
@@ -226,7 +233,7 @@ export function PayOnProofCheque() {
                   const icon = res ? ICON[res] : null;
                   const both = (["cheat", "honest"] as const).map((k) => ({ k, d: RUNS[k].details[i] })).filter((x) => x.d);
                   return (
-                    <li key={c.text} className="py-2 text-sm">
+                    <li key={c.text} className="py-1.5 text-sm sm:py-2">
                       <div className="flex items-center gap-3">
                         {icon ? (
                           <icon.Icon key={`${play}-${res}`} className={`detail-in size-5 shrink-0 ${icon.cls}`} aria-hidden="true" />
@@ -235,12 +242,13 @@ export function PayOnProofCheque() {
                         )}
                         <span className="min-w-0 flex-1 text-ink">{c.text}</span>
                         <span className={`whitespace-nowrap text-xs ${icon ? icon.cls : "text-ink-3"}`}>
-                          {icon ? `${icon.word} · ${res === "blocked" ? "injection found" : c.by}` : c.by}
+                          {icon ? icon.word : c.by}
+                          {icon && <span className="hidden sm:inline">{` · ${res === "blocked" ? "injection found" : c.by}`}</span>}
                         </span>
                       </div>
                       {/* Both runs' details share one grid cell, so the cheque keeps its height when the run changes. */}
                       {both.length > 0 && (
-                        <div className="grid pl-8 [&>*]:[grid-area:1/1]">
+                        <div className="hidden pl-8 sm:grid [&>*]:[grid-area:1/1]">
                           {both.map(({ k, d }) => {
                             const on = k === mode && !!res;
                             return (
@@ -255,53 +263,31 @@ export function PayOnProofCheque() {
                   );
                 })}
               </ol>
-              <div className="mt-4 flex min-h-11 items-center md:hidden" aria-hidden="true">
+              <div className="mt-4 flex min-h-11 flex-wrap items-center gap-x-4 gap-y-2" aria-hidden="true">
                 {done && (
-                  <p key={`m-${mode}-${play}`} className={`stamp-land whitespace-nowrap rounded-md border-2 px-3 py-1.5 font-semibold uppercase tracking-wide ${stampCls}`}>
-                    {run.stamp}
-                  </p>
+                  <>
+                    <p key={`m-${mode}-${play}`} className={`stamp-land whitespace-nowrap rounded-md border-2 px-3 py-1.5 font-semibold uppercase tracking-wide ${stampCls}`}>
+                      {run.stamp}
+                    </p>
+                    <p key={`a-${mode}-${play}`} className="detail-in basis-full text-xs text-ink-2 sm:hidden">
+                      {run.announce}
+                    </p>
+                  </>
                 )}
               </div>
-            </div>
-
-            <div className="mt-6 lg:mt-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <Link href="/demo" className="inline-flex items-center justify-center rounded-md bg-accent px-5 py-3 font-medium text-accent-ink no-underline transition-opacity duration-[var(--t-tap)] hover:opacity-90">
-                  Try the demo, no login
-                </Link>
-                <Link href="/new" className="inline-flex items-center justify-center rounded-md border border-rule-strong px-5 py-3 font-medium text-ink no-underline transition-colors duration-[var(--t-tap)] hover:bg-paper">
-                  Create a milestone
-                </Link>
-              </div>
-              <p className="mt-2 text-[11px] text-ink-3">
-                Conditions, fingerprint and amounts from a real sandbox run:{" "}
-                <a href={`https://github.com/TanmayShah29/milestone-demo/pull/${run.pr}`} target="_blank" rel="noreferrer" className="underline">
-                  milestone-demo {run.source}
-                </a>
-                . That run took only the 5% platform fee; today PayPal&apos;s own fees are passed on too, so $25 pays about $21.94.
+              <p role="status" aria-live="polite" className="sr-only">
+                {done ? run.announce : ""}
               </p>
             </div>
-          </div>
-        </div>
 
-        <div className="relative flex flex-col items-center justify-center gap-3 md:w-56">
-          <GuillocheSeal key={`${run.hash}-${play}`} hash={run.hash} sealed size={176} label={false} ink={play > 0} />
-          <p className="text-center text-xs text-ink-2">
-            Terms sealed by both sides
-            <span className="block font-mono text-ink-3">
-              {run.hash.slice(0, 6)}…{run.hash.slice(-4)}
-            </span>
-          </p>
-          <div className="hidden min-h-11 items-center justify-center md:flex">
-            {done && (
-              <p key={`${mode}-${play}`} aria-hidden="true" className={`stamp-land whitespace-nowrap rounded-md border-2 px-3 py-1.5 text-center font-semibold uppercase tracking-wide ${stampCls}`}>
-                {run.stamp}
-              </p>
-            )}
+            <p className="mt-3 text-[11px] text-ink-3">
+              From a real sandbox run:{" "}
+              <a href={`https://github.com/TanmayShah29/milestone-demo/pull/${run.pr}`} target="_blank" rel="noreferrer" className="underline">
+                milestone-demo {run.source}
+              </a>
+              . That run took only the 5% platform fee; today PayPal&apos;s own fees are passed on too, so $25 pays about $21.94.
+            </p>
           </div>
-          <p role="status" aria-live="polite" className="sr-only">
-            {done ? run.announce : ""}
-          </p>
         </div>
       </div>
     </div>

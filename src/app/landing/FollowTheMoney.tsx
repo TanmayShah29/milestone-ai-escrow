@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { GuillocheSeal } from "@/components/GuillocheSeal";
 
 // Act 2: one $25.00 payment, followed through the five steps as the visitor scrolls. The stage stays put
 // while the steps scroll past it; every call and file named here is the real one (src/lib/money/flow.ts,
@@ -110,26 +109,12 @@ function Fence({ s, k: i }: { s: Step; k: number }) {
   );
 }
 
+/** The money rail and who acts at this step. */
 function Stage({ i }: { i: number }) {
   const s = STEPS[i]!;
   return (
-    <div className="flex w-full flex-col gap-3 rounded-xl border border-rule-strong bg-panel p-3 shadow-[var(--shadow-card)] sm:gap-4 sm:p-6">
-      {/* Step dots */}
-      <ol className="hidden items-center gap-2 sm:flex" aria-hidden="true">
-        {STEPS.map((x, k) => (
-          <li key={x.name} className="flex flex-1 items-center gap-2 last:flex-none">
-            <span className={`text-xs font-medium transition-colors duration-[var(--t-state)] ${k === i ? "text-ink" : k < i ? "text-paid" : "text-ink-3"}`}>{x.name}</span>
-            {k < STEPS.length - 1 && (
-              <span className="relative h-px flex-1 bg-rule-strong">
-                <span className="absolute inset-0 origin-left bg-paid transition-transform duration-[var(--t-travel)] ease-[var(--ease-out)]" style={{ transform: `scaleX(${k < i ? 1 : 0})` }} />
-              </span>
-            )}
-          </li>
-        ))}
-      </ol>
-
-      {/* The money rail */}
-      <div className="overflow-hidden rounded-lg bg-paper px-3 pb-2.5 pt-4 sm:px-5 sm:pb-3 sm:pt-5">
+    <div className="flex w-full flex-col gap-4 rounded-xl border border-rule-strong bg-panel p-4 shadow-[var(--shadow-card)] sm:p-6">
+      <div className="overflow-hidden rounded-lg bg-paper px-3 pb-3 pt-5 sm:px-5">
         <div className="relative mx-[16.66%] h-9">
           <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-rule-strong" />
           <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 origin-left bg-paid transition-transform duration-[var(--t-travel)] ease-[var(--ease-out)]" style={{ transform: `scaleX(${s.at / 2})` }} />
@@ -157,105 +142,99 @@ function Stage({ i }: { i: number }) {
           ))}
         </ol>
       </div>
-
-      {/* Who acts: the AI on one side of the fence, the rules on the money's side (inline per step on phones) */}
-      <div className="hidden lg:block">
-        <Fence s={s} k={i} />
-      </div>
-
-      {/* What actually runs */}
-      <div className="hidden gap-4 lg:flex">
-        <div className="min-w-0 flex-1 rounded-md border border-rule bg-paper p-3">
-          <p className="text-xs font-medium text-ink-2">What runs</p>
-          <div key={`run-${i}`} className="mt-1.5 space-y-1">
-            {s.runs.map((line) => (
-              <p key={line} className="detail-in break-all font-mono text-[11px] leading-relaxed text-ink sm:text-xs">
-                {line}
-              </p>
-            ))}
-          </div>
-          <a href={s.guard.href} target="_blank" rel="noreferrer" className="mt-2 inline-block break-all text-[11px] text-ink-2 underline">
-            Enforced in {s.guard.label}
-          </a>
-        </div>
-        <div className="hidden shrink-0 flex-col items-center justify-center sm:flex">
-          <GuillocheSeal hash={HASH} sealed size={96} label={false} />
-          <p className="mt-1 font-mono text-[10px] text-ink-3">
-            {HASH.slice(0, 6)}…{HASH.slice(-4)}
-          </p>
-        </div>
-      </div>
+      <Fence s={s} k={i} />
     </div>
   );
 }
 
+const STEP_MS = 4500;
+
+// One screen, not a long scroll: five step tabs that advance on their own while the section is on screen,
+// and stop for good once the visitor picks one. Reduced motion never advances on its own.
 export function FollowTheMoney() {
   const [i, setI] = useState(0);
-  const refs = useRef<(HTMLElement | null)[]>([]);
+  const [auto, setAuto] = useState(true);
+  const [inView, setInView] = useState(false);
+  const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) if (e.isIntersecting) setI(Number((e.target as HTMLElement).dataset.step));
-      },
-      // On phones the pinned stage covers the top of the screen, so a step counts once its text is below it.
-      { rootMargin: window.matchMedia("(min-width: 1024px)").matches ? "-45% 0px -45% 0px" : "-38% 0px -57% 0px" },
-    );
-    refs.current.forEach((el) => el && io.observe(el));
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => setInView(!!e?.isIntersecting), { threshold: 0.4 });
+    io.observe(el);
     return () => io.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (!auto || !inView || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const t = window.setInterval(() => setI((k) => (k + 1) % STEPS.length), STEP_MS);
+    return () => window.clearInterval(t);
+  }, [auto, inView]);
+
+  const pick = (k: number) => {
+    setAuto(false);
+    setI(k);
+  };
+  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!d) return;
+    e.preventDefault();
+    const next = (i + d + STEPS.length) % STEPS.length;
+    pick(next);
+    document.getElementById(`step-tab-${next}`)?.focus();
+  };
+  const s = STEPS[i]!;
+
   return (
-    <section aria-labelledby="follow-h" className="border-y border-rule bg-paper">
-      <div className="mx-auto max-w-6xl px-4 pt-16">
+    <section ref={ref} aria-labelledby="follow-h" className="border-y border-rule bg-paper">
+      <div className="mx-auto max-w-6xl px-4 py-16">
         <h2 id="follow-h" className="text-3xl font-semibold tracking-tight sm:text-4xl">
           Follow the $25
         </h2>
-        <p className="mt-3 max-w-xl text-ink-2">One real payment from milestone-demo PR #1, from the client&apos;s card to the worker. Scroll, and watch where the money is.</p>
-      </div>
+        <p className="mt-3 max-w-xl text-ink-2">One real payment from milestone-demo PR #1, from the client&apos;s card to the worker, in five steps.</p>
 
-      <div className="mx-auto grid max-w-6xl gap-x-12 px-4 pb-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        {/* The stage: pinned while the steps scroll past */}
-        <div className="sticky top-16 z-10 -mx-4 bg-paper/95 px-4 pb-3 pt-4 backdrop-blur lg:order-2 lg:mx-0 lg:h-[calc(100vh-6rem)] lg:bg-transparent lg:px-0 lg:py-8 lg:backdrop-blur-none">
-          <div className="lg:flex lg:h-full lg:items-center" aria-live="polite">
+        <div role="tablist" aria-label="Steps" onKeyDown={onKey} className="mt-8 grid grid-cols-5 gap-1.5 sm:gap-2">
+          {STEPS.map((x, k) => (
+            <button
+              key={x.name}
+              id={`step-tab-${k}`}
+              role="tab"
+              type="button"
+              aria-selected={k === i}
+              aria-controls="step-panel"
+              tabIndex={k === i ? 0 : -1}
+              onClick={() => pick(k)}
+              className={`relative min-h-11 overflow-hidden rounded-md border px-1 text-xs font-medium transition-colors duration-[var(--t-tap)] sm:text-sm ${k === i ? "border-ink bg-panel text-ink" : k < i ? "border-paid/40 bg-panel text-paid" : "border-rule-strong bg-panel text-ink-2 hover:text-ink"}`}
+            >
+              <span className="hidden sm:inline">{k + 1}. </span>
+              {x.name}
+              {k === i && auto && inView && <span key={`p-${i}`} aria-hidden="true" className="step-progress absolute inset-x-0 bottom-0 h-0.5 origin-left bg-ink" style={{ animationDuration: `${STEP_MS}ms` }} />}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-10">
+          <div id="step-panel" role="tabpanel" aria-labelledby={`step-tab-${i}`} key={i} className="detail-in">
+            <h3 className="text-2xl font-semibold tracking-tight text-ink">{s.title}</h3>
+            <p className="mt-2 max-w-md leading-relaxed text-ink-2">{s.text}</p>
+            <div className="mt-4 rounded-md border border-rule bg-panel p-3">
+              <p className="text-xs font-medium text-ink-2">What runs</p>
+              {s.runs.map((line) => (
+                <p key={line} className="mt-1 break-all font-mono text-[11px] leading-relaxed text-ink sm:text-xs">
+                  {line}
+                </p>
+              ))}
+              <a href={s.guard.href} target="_blank" rel="noreferrer" className="mt-2 inline-block break-all text-[11px] text-ink-2 underline">
+                Enforced in {s.guard.label}
+              </a>
+            </div>
+          </div>
+          <div aria-live="polite">
             <p className="sr-only">
-              Step {i + 1} of 5, {STEPS[i]!.name}. The money is at: {STATIONS[STEPS[i]!.at]!.label}.
+              Step {i + 1} of 5, {s.name}. The money is at: {STATIONS[s.at]!.label}.
             </p>
             <Stage i={i} />
           </div>
-        </div>
-
-        <div className="lg:order-1">
-          {STEPS.map((s, k) => (
-            <article
-              key={s.name}
-              ref={(el) => {
-                refs.current[k] = el;
-              }}
-              data-step={k}
-              className="flex min-h-[60vh] flex-col justify-center py-10 lg:min-h-[80vh]"
-            >
-              <p className={`text-sm font-medium transition-colors duration-[var(--t-state)] ${k === i ? "text-ink" : "text-ink-3"}`}>
-                Step {k + 1} · {s.name}
-              </p>
-              <h3 className={`mt-2 text-2xl font-semibold tracking-tight transition-colors duration-[var(--t-state)] sm:text-3xl ${k === i ? "text-ink" : "text-ink-3"}`}>{s.title}</h3>
-              <p className={`mt-3 max-w-md leading-relaxed transition-colors duration-[var(--t-state)] ${k === i ? "text-ink-2" : "text-ink-3"}`}>{s.text}</p>
-              <div className="mt-4 lg:hidden">
-                <Fence s={s} k={k} />
-              </div>
-              <div className="mt-3 rounded-md border border-rule bg-panel p-3 lg:hidden">
-                <p className="text-xs font-medium text-ink-2">What runs</p>
-                {s.runs.map((line) => (
-                  <p key={line} className="mt-1 break-all font-mono text-[11px] leading-relaxed text-ink">
-                    {line}
-                  </p>
-                ))}
-                <a href={s.guard.href} target="_blank" rel="noreferrer" className="mt-2 inline-block break-all text-[11px] text-ink-2 underline">
-                  Enforced in {s.guard.label}
-                </a>
-              </div>
-            </article>
-          ))}
         </div>
       </div>
     </section>

@@ -13,23 +13,38 @@ import { PayPalTrail } from "./landing/PayPalTrail";
 export default function Home() {
   return (
     <main>
-      <section className="mx-auto max-w-6xl px-4 pb-14 pt-10 sm:pt-12 lg:pt-8">
-        <p className="text-sm font-medium text-ink-2">For teams hiring freelancers or AI coding agents</p>
-        <h1 className="mt-2 max-w-3xl text-4xl font-semibold tracking-tight text-ink sm:text-6xl">Pay only when the work passes.</h1>
-        <p className="mt-4 max-w-2xl text-lg text-ink-2 lg:mt-3">AI writes the tests and tries to cheat them. A PayPal authorization hold keeps the money. Fixed rules pay the worker when the signed tests pass, and the AI can never move it.</p>
-        <div className="mt-8 lg:mt-6">
+      {/* First screen: the idea, the cheque that proves it, and the two ways in. Nothing else competes. */}
+      <section className="mx-auto max-w-6xl px-4 pb-12 pt-4 sm:pt-10 lg:grid lg:min-h-[calc(100svh-3.5rem)] lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] lg:items-center lg:gap-12 lg:py-8">
+        <div>
+          <h1 className="max-w-xl text-4xl font-semibold tracking-tight text-ink sm:text-5xl xl:text-6xl">Pay only when the work passes.</h1>
+          <p className="mt-3 max-w-md text-ink-2 sm:text-lg">A PayPal hold that only fixed rules release, once the signed tests pass. AI writes the tests and tries to cheat them. It can never move the money.</p>
+          <div className="mt-6 hidden gap-3 lg:flex">
+            <Link href="/demo" className="inline-flex min-h-12 items-center justify-center rounded-md bg-accent px-5 font-medium text-accent-ink no-underline transition-opacity duration-[var(--t-tap)] hover:opacity-90">
+              Run it live, no login
+            </Link>
+            <Link href="/new" className="inline-flex min-h-12 items-center justify-center rounded-md border border-rule-strong px-5 font-medium text-ink no-underline transition-colors duration-[var(--t-tap)] hover:bg-panel">
+              Create a milestone
+            </Link>
+          </div>
+        <div className="mt-4 grid grid-cols-2 gap-3 lg:hidden">
+          <Link href="/demo" className="inline-flex min-h-12 items-center justify-center rounded-md bg-accent px-4 text-center font-medium text-accent-ink no-underline">
+            Run it live
+          </Link>
+          <Link href="/new" className="inline-flex min-h-12 items-center justify-center rounded-md border border-rule-strong px-4 text-center font-medium text-ink no-underline">
+            Create one
+          </Link>
+        </div>
+        </div>
+        <div className="mt-5 lg:mt-0">
           <PayOnProofCheque />
         </div>
-        <PayPalTrail />
-        <p className="mt-6 max-w-3xl text-sm text-ink-2">
-          <span className="font-semibold text-ink">71% of freelancers</span> have had trouble getting paid, and &ldquo;done&rdquo; is where disputes start. AI agents make it sharper: they take paid work in minutes, and no one should let an agent pay itself.{" "}
-          <a href="https://onlabor.org/wp-content/uploads/2017/05/FU_NonpaymentReport_r3.pdf" target="_blank" rel="noreferrer" className="text-ink-3 underline">
-            Freelancers Union, 2015
-          </a>
-        </p>
       </section>
 
       <FollowTheMoney />
+
+      <div className="mx-auto max-w-6xl px-4">
+        <PayPalTrail />
+      </div>
 
       <AttackLab />
 
@@ -37,13 +52,21 @@ export default function Home() {
 
       <AgentsHire />
 
-      <section className="border-t border-rule bg-ink text-panel">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-16 sm:flex-row sm:items-center sm:justify-between">
+      {/* The close, in the same surface as the cheque: a light panel, not a dark band. */}
+      <section className="mx-auto max-w-6xl px-4 pb-16">
+        <div className="flex flex-col gap-6 rounded-xl border border-rule-strong bg-panel p-6 shadow-[var(--shadow-card)] sm:flex-row sm:items-center sm:justify-between sm:p-10">
           <div>
-            <p className="text-3xl font-semibold tracking-tight">Now watch real money move.</p>
-            <p className="mt-2 max-w-xl text-panel/75">One click places a real PayPal sandbox hold, opens a real pull request and runs real CI. About 2 minutes, no login.</p>
+            <p className="text-3xl font-semibold tracking-tight text-ink">Now watch real money move.</p>
+            <p className="mt-2 max-w-xl text-ink-2">One click places a real PayPal sandbox hold, opens a real pull request and runs real CI. About 2 minutes, no login.</p>
+            <p className="mt-4 flex items-center gap-2 text-xs text-ink-3" aria-hidden="true">
+              <span className="rounded-full border border-ink px-2 py-0.5 font-mono font-semibold text-ink">$12.00</span>
+              <span className="h-px w-6 bg-rule-strong" />
+              <span className="text-held">PayPal hold</span>
+              <span className="h-px w-6 bg-rule-strong" />
+              <span className="text-paid">Worker&apos;s PayPal</span>
+            </p>
           </div>
-          <Link href="/demo" className="inline-flex min-h-12 items-center justify-center rounded-md bg-panel px-6 font-semibold text-ink no-underline transition-opacity duration-[var(--t-tap)] hover:opacity-90">
+          <Link href="/demo" className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-md bg-accent px-6 font-semibold text-accent-ink no-underline transition-opacity duration-[var(--t-tap)] hover:opacity-90">
             Run it live
           </Link>
         </div>

@@ -167,6 +167,19 @@ select {
   }
 }
 
+/* A step tab's progress bar while the steps advance on their own. */
+.step-progress {
+  animation: step-progress linear both;
+}
+@keyframes step-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* A detail appears under the row it explains. */
 .detail-in {
   animation: detail-in var(--t-state) var(--ease-out) both;
@@ -201,5 +214,8 @@ select {
   }
   .detail-in {
     animation: fade-in var(--t-state) linear both;
+  }
+  .step-progress {
+    display: none; /* the steps don't advance on their own under reduced motion */
   }
 }
