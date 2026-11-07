@@ -292,7 +292,7 @@ function Double() {
                 <p className="mt-1 text-paid">Captured.</p>
               </>
             ) : (
-              <p className="mt-1 text-ink-2">The claim for this capture is already taken, so nothing is sent. A retry after a timeout reuses ms_&#123;milestone&#125;_capture_1, and PayPal returns the first result instead of charging again.</p>
+              <p className="mt-1 text-ink-2">The claim for this capture is already taken, so nothing is sent to PayPal. If a call times out, code doesn&apos;t resend it: it reads the authorization back from PayPal, and only tries again, as attempt 2, once PayPal shows the first capture never happened.</p>
             )}
           </li>
         ))}

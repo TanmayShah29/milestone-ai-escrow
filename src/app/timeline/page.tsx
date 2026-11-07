@@ -69,8 +69,13 @@ export default function TimelinePage() {
     });
   }, []);
 
+  // The Gantt is a 1.8 MB chunk: desktops load it at once, phones get a light preview and load it on request.
+  const [gantt, setGantt] = useState(false);
   useEffect(() => {
-    preloadTimeline(); // fetch the Gantt chunk while the data loads, not after
+    if (window.matchMedia("(min-width: 1024px)").matches) {
+      setGantt(true);
+      preloadTimeline(); // fetch the Gantt chunk while the data loads, not after
+    }
     load();
   }, [load]);
 
@@ -127,6 +132,8 @@ export default function TimelinePage() {
       <div className="min-h-0 flex-1">
         {!data ? (
           <TimelineSkeleton />
+        ) : !gantt && (showing || data.tasks.length > 0) ? (
+          <TimelinePreview tasks={(showing ? showcaseChart!.tasks : data.tasks) as Task[]} onOpen={() => setGantt(true)} />
         ) : showing ? (
           <GanttView key="showcase" data={showcaseChart!} readOnly fit />
         ) : data.tasks.length > 0 ? (
@@ -138,6 +145,49 @@ export default function TimelinePage() {
         )}
       </div>
     </main>
+  );
+}
+
+type Bar = Task & { name?: string; endDate?: string; status?: string };
+const BAR: Record<string, string> = { done: "bg-paid", active: "bg-ink", failed: "bg-failed", cancelled: "bg-blocked", todo: "bg-blocked", blocked: "bg-blocked", unfunded: "bg-blocked" };
+
+// Phones: the same data as plain bars in the money colours, with no Gantt chunk until asked for.
+function TimelinePreview({ tasks, onOpen }: { tasks: Task[]; onOpen: () => void }) {
+  return (
+    <div className="h-full overflow-auto px-4 py-4">
+      <ol className="space-y-6">
+        {(tasks as Bar[]).map((m) => {
+          const kids = (m.children ?? []) as Bar[];
+          const t0 = Math.min(...kids.map((k) => +new Date(k.startDate)));
+          const t1 = Math.max(...kids.map((k) => +new Date(k.endDate ?? k.startDate)));
+          const span = Math.max(t1 - t0, 1);
+          return (
+            <li key={m.id}>
+              <p className="text-sm font-semibold text-ink">{m.name}</p>
+              <ol className="mt-2 space-y-1.5">
+                {kids.map((k) => {
+                  const a = +new Date(k.startDate);
+                  const b = +new Date(k.endDate ?? k.startDate);
+                  return (
+                    <li key={k.id} className="grid grid-cols-[7.5rem_1fr] items-center gap-2 text-xs">
+                      <span className="truncate text-ink-2" title={k.name}>
+                        {k.name}
+                      </span>
+                      <span className="relative h-3 rounded-sm bg-paper">
+                        <span className={`absolute inset-y-0 rounded-sm ${k.phase === "hold" && k.status === "active" ? "bg-held" : (BAR[k.status ?? "todo"] ?? "bg-blocked")}`} style={{ left: `${((a - t0) / span) * 100}%`, width: `max(4px, ${((b - a) / span) * 100}%)` }} />
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </li>
+          );
+        })}
+      </ol>
+      <button type="button" onClick={onOpen} className="mt-6 min-h-11 w-full rounded-md border border-rule-strong bg-panel px-4 text-sm font-medium text-ink">
+        Open the interactive Gantt (Bryntum, about 1.8 MB)
+      </button>
+    </div>
   );
 }
 

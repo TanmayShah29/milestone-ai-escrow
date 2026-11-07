@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
 import { toHttp } from "@/lib/http";
 import { authorizeHold, InProgress } from "@/lib/money/flow";
 import { feeApproved } from "@/lib/resolution/desk";
@@ -15,6 +16,12 @@ export async function GET(req: Request) {
   // ?fee=client|worker: an arbitration fee hold (resolution/desk.ts), not the milestone's own hold.
   const fee = url.searchParams.get("fee");
   const back = new URL(`/milestones/${encodeURIComponent(milestoneId)}${fee ? "/court" : ""}`, base);
+  // Anyone can call this, so turn away a missing order id or an unknown milestone before taking its lock.
+  const known = token && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(milestoneId) && (await db().query("select 1 from milestones where id = $1", [milestoneId])).rowCount;
+  if (!known) {
+    back.searchParams.set("error", "This PayPal return link doesn't match a milestone.");
+    return NextResponse.redirect(back);
+  }
   try {
     if (fee === "client" || fee === "worker") await feeApproved(milestoneId, fee, token);
     else await authorizeHold(milestoneId, token);

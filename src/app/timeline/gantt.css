@@ -72,6 +72,47 @@ html:root[data-theme="dark"]:not(.b-nothing) {
   --b-time-range-color: var(--panel);
 }
 
+/* Bars in the money colours (DESIGN.md), not Bryntum's stock palette: paid green when done, ink while
+   active, slate while waiting behind a gate, held amber for the hold, failed red when sent back. */
+.b-gantt-task.ms-phase,
+.b-gantt-task.ms-milestone {
+  --b-primary: var(--ink);
+  background-color: var(--ink) !important;
+  color: var(--panel) !important;
+  border-color: transparent !important;
+}
+.b-gantt-task.ms-done {
+  --b-primary: var(--paid);
+  background-color: var(--paid) !important;
+}
+.b-gantt-task.ms-todo,
+.b-gantt-task.ms-blocked,
+.b-gantt-task.ms-unfunded {
+  --b-primary: var(--blocked);
+  background-color: var(--blocked) !important;
+}
+.b-gantt-task.ms-failed {
+  --b-primary: var(--failed);
+  background-color: var(--failed) !important;
+}
+.b-gantt-task.ms-expiring,
+.b-gantt-task.ms-warn,
+.b-gantt-task.ms-dispute {
+  --b-primary: var(--held);
+  background-color: var(--held) !important;
+}
+/* A live PayPal hold is held amber, like the money panel and the cheque. */
+.b-gantt-task.ms-key-hold.ms-active {
+  --b-primary: var(--held);
+  background-color: var(--held) !important;
+}
+.b-gantt-task .b-gantt-task-percent {
+  background-color: rgb(255 255 255 / 0.18) !important;
+}
+.b-gantt {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
 /* Phase states. */
 .b-gantt-task.ms-blocked,
 .b-gantt-task.ms-unfunded {

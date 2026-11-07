@@ -6,6 +6,7 @@ export const loadGanttView = () => import("./GanttView");
 let started: Promise<unknown> | undefined;
 export function preloadTimeline(): void {
   if (typeof window === "undefined" || started) return;
+  if (!window.matchMedia("(min-width: 1024px)").matches) return; // phones open a light preview first
   started = loadGanttView().catch(() => {
     started = undefined; // let a later call retry
   });

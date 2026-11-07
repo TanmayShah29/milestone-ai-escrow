@@ -373,7 +373,7 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
     endDate: iso(p.end),
     manuallyScheduled: !p.auto,
     percentDone: p.status === "done" ? 100 : p.status === "active" ? 50 : 0,
-    cls: `ms-phase ms-${p.status}`,
+    cls: `ms-phase ms-${p.status} ms-key-${p.key}`,
     iconCls: p.status === "blocked" || p.status === "unfunded" ? "fa fa-lock" : p.status === "cancelled" ? "fa fa-ban" : p.icon,
     eventColor: COLOR[p.status],
     status: p.status,

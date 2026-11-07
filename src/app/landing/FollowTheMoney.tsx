@@ -66,9 +66,9 @@ const STEPS: Step[] = [
   {
     name: "Release",
     title: "Release by rule, not by a person",
-    text: "After a short objection window, code captures the hold and PayPal pays the worker, minus fees. If a must-have had failed, the money would still be on hold.",
+    text: "After a short objection window, code captures the hold and PayPal pays the worker, minus fees. This run took only the 5% platform fee; Milestone now also passes on PayPal's checkout and payout fees, so $25 pays about $21.94. If a must-have had failed, the money would still be on hold.",
     at: 2,
-    runs: ["POST /v2/payments/authorizations/{id}/capture", "POST /v1/payments/payouts", "$25.00 captured → $23.75 to the worker"],
+    runs: ["POST /v2/payments/authorizations/{id}/capture", "POST /v1/payments/payouts", "$25.00 captured → $23.75 to the worker (5% fee)"],
     guard: { label: "src/lib/money/flow.ts", href: `${REPO}src/lib/money/flow.ts` },
     ai: null,
     rules: "Captures, then pays out",
