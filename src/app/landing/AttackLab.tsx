@@ -56,7 +56,7 @@ function Inject() {
   const hits = useMemo(() => scanForInjection(text), [text]);
   const invisible = (text.match(/[​-‏⁠-⁤]/g) ?? []).length;
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 [&>*]:min-w-0">
       <div>
         <label htmlFor="inject-text" className="text-sm font-medium text-ink">
           The pull request&apos;s code. Edit it and try to get past the scan.
@@ -139,10 +139,10 @@ function Fake() {
   const draftPassed = DRAFT.every(([n, w]) => fakeToRoman(n) === w);
   const hardFailed = HARDENED.filter(([n, w]) => fakeToRoman(n) !== w).length;
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 [&>*]:min-w-0">
       <div>
         <p className="text-sm font-medium text-ink">The cheating worker&apos;s code, written by a second AI</p>
-        <pre className="mt-2 overflow-x-auto rounded-md border border-rule-strong bg-paper p-3 font-mono text-xs leading-relaxed text-ink">{`export function toRoman(n: number): string {
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all sm:whitespace-pre sm:break-normal rounded-md border border-rule-strong bg-paper p-3 font-mono text-xs leading-relaxed text-ink">{`export function toRoman(n: number): string {
   if (n === 1) return 'I';
   if (n === 4) return 'IV';
   return '';
@@ -215,15 +215,15 @@ function Swap() {
     [1, 2, 3].forEach((p) => window.setTimeout(() => setPhase(p), reduce ? 0 : p * 420));
   };
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 [&>*]:min-w-0">
       <div className="space-y-3">
         <div>
           <p className="text-sm font-medium text-ink">Signed test C2 (both sides signed this)</p>
-          <pre className="mt-1.5 overflow-x-auto rounded-md border border-rule-strong bg-paper p-3 font-mono text-[11px] leading-relaxed text-ink">{SIGNED}</pre>
+          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap break-all sm:whitespace-pre sm:break-normal rounded-md border border-rule-strong bg-paper p-3 font-mono text-[11px] leading-relaxed text-ink">{SIGNED}</pre>
         </div>
         <div>
           <p className="text-sm font-medium text-ink">Your pull request&apos;s version of the same file</p>
-          <pre className="mt-1.5 overflow-x-auto rounded-md border border-failed/50 bg-failed-field p-3 font-mono text-[11px] leading-relaxed text-ink">{SWAPPED}</pre>
+          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap break-all sm:whitespace-pre sm:break-normal rounded-md border border-failed/50 bg-failed-field p-3 font-mono text-[11px] leading-relaxed text-ink">{SWAPPED}</pre>
         </div>
         <button type="button" onClick={run} className="inline-flex min-h-11 items-center gap-2 rounded-md bg-accent px-4 font-medium text-accent-ink transition-opacity duration-[var(--t-tap)] hover:opacity-90">
           <Play className="size-4" aria-hidden="true" /> Open the pull request
@@ -262,7 +262,7 @@ function Swap() {
 function Double() {
   const [clicks, setClicks] = useState<number[]>([]);
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 [&>*]:min-w-0">
       <div>
         <p className="text-sm text-ink-2">The capture button fires twice, from a double click, a retry or two servers at once. Press it as often as you like.</p>
         <div className="mt-3 flex gap-2">

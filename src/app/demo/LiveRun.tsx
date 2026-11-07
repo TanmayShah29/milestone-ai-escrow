@@ -158,14 +158,35 @@ export function LiveRun() {
       <h2 id="live-heading" className="sr-only">Run it live</h2>
       <MoneyRail p={progress} idleCents={1200} />
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <button onClick={() => start("honest")} disabled={!!busy} className="rounded-md bg-accent px-4 py-3 text-left text-accent-ink transition-opacity duration-[var(--t-tap)] hover:opacity-90 disabled:opacity-60">
-          <span className="block font-semibold">Honest worker</span>
-          <span className="block text-sm opacity-90">The work is right, so PayPal pays.</span>
-        </button>
-        <button onClick={() => start("cheat")} disabled={!!busy} className="rounded-md border border-rule-strong bg-panel px-4 py-3 text-left text-ink hover:border-ink disabled:opacity-60">
-          <span className="block font-semibold">Cheating worker</span>
-          <span className="block text-sm text-ink-2">Fake code that tells the AI reviewer to pass it.</span>
-        </button>
+        {/* Both look the same until one is picked; then only the chosen worker is marked. */}
+        {(
+          [
+            { kind: "honest", title: "Honest worker", text: "The work is right, so PayPal pays." },
+            { kind: "cheat", title: "Cheating worker", text: "Fake code that tells the AI reviewer to pass it." },
+          ] as const
+        ).map((c) => {
+          const chosen = (busy ?? progress?.kind) === c.kind;
+          const other = !chosen && !!(busy ?? progress?.kind);
+          return (
+            <button
+              key={c.kind}
+              type="button"
+              onClick={() => start(c.kind)}
+              disabled={!!busy}
+              aria-pressed={chosen}
+              className={`relative rounded-md border px-4 py-3 text-left transition-colors duration-[var(--t-tap)] ${
+                chosen ? "border-ink bg-ink text-panel" : other ? "border-rule bg-panel text-ink-3" : "border-rule-strong bg-panel text-ink hover:border-ink"
+              } disabled:cursor-not-allowed`}
+            >
+              <span className="flex items-center gap-2 font-semibold">
+                {chosen && <Check className="size-4" aria-hidden="true" />}
+                {c.title}
+                {chosen && <span className="ml-auto text-xs font-medium opacity-80">{busy ? "Running" : "Your pick"}</span>}
+              </span>
+              <span className={`block text-sm ${chosen ? "opacity-85" : other ? "" : "text-ink-2"}`}>{c.text}</span>
+            </button>
+          );
+        })}
       </div>
       {busy && !progress && (
         <p role="status" className="mt-4 flex items-center gap-2 text-sm text-ink-3">
