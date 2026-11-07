@@ -28,7 +28,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         </a>
         <header className="sticky top-0 z-50 border-b border-rule bg-paper/80 text-ink backdrop-blur-md supports-[backdrop-filter]:bg-paper/70">
           <nav className="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4 text-sm sm:gap-6" aria-label="Main">
-            <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight text-ink no-underline">
+            <Link href="/" className="flex min-h-11 items-center gap-2 font-semibold tracking-tight text-ink no-underline">
               <svg viewBox="0 0 20 20" className="size-5" aria-hidden="true">
                 <circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
                 <path d="M5.5 10.5l3 3 6-7" fill="none" stroke="var(--paid)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -51,7 +51,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             <Link href="/bench" className="hidden min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink sm:inline-flex">
               Proof Bench
             </Link>
-            <Link href="/new" className="ml-auto whitespace-nowrap rounded-md bg-accent px-3.5 py-1.5 font-medium text-accent-ink no-underline shadow-sm transition-opacity hover:opacity-90">
+            <Link href="/new" className="ml-auto inline-flex min-h-11 items-center whitespace-nowrap rounded-md bg-accent px-3.5 font-medium text-accent-ink no-underline shadow-sm transition-opacity hover:opacity-90">
               New<span className="hidden sm:inline"> milestone</span>
             </Link>
           </nav>

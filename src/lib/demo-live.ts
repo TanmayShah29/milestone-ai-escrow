@@ -238,6 +238,7 @@ export type LiveProgress = {
   error: string | null;
   milestoneId: string;
   amountCents: number;
+  payoutCents: number | null; // what reached the worker, once paid
   moneyAt: MoneyAt;
   steps: LiveStep[];
 };
@@ -370,5 +371,5 @@ export async function liveProgress(id: string, github?: GitHub): Promise<LivePro
   const sha = review && !review.decision && /^[0-9a-f]{7,64}$/i.test(review.head_sha) ? review.head_sha : undefined;
   const ci = github && sha && run.status === "running" ? await ciLive(github, sha, m.criteria_hash) : {};
   const moneyAt: MoneyAt = m.state === "PAID_OUT" ? "worker" : m.paypal_authorization_id && m.state !== "CANCELLED" ? "hold" : "client";
-  return { id: run.id, kind: run.kind, status: run.status, outcome: run.outcome, error: run.error, milestoneId: m.id, amountCents: m.amount_cents, moneyAt, steps: buildSteps(run, m, review, ci) };
+  return { id: run.id, kind: run.kind, status: run.status, outcome: run.outcome, error: run.error, milestoneId: m.id, amountCents: m.amount_cents, payoutCents: m.payout_cents ?? null, moneyAt, steps: buildSteps(run, m, review, ci) };
 }

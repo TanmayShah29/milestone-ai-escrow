@@ -32,28 +32,62 @@ const STATIONS: { at: MoneyAt; label: string; note: string }[] = [
   { at: "worker", label: "Worker's PayPal", note: "Paid out" },
 ];
 
-/** Where the money is right now. It only moves right when code captures, and only after the tests pass. */
-function MoneyRail({ p }: { p: LiveProgress }) {
-  const i = STATIONS.findIndex((s) => s.at === p.moneyAt);
-  const stuck = p.status === "done" && p.outcome !== "paid"; // caught: it stays on hold, the worker gets nothing
-  const amount = `$${(p.amountCents / 100).toFixed(2)}`;
+// Which real id stamps onto which station, as each one arrives from PayPal or GitHub.
+const STAMPS: { key: string; at: MoneyAt; label: string }[] = [
+  { key: "terms", at: "client", label: "Terms fingerprint" },
+  { key: "hold", at: "hold", label: "PayPal authorization" },
+  { key: "capture", at: "worker", label: "PayPal capture" },
+  { key: "payout", at: "worker", label: "PayPal payout item" },
+];
+
+/** Where the money is right now, with the real ids stamped where they happened. It only moves right when
+ * code captures, and only after the tests pass. Before a run, it waits on the client's card. */
+function MoneyRail({ p, idleCents }: { p?: LiveProgress; idleCents: number }) {
+  const at = p?.moneyAt ?? "client";
+  const i = STATIONS.findIndex((s) => s.at === at);
+  const stuck = !!p && p.status === "done" && p.outcome !== "paid"; // caught: it stays on hold, the worker gets nothing
+  const cents = at === "worker" && p?.payoutCents != null ? p.payoutCents : (p?.amountCents ?? idleCents); // the worker gets the payout, not the hold
+  const amount = `$${(cents / 100).toFixed(2)}`;
+  const ids = (st: MoneyAt) =>
+    STAMPS.filter((x) => x.at === st).flatMap((x) => {
+      const step = p?.steps.find((s) => s.key === x.key);
+      return step?.id ? [{ ...x, id: step.id }] : [];
+    });
   return (
-    <div className="mb-6" aria-label={`The ${amount} is now at: ${STATIONS[i]!.label}`} role="img">
-      <div className="relative mx-[16.66%] h-8">
-        <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-rule-strong" />
-        <div className="absolute top-1/2 h-px -translate-y-1/2 bg-paid transition-all duration-1000 ease-out" style={{ left: 0, width: `${i * 50}%` }} />
-        <span
-          className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border px-2.5 py-1 font-mono text-xs font-semibold shadow-sm transition-all duration-1000 ease-out ${p.moneyAt === "worker" ? "border-paid bg-paid text-paper" : stuck ? "border-held bg-held-field text-held" : "border-ink bg-panel text-ink"}`}
-          style={{ left: `${i * 50}%` }}
-        >
-          {amount}
-        </span>
+    <div className={`rounded-xl border border-rule-strong bg-panel p-4 shadow-[var(--shadow-card)] sm:p-6 ${p ? "sticky top-16 z-10" : ""}`} aria-label={`The ${amount} is now at: ${STATIONS[i]!.label}`} role="img">
+      <div className="overflow-hidden px-1 pt-3">
+        <div className="relative mx-[16.66%] h-10">
+          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-rule-strong" />
+          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 origin-left bg-paid transition-transform duration-[var(--t-travel)] ease-[var(--ease-out)]" style={{ transform: `scaleX(${i / 2})` }} />
+          {[0, 1, 2].map((k) => (
+            <span key={k} className={`absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-colors duration-[var(--t-state)] ${k <= i ? "border-paid bg-paid" : "border-rule-strong bg-panel"}`} style={{ left: `${k * 50}%` }} />
+          ))}
+          <div className="absolute inset-0 transition-transform duration-[var(--t-travel)] ease-[var(--ease-out)]" style={{ transform: `translateX(${i * 50}%)` }}>
+            <span
+              className={`money absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border px-3.5 py-1.5 font-mono text-base font-semibold shadow-sm transition-colors duration-[var(--t-state)] ${
+                at === "worker" ? "border-paid bg-paid text-panel" : stuck || at === "hold" ? "border-held bg-held-field text-held" : "border-ink bg-panel text-ink"
+              }`}
+            >
+              {amount}
+            </span>
+          </div>
+        </div>
       </div>
-      <ol className="mt-2 grid grid-cols-3 text-center text-xs sm:text-sm">
+      <ol className="mt-4 grid grid-cols-3 gap-2 text-center text-xs sm:gap-4 sm:text-sm">
         {STATIONS.map((s, k) => (
-          <li key={s.at} className={k === i ? "font-semibold text-ink" : "text-ink-3"}>
-            {s.label}
-            <span className="block font-normal text-ink-3">{k === i ? (stuck ? "Held: worker not paid" : s.note) : "\u00a0"}</span>
+          <li key={s.at} className="min-w-0">
+            <p className={k === i ? "font-semibold text-ink" : "text-ink-3"}>{s.label}</p>
+            <p className={`text-xs ${k === i ? (stuck && k === 1 ? "text-held" : "text-ink-2") : "text-ink-3"}`}>
+              {k === i ? (stuck ? "Held: worker not paid" : p ? s.note : "Pick a worker to start") : " "}
+            </p>
+            <div className="mt-2 flex flex-col items-center gap-1.5">
+              {ids(s.at).map((x) => (
+                <p key={x.key} className="detail-in max-w-full rounded-md border border-ink/40 bg-paper px-2 py-1 -rotate-2">
+                  <span className="block text-[10px] text-ink-3">{x.label}</span>
+                  <span className="block break-all font-mono text-[11px] text-ink">{x.id}</span>
+                </p>
+              ))}
+            </div>
           </li>
         ))}
       </ol>
@@ -121,10 +155,10 @@ export function LiveRun() {
 
   return (
     <section aria-labelledby="live-heading">
-      <h2 id="live-heading" className="text-xl font-semibold tracking-tight">Run it live</h2>
-      <p className="mt-2 text-ink-2">Pick a worker. One click places a real PayPal sandbox hold, opens a real GitHub pull request and runs real CI. An AI reviewer reads the diff too, but only code can move the money. It takes about 2 minutes, with no login.</p>
+      <h2 id="live-heading" className="sr-only">Run it live</h2>
+      <MoneyRail p={progress} idleCents={1200} />
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <button onClick={() => start("honest")} disabled={!!busy} className="rounded-md bg-accent px-4 py-3 text-left text-accent-ink hover:opacity-90 disabled:opacity-60">
+        <button onClick={() => start("honest")} disabled={!!busy} className="rounded-md bg-accent px-4 py-3 text-left text-accent-ink transition-opacity duration-[var(--t-tap)] hover:opacity-90 disabled:opacity-60">
           <span className="block font-semibold">Honest worker</span>
           <span className="block text-sm opacity-90">The work is right, so PayPal pays.</span>
         </button>
@@ -140,9 +174,8 @@ export function LiveRun() {
       )}
       {error && <p role="alert" className="mt-4 rounded-md border border-failed/40 bg-failed-field p-3 text-sm text-ink">{error}</p>}
       {progress && (
-        <div className="mt-6 rounded-md border border-rule bg-panel p-4 sm:p-5">
-          <MoneyRail p={progress} />
-          <ol className="space-y-4">
+        <div className="mt-6 rounded-xl border border-rule bg-panel p-4 sm:p-6">
+          <ol className="grid gap-x-8 gap-y-4 lg:grid-cols-2">
             {progress.steps.map((s) => (
               <li key={s.key} className="flex gap-3">
                 <StepIcon state={s.state} />
@@ -165,7 +198,8 @@ export function LiveRun() {
           <Banner p={progress} />
           {dealId && progress.status !== "running" && (
             <p className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-              <a href={`/milestones/${dealId}`} className="font-medium underline underline-offset-2">Open this deal</a>
+              <a href={`/proof/${dealId}`} className="font-medium underline underline-offset-2">Verify the receipt yourself</a>
+              <a href={`/milestones/${dealId}`} className="underline underline-offset-2">Open this deal</a>
               <a href="/ledger" className="underline underline-offset-2">See every PayPal call in the ledger</a>
             </p>
           )}

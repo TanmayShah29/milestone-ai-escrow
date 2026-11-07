@@ -5,7 +5,6 @@ import { useState } from "react";
 import { writeDemo } from "@/lib/client/demo";
 import { rememberLink } from "@/lib/client/links";
 import { preloadTimeline } from "@/app/timeline/preload";
-import { AttackExample } from "./AttackExample";
 import { LiveRun } from "./LiveRun";
 
 type Seeded = { id: string; title: string; client: string; worker: string; story: "paid" | "caught" | "fund" };
@@ -31,17 +30,18 @@ export default function DemoPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-14 sm:py-20">
-      <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Try Milestone</h1>
-      <p className="mt-4 text-lg text-ink-2">Hire a worker through PayPal, and pay only when tests prove the work is done. Everything here uses PayPal&apos;s sandbox, so no real money moves.</p>
+    <main className="mx-auto max-w-5xl px-4 py-12 sm:py-16">
+      <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">Watch real money move.</h1>
+      <p className="mt-4 max-w-2xl text-lg text-ink-2">
+        Pick a worker. One click places a real PayPal sandbox hold, opens a real GitHub pull request and runs real CI. Each PayPal id stamps onto the rail as PayPal returns it. About 2 minutes, no login, sandbox money only.
+      </p>
       <div className="mt-8">
         <LiveRun />
       </div>
-      <AttackExample />
       <p className="mt-8 text-ink-2">
         How does this compare with asking an AI whether the work is done? <a href="/bench" className="font-medium text-ink underline underline-offset-2">Proof Bench</a> runs both on the same twelve pull requests.
       </p>
-      <h2 className="mt-12 border-t border-rule pt-8 text-xl font-semibold tracking-tight">Or explore a finished project</h2>
+      <h2 className="mt-14 border-t border-rule pt-10 text-2xl font-semibold tracking-tight">Or explore a finished project</h2>
       <p className="mt-2 text-ink-2">We&apos;ll set up a small project with three milestones, each showing one part of the idea. You&apos;ll be both the client and the worker; switch sides at the top of each milestone.</p>
       <ul className="mt-6 space-y-3 text-ink">
         <li><span className="font-semibold">Place a real sandbox hold.</span> Fund a milestone with PayPal&apos;s sandbox test card and watch the hold appear. No login; sandbox test money only.</li>
@@ -62,7 +62,7 @@ export default function DemoPage() {
           {error}
         </p>
       )}
-      <p className="mt-10 text-sm text-ink-3">Everything runs on PayPal&apos;s sandbox. The guided tour below is a replay: its pull requests and CI logs are real and public on GitHub, and its PayPal ids are marked as placeholders. For real PayPal ids end to end, use Run it live above, or open the <a href="/ledger" className="underline">ledger</a> to see recent live runs. The hold you place in the tour is a real sandbox hold.</p>
+      <p className="mt-10 text-sm text-ink-3">Everything runs on PayPal&apos;s sandbox. In the finished project, two of the three milestones are replays: their pull requests and CI logs are real and public on GitHub, and their PayPal ids start with DEMO- so you can tell them apart. For real PayPal ids end to end, use Run it live above, or open the <a href="/ledger" className="underline">ledger</a> to see recent live runs. The hold you place in the tour is a real sandbox hold.</p>
     </main>
   );
 }

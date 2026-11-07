@@ -169,7 +169,8 @@ export default function GanttView(props: { data: Data; onReschedule?: (milestone
     () => ({
       project,
       // Open at the start of the work (a day before), not the empty days the time axis pads in before it.
-      visibleDate: { date: new Date(Math.min(...data.tasks.map((t) => Date.parse((t as { startDate: string }).startDate))) - 86_400_000), block: "start" },
+      // Not when zooming to fit: Bryntum applies visibleDate after the zoom and scrolled the fitted view away.
+      ...(fit ? {} : { visibleDate: { date: new Date(Math.min(...data.tasks.map((t) => Date.parse((t as { startDate: string }).startDate))) - 86_400_000), block: "start" } }),
       ariaLabel: readOnly ? "Live judge runs: each run's phases and PayPal hold over time (read only)" : "Milestone timeline: each milestone's phases and PayPal hold over time",
       readOnly,
       // Project start/end lines mean little across unrelated judge runs.
@@ -299,7 +300,7 @@ export default function GanttView(props: { data: Data; onReschedule?: (milestone
         if (changed && taskRecord.endDate) onReschedule?.(String(taskRecord.get("milestoneId")), taskRecord.endDate as Date);
       },
     }),
-    [project, data, onReschedule, onRefuse, readOnly],
+    [project, data, onReschedule, onRefuse, readOnly, fit],
   );
 
   // Zoom to the data once the engine has placed it (the showcase: runs that took minutes). The chart stays

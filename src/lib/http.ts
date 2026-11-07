@@ -14,8 +14,14 @@ export function toHttp(err: unknown): NextResponse {
   if (err instanceof Forbidden) return json(403, { error: err.message });
   if (err instanceof AiBusy) return json(503, { error: err.message, aiBusy: true });
   // A milestone lock that stayed busy (55P03), or no free database connection within the connect timeout.
-  if ((err as { code?: string })?.code === "55P03" || /timeout exceeded when trying to connect/i.test(String((err as Error)?.message ?? "")))
-    return json(503, { error: "This milestone is busy with another step. Try again in a moment." });
+  if ((err as { code?: string })?.code === "55P03") {
+    console.warn(`milestone lock busy: ${String((err as Error).message).slice(0, 200)}`);
+    return NextResponse.json({ error: "This milestone is busy with another step. Try again in a moment." }, { status: 503, headers: { "Retry-After": "5" } });
+  }
+  if (/timeout exceeded when trying to connect/i.test(String((err as Error)?.message ?? ""))) {
+    console.error("database pool exhausted: no free connection within the connect timeout");
+    return NextResponse.json({ error: "The server is busy right now. Try again in a moment." }, { status: 503, headers: { "Retry-After": "10" } });
+  }
   if (err instanceof AiUnreadable) return json(502, { error: "The AI didn't return usable terms. Try again, or write them by hand." });
   if (err instanceof InvalidTransition || err instanceof StaleState || err instanceof InProgress) return json(409, { error: err.message });
   if (err instanceof InvariantViolation) return json(409, { error: err.message });
