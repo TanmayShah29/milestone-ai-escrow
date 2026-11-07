@@ -35,20 +35,20 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               </svg>
               Milestone
             </Link>
-            <Link href="/milestones" className="text-ink-2 no-underline transition-colors hover:text-ink">
+            <Link href="/milestones" className="inline-flex min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink">
               <span className="sm:hidden">Deals</span>
               <span className="hidden sm:inline">Your milestones</span>
             </Link>
-            <Link href="/timeline" className="hidden text-ink-2 no-underline transition-colors hover:text-ink sm:inline">
+            <Link href="/timeline" className="hidden min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink sm:inline-flex">
               Timeline
             </Link>
-            <Link href="/ledger" className="hidden text-ink-2 no-underline transition-colors hover:text-ink sm:inline">
+            <Link href="/ledger" className="hidden min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink sm:inline-flex">
               Ledger
             </Link>
-            <Link href="/bounties" className="text-ink-2 no-underline transition-colors hover:text-ink">
+            <Link href="/bounties" className="inline-flex min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink">
               Bounties
             </Link>
-            <Link href="/bench" className="hidden text-ink-2 no-underline transition-colors hover:text-ink sm:inline">
+            <Link href="/bench" className="hidden min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink sm:inline-flex">
               Proof Bench
             </Link>
             <Link href="/new" className="ml-auto whitespace-nowrap rounded-md bg-accent px-3.5 py-1.5 font-medium text-accent-ink no-underline shadow-sm transition-opacity hover:opacity-90">

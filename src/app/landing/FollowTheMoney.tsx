@@ -81,12 +81,41 @@ const STATIONS = [
   { label: "Worker's PayPal", note: ["Nothing yet", "Nothing yet", "Nothing yet", "Nothing yet", "$23.75 paid"] },
 ];
 
+/** The AI on one side of a "no path to money" line, the fixed rules on the money's side. */
+function Fence({ s, k: i }: { s: Step; k: number }) {
+  return (
+      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 text-xs sm:gap-3">
+        <div className={`rounded-md border p-2.5 transition-colors duration-[var(--t-state)] sm:p-3 ${s.ai ? "border-ink bg-panel" : "border-rule bg-paper"}`}>
+          <p className={`font-semibold ${s.ai ? "text-ink" : "text-ink-3"}`}>AI</p>
+          <p key={`ai-${i}`} className={`detail-in mt-1 ${s.ai ? "text-ink-2" : "text-ink-3"}`}>
+            {s.ai ?? "Not involved in this step"}
+          </p>
+        </div>
+        <div className="flex flex-col items-center justify-center gap-1 px-0.5">
+          <span className="w-px flex-1 border-l border-dashed border-failed" aria-hidden="true" />
+          <span className="text-center text-[10px] font-medium uppercase leading-tight tracking-wide text-failed">
+            No path
+            <br />
+            to money
+          </span>
+          <span className="w-px flex-1 border-l border-dashed border-failed" aria-hidden="true" />
+        </div>
+        <div className="rounded-md border border-paid/50 bg-paid-field p-2.5 sm:p-3">
+          <p className="font-semibold text-paid">Fixed rules (code)</p>
+          <p key={`r-${i}`} className="detail-in mt-1 text-ink">
+            {s.rules}
+          </p>
+        </div>
+      </div>
+  );
+}
+
 function Stage({ i }: { i: number }) {
   const s = STEPS[i]!;
   return (
-    <div className="flex w-full flex-col gap-4 rounded-xl border border-rule-strong bg-panel p-4 shadow-[var(--shadow-card)] sm:p-6">
+    <div className="flex w-full flex-col gap-3 rounded-xl border border-rule-strong bg-panel p-3 shadow-[var(--shadow-card)] sm:gap-4 sm:p-6">
       {/* Step dots */}
-      <ol className="flex items-center gap-2" aria-hidden="true">
+      <ol className="hidden items-center gap-2 sm:flex" aria-hidden="true">
         {STEPS.map((x, k) => (
           <li key={x.name} className="flex flex-1 items-center gap-2 last:flex-none">
             <span className={`text-xs font-medium transition-colors duration-[var(--t-state)] ${k === i ? "text-ink" : k < i ? "text-paid" : "text-ink-3"}`}>{x.name}</span>
@@ -100,7 +129,7 @@ function Stage({ i }: { i: number }) {
       </ol>
 
       {/* The money rail */}
-      <div className="overflow-hidden rounded-lg bg-paper px-3 pb-3 pt-5 sm:px-5">
+      <div className="overflow-hidden rounded-lg bg-paper px-3 pb-2.5 pt-4 sm:px-5 sm:pb-3 sm:pt-5">
         <div className="relative mx-[16.66%] h-9">
           <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-rule-strong" />
           <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 origin-left bg-paid transition-transform duration-[var(--t-travel)] ease-[var(--ease-out)]" style={{ transform: `scaleX(${s.at / 2})` }} />
@@ -129,29 +158,9 @@ function Stage({ i }: { i: number }) {
         </ol>
       </div>
 
-      {/* Who acts: the AI on one side of the fence, the rules on the money's side */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 text-xs sm:gap-3">
-        <div className={`rounded-md border p-2.5 transition-colors duration-[var(--t-state)] sm:p-3 ${s.ai ? "border-ink bg-panel" : "border-rule bg-paper"}`}>
-          <p className={`font-semibold ${s.ai ? "text-ink" : "text-ink-3"}`}>AI</p>
-          <p key={`ai-${i}`} className={`detail-in mt-1 ${s.ai ? "text-ink-2" : "text-ink-3"}`}>
-            {s.ai ?? "Not involved in this step"}
-          </p>
-        </div>
-        <div className="flex flex-col items-center justify-center gap-1 px-0.5">
-          <span className="w-px flex-1 border-l border-dashed border-failed" aria-hidden="true" />
-          <span className="text-center text-[10px] font-medium uppercase leading-tight tracking-wide text-failed">
-            No path
-            <br />
-            to money
-          </span>
-          <span className="w-px flex-1 border-l border-dashed border-failed" aria-hidden="true" />
-        </div>
-        <div className="rounded-md border border-paid/50 bg-paid-field p-2.5 sm:p-3">
-          <p className="font-semibold text-paid">Fixed rules (code)</p>
-          <p key={`r-${i}`} className="detail-in mt-1 text-ink">
-            {s.rules}
-          </p>
-        </div>
+      {/* Who acts: the AI on one side of the fence, the rules on the money's side (inline per step on phones) */}
+      <div className="hidden lg:block">
+        <Fence s={s} k={i} />
       </div>
 
       {/* What actually runs */}
@@ -190,7 +199,7 @@ export function FollowTheMoney() {
         for (const e of entries) if (e.isIntersecting) setI(Number((e.target as HTMLElement).dataset.step));
       },
       // On phones the pinned stage covers the top of the screen, so a step counts once its text is below it.
-      { rootMargin: window.matchMedia("(min-width: 1024px)").matches ? "-45% 0px -45% 0px" : "-62% 0px -33% 0px" },
+      { rootMargin: window.matchMedia("(min-width: 1024px)").matches ? "-45% 0px -45% 0px" : "-38% 0px -57% 0px" },
     );
     refs.current.forEach((el) => el && io.observe(el));
     return () => io.disconnect();
@@ -224,14 +233,17 @@ export function FollowTheMoney() {
                 refs.current[k] = el;
               }}
               data-step={k}
-              className="flex min-h-[85vh] flex-col justify-end py-8 lg:min-h-[80vh] lg:justify-center"
+              className="flex min-h-[60vh] flex-col justify-center py-10 lg:min-h-[80vh]"
             >
               <p className={`text-sm font-medium transition-colors duration-[var(--t-state)] ${k === i ? "text-ink" : "text-ink-3"}`}>
                 Step {k + 1} · {s.name}
               </p>
               <h3 className={`mt-2 text-2xl font-semibold tracking-tight transition-colors duration-[var(--t-state)] sm:text-3xl ${k === i ? "text-ink" : "text-ink-3"}`}>{s.title}</h3>
               <p className={`mt-3 max-w-md leading-relaxed transition-colors duration-[var(--t-state)] ${k === i ? "text-ink-2" : "text-ink-3"}`}>{s.text}</p>
-              <div className="mt-4 rounded-md border border-rule bg-panel p-3 lg:hidden">
+              <div className="mt-4 lg:hidden">
+                <Fence s={s} k={k} />
+              </div>
+              <div className="mt-3 rounded-md border border-rule bg-panel p-3 lg:hidden">
                 <p className="text-xs font-medium text-ink-2">What runs</p>
                 {s.runs.map((line) => (
                   <p key={line} className="mt-1 break-all font-mono text-[11px] leading-relaxed text-ink">

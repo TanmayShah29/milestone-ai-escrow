@@ -61,6 +61,26 @@ export default function ProofPage({ params }: { params: Promise<{ id: string }> 
     void run(null);
   }, [run]);
 
+  // Show the check happening: each event turns green (or red) in order, then the verdict lands.
+  const [revealed, setRevealed] = useState(0);
+  useEffect(() => {
+    if (!check) return setRevealed(0);
+    const n = check.events.length;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return setRevealed(n);
+    const step = Math.max(20, Math.min(70, 1400 / Math.max(n, 1)));
+    let k = 0;
+    setRevealed(0);
+    const t = window.setInterval(() => {
+      k += 1;
+      setRevealed(k);
+      if (k >= n) {
+        window.clearInterval(t);
+        document.querySelector("[data-broken='true']")?.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }, step);
+    return () => window.clearInterval(t);
+  }, [check]);
+
   useEffect(() => {
     if (!data) return;
     // A signature counts only if the chain itself recorded that key signing those terms.
@@ -91,6 +111,7 @@ export default function ProofPage({ params }: { params: Promise<{ id: string }> 
     );
   if (!data) return <main className="mx-auto max-w-4xl px-4 py-16 text-ink-2">Loading the proof chain…</main>;
 
+  const done = !!check && revealed >= check.events.length;
   const ok = check?.ok === true;
   const byKey = new Map(data.keys.map((k) => [k.id, k]));
   return (
@@ -109,10 +130,12 @@ export default function ProofPage({ params }: { params: Promise<{ id: string }> 
 
       <section
         aria-live="polite"
-        className={`mt-6 rounded-lg border p-4 sm:p-5 ${check === null ? "border-rule bg-panel" : ok ? "border-paid bg-paid-field" : "border-failed bg-failed-field"}`}
+        className={`mt-6 rounded-lg border p-4 transition-colors duration-[var(--t-state)] sm:p-5 ${!done ? "border-rule bg-panel" : ok ? "border-paid bg-paid-field" : "border-failed bg-failed-field"}`}
       >
-        {check === null ? (
-          <p className="text-ink-2">Checking…</p>
+        {!done || !check ? (
+          <p className="text-ink-2">
+            Checking event {Math.min(revealed + 1, check?.events.length ?? 1)} of {check?.events.length ?? data.events.length}: recomputing its hash, its link to the one before, and its signature…
+          </p>
         ) : (
           <div className="flex items-start gap-3">
             {ok ? <ShieldCheck aria-hidden className="mt-0.5 size-6 shrink-0 text-paid" /> : <ShieldX aria-hidden className="mt-0.5 size-6 shrink-0 text-failed" />}
@@ -197,13 +220,13 @@ export default function ProofPage({ params }: { params: Promise<{ id: string }> 
 
       <ol className="mt-8 border-t border-rule">
         {data.events.map((e, i) => {
-          const c = check?.events[i];
-          const b = c?.body;
+          const c = i < revealed ? check?.events[i] : undefined;
+          const b = check?.events[i]?.body;
           const key = byKey.get(e.keyId);
           return (
-            <li key={e.seq} className="grid grid-cols-[2rem_1fr] gap-3 border-b border-rule py-3 text-sm">
-              <span className="pt-0.5" aria-label={c ? (c.ok ? "verified" : "failed") : "not checked yet"}>
-                {c ? c.ok ? <Check aria-hidden className="size-5 text-paid" /> : <X aria-hidden className="size-5 text-failed" /> : <span className="text-ink-3">·</span>}
+            <li key={e.seq} data-broken={c && !c.ok ? "true" : undefined} className={`grid grid-cols-[2rem_1fr] gap-3 border-b border-rule py-3 text-sm transition-colors duration-[var(--t-state)] ${c && !c.ok ? "bg-failed-field" : ""}`}>
+              <span className="pt-0.5" role="img" aria-label={c ? (c.ok ? "verified" : "failed") : "not checked yet"}>
+                {c ? c.ok ? <Check aria-hidden className="detail-in size-5 text-paid" /> : <X aria-hidden className="detail-in size-5 text-failed" /> : <span className="text-ink-3">·</span>}
               </span>
               <div className="min-w-0">
                 <p className="flex flex-wrap items-baseline gap-x-3">
@@ -216,7 +239,7 @@ export default function ProofPage({ params }: { params: Promise<{ id: string }> 
                     </time>
                   )}
                   {b?.to && <span className="text-xs text-ink-2">→ {stateLabel(b.to)}</span>}
-                  {b?.backfilled && <span className="text-xs text-held">signed after the fact</span>}
+                  {b?.backfilled && <span className="text-xs text-ink-3" title="This step happened before the proof chain existed; it was signed when the chain was added, and is linked and checked like every other step.">signed after the fact</span>}
                 </p>
                 {b && (
                   <p className="mt-1 break-all font-mono text-xs text-ink-2">

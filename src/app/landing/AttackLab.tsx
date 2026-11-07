@@ -323,7 +323,7 @@ export function AttackLab() {
       </h2>
       <p className="mt-3 max-w-xl text-ink-2">You&apos;re the worker, and you want the $25 without doing the work. Pick an attack. Each one shows the defense that stops it, the file it lives in, and the outside practice it follows.</p>
 
-      <div role="tablist" aria-label="Attacks" onKeyDown={onKey} className="mt-8 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+      <div role="tablist" aria-label="Attacks" onKeyDown={onKey} className="mt-8 flex flex-wrap gap-2">
         {ATTACKS.map((x) => (
           <button
             key={x.id}

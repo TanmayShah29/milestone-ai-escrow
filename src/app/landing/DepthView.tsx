@@ -78,13 +78,35 @@ function StateGraph({ states, edges }: { states: string[]; edges: [string, strin
     io.observe(el);
     return () => io.disconnect();
   }, []);
+  // One tab stop for the whole graph; arrow keys move between states in reading order.
+  const onKey = (e: React.KeyboardEvent<SVGSVGElement>) => {
+    const d = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    if (!d) return;
+    e.preventDefault();
+    const order = [...states].sort((a, b) => (POS[a]![1] - POS[b]![1]) * 10 + (POS[a]![0] - POS[b]![0]));
+    const next = order[(order.indexOf(sel) + d + order.length) % order.length]!;
+    setSel(next);
+    (e.currentTarget.querySelector(`[data-state="${next}"]`) as SVGGElement | null)?.focus();
+  };
   const isHappy = (a: string, b: string) => HAPPY.indexOf(b) === HAPPY.indexOf(a) + 1 && HAPPY.includes(a);
   const out = edges.filter(([a]) => a === sel).map(([, b]) => b);
   const into = edges.filter(([, b]) => b === sel).map(([a]) => a);
   return (
     <div ref={ref}>
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <svg viewBox="0 0 980 290" className="min-w-[720px]" role="img" aria-label={`The milestone state machine: ${states.length} states and ${edges.length} allowed moves. The path along the top is the one a passing milestone takes.`}>
+      {/* Phones: the same machine as a list, no sideways scroll. */}
+      <ul className="space-y-2 sm:hidden">
+        {states.map((st) => {
+          const next = edges.filter(([a]) => a === st).map(([, b]) => b);
+          return (
+            <li key={st} className="rounded-md border border-rule bg-paper p-3 text-sm">
+              <p className={`font-semibold ${HAPPY.includes(st) ? "text-ink" : "text-ink-2"}`}>{LABEL[st] ?? st}</p>
+              <p className="mt-1 text-xs text-ink-2">{next.length ? <>can move to <span className="text-paid">{next.map((n) => LABEL[n]).join(", ")}</span></> : "final: nothing moves out of it"}</p>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="hidden sm:block">
+        <svg viewBox="0 0 980 290" role="group" onKeyDown={onKey} aria-label={`The milestone state machine: ${states.length} states and ${edges.length} allowed moves. The path along the top is the one a passing milestone takes.`}>
           <defs>
             {["base", "out", "in", "happy"].map((k) => (
               <marker key={k} id={`arrow-${k}`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -119,12 +141,12 @@ function StateGraph({ states, edges }: { states: string[]; edges: [string, strin
             return (
               <g
                 key={s}
-                tabIndex={0}
+                tabIndex={s === sel ? 0 : -1}
+                data-state={s}
                 role="button"
                 aria-pressed={active}
                 aria-label={`${LABEL[s] ?? s}: ${edges.filter(([a]) => a === s).length} moves out`}
                 onClick={() => setSel(s)}
-                onMouseEnter={() => setSel(s)}
                 onFocus={() => setSel(s)}
                 onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setSel(s)}
                 className="cursor-pointer outline-none [&:focus-visible>rect]:stroke-[var(--focus)]"
@@ -148,7 +170,7 @@ function StateGraph({ states, edges }: { states: string[]; edges: [string, strin
           })}
         </svg>
       </div>
-      <p key={sel} aria-live="polite" className="detail-in mt-3 text-sm text-ink-2">
+      <p key={sel} aria-live="polite" className="detail-in mt-3 hidden text-sm text-ink-2 sm:block">
         <span className="font-semibold text-ink">{LABEL[sel]}</span>
         {out.length ? (
           <>

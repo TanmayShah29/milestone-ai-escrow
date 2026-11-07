@@ -302,13 +302,16 @@ export default function GanttView(props: { data: Data; onReschedule?: (milestone
     [project, data, onReschedule, onRefuse, readOnly],
   );
 
-  // Zoom to the data once the engine has placed it (the showcase: runs that took minutes).
+  // Zoom to the data once the engine has placed it (the showcase: runs that took minutes). The chart stays
+  // hidden until then, so the bars don't jump sideways after they first appear.
+  const [ready, setReady] = useState(!fit);
   useEffect(() => {
     if (!fit) return;
     let cancelled = false;
-    project.commitAsync().then(() => {
+    project.commitAsync().then(async () => {
       const g = ref.current?.instance as Gantt | undefined;
-      if (!cancelled && g && !g.isDestroyed) void g.zoomToFit({ leftMargin: 40, rightMargin: 80 });
+      if (!cancelled && g && !g.isDestroyed) await g.zoomToFit({ leftMargin: 40, rightMargin: 80 });
+      if (!cancelled) requestAnimationFrame(() => setReady(true));
     });
     return () => {
       cancelled = true;
@@ -333,5 +336,9 @@ export default function GanttView(props: { data: Data; onReschedule?: (milestone
     if (status) status.hidden = narrow;
   }, [narrow]);
 
-  return <BryntumGantt ref={ref} {...config} />;
+  return (
+    <div className={`h-full transition-opacity duration-[var(--t-state)] ${ready ? "opacity-100" : "invisible opacity-0"}`}>
+      <BryntumGantt ref={ref} {...config} />
+    </div>
+  );
 }

@@ -11,7 +11,7 @@ import { GuillocheSeal } from "@/components/GuillocheSeal";
 // The failing outputs below are what the PR #2 code returns for the signed tests' inputs.
 
 type Result = "pass" | "fail" | "blocked";
-type Detail = { call: string; got: string; want: string } | { quote: string };
+type Detail = { call: string; got: string; want: string } | { quote: string } | { note: string };
 type Mode = "honest" | "cheat";
 
 const CONDITIONS = [
@@ -31,7 +31,13 @@ const RUNS: Record<
     source: "pull request #1",
     hash: "48a51380573e1d02a1c66c14a600c34041a3c6823275d0a3ec9cc1deefab03d1",
     results: ["pass", "pass", "pass", "pass"],
-    details: [null, null, null, null],
+    // What the honest code returned for the same inputs (it passed, so it returned what the tests want).
+    details: [
+      null,
+      { call: "slugify('Hello,   World!')", got: '"hello-world"', want: '"hello-world"' },
+      { call: "slugify('Crème brûlée')", got: '"creme-brulee"', want: '"creme-brulee"' },
+      { note: "The AI read the README and recommended a pass. It can only recommend; the rules decided." },
+    ],
     stamp: "Cleared · $23.75 paid",
     tone: "paid",
     announce: "Every condition passed. The hold was captured and the worker was paid $23.75.",
@@ -81,18 +87,19 @@ const ICON = {
 } as const;
 
 function RowDetail({ d }: { d: Detail }) {
+  if ("note" in d) return <p className="mt-1 text-xs text-ink-2">{d.note}</p>;
   if ("quote" in d)
     return (
-      <div className="detail-in mt-2 rounded-md border border-failed/40 bg-failed-field px-3 py-2 text-xs text-ink">
+      <div className="mt-2 rounded-md border border-failed/40 bg-failed-field px-3 py-2 text-xs text-ink">
         <p className="text-ink-2">Text in the pull request, aimed at the AI reviewer:</p>
         <p className="mt-1 break-words font-mono text-[11px] leading-relaxed">{d.quote}</p>
         <p className="mt-1 font-medium text-failed">Flagged, not obeyed. It blocks automatic payment.</p>
       </div>
     );
   return (
-    <p className="detail-in mt-1 text-xs text-ink-2">
-      <span className="whitespace-pre-wrap font-mono text-ink">{d.call}</span> returned <span className="font-mono text-failed">{d.got}</span>; the signed test wants{" "}
-      <span className="font-mono text-ink">{d.want}</span>
+    <p className="mt-1 text-xs text-ink-2">
+      <span className="whitespace-pre-wrap font-mono text-ink">{d.call}</span> returned <span className={`font-mono ${d.got === d.want ? "text-paid" : "text-failed"}`}>{d.got}</span>
+      {d.got === d.want ? <>, as the signed test wants</> : <>; the signed test wants <span className="font-mono text-ink">{d.want}</span></>}
     </p>
   );
 }
@@ -106,7 +113,7 @@ export function PayOnProofCheque() {
   const started = useRef(false);
   const run = RUNS[mode];
 
-  const start = useCallback((m: Mode) => {
+  const start = useCallback((m: Mode, then?: Mode) => {
     timers.current.forEach(clearTimeout);
     timers.current = [];
     started.current = true;
@@ -115,21 +122,27 @@ export function PayOnProofCheque() {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return setShown(DONE);
     setShown(0);
     for (let i = 1; i <= CONDITIONS.length; i++) timers.current.push(window.setTimeout(() => setShown(i), FIRST_TICK + (i - 1) * STAGGER));
-    timers.current.push(window.setTimeout(() => setShown(DONE), FIRST_TICK + (CONDITIONS.length - 1) * STAGGER + 200));
+    const end = FIRST_TICK + (CONDITIONS.length - 1) * STAGGER + 200;
+    timers.current.push(window.setTimeout(() => setShown(DONE), end));
+    if (then) timers.current.push(window.setTimeout(() => startRef.current(then), end + 2200)); // let the stamp be read first
   }, []);
+  const startRef = useRef(start);
+  startRef.current = start;
 
-  // Play the honest run once, when the cheque is first on screen.
+  // First the cheat is caught and the money stays held, then the honest run clears it: once, when the
+  // conditions are on screen. Any click takes over.
+  const list = useRef<HTMLOListElement>(null);
   useEffect(() => {
-    const el = root.current;
-    if (!el || typeof IntersectionObserver === "undefined") return start("honest");
+    const el = root.current; // as soon as the cheque shows, so a phone's first screen isn't inert
+    if (!el || typeof IntersectionObserver === "undefined") return start("cheat", "honest");
     const io = new IntersectionObserver(
       ([e]) => {
         if (e?.isIntersecting && !started.current) {
-          start("honest");
+          start("cheat", "honest");
           io.disconnect();
         }
       },
-      { threshold: 0.35 },
+      { threshold: 0.15 },
     );
     io.observe(el);
     return () => {
@@ -174,7 +187,7 @@ export function PayOnProofCheque() {
           </div>
 
           <div className="mt-6 flex flex-col lg:mt-4">
-            <div className="order-2 mt-6 md:order-1 md:mt-0">
+            <div>
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                 <p className="text-sm font-medium text-ink" id="who-label">
                   Who did the work?
@@ -207,11 +220,11 @@ export function PayOnProofCheque() {
                 </div>
               </div>
 
-              <ol className="mt-3 divide-y divide-rule border-y border-rule" aria-label="Conditions">
+              <ol ref={list} className="mt-3 divide-y divide-rule border-y border-rule" aria-label="Conditions">
                 {CONDITIONS.map((c, i) => {
                   const res = shown > i ? run.results[i]! : null;
                   const icon = res ? ICON[res] : null;
-                  const detail = res && res !== "pass" ? run.details[i] : null;
+                  const both = (["cheat", "honest"] as const).map((k) => ({ k, d: RUNS[k].details[i] })).filter((x) => x.d);
                   return (
                     <li key={c.text} className="py-2 text-sm">
                       <div className="flex items-center gap-3">
@@ -225,18 +238,33 @@ export function PayOnProofCheque() {
                           {icon ? `${icon.word} · ${res === "blocked" ? "injection found" : c.by}` : c.by}
                         </span>
                       </div>
-                      {detail && (
-                        <div className="pl-8">
-                          <RowDetail d={detail} />
+                      {/* Both runs' details share one grid cell, so the cheque keeps its height when the run changes. */}
+                      {both.length > 0 && (
+                        <div className="grid pl-8 [&>*]:[grid-area:1/1]">
+                          {both.map(({ k, d }) => {
+                            const on = k === mode && !!res;
+                            return (
+                              <div key={k === mode ? `${k}-${play}` : k} aria-hidden={!on} className={on ? "detail-in" : "invisible"}>
+                                <RowDetail d={d!} />
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </li>
                   );
                 })}
               </ol>
+              <div className="mt-4 flex min-h-11 items-center md:hidden" aria-hidden="true">
+                {done && (
+                  <p key={`m-${mode}-${play}`} className={`stamp-land whitespace-nowrap rounded-md border-2 px-3 py-1.5 font-semibold uppercase tracking-wide ${stampCls}`}>
+                    {run.stamp}
+                  </p>
+                )}
+              </div>
             </div>
 
-            <div className="order-1 md:order-2 md:mt-6 lg:mt-5">
+            <div className="mt-6 lg:mt-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <Link href="/demo" className="inline-flex items-center justify-center rounded-md bg-accent px-5 py-3 font-medium text-accent-ink no-underline transition-opacity duration-[var(--t-tap)] hover:opacity-90">
                   Try the demo, no login
@@ -250,7 +278,7 @@ export function PayOnProofCheque() {
                 <a href={`https://github.com/TanmayShah29/milestone-demo/pull/${run.pr}`} target="_blank" rel="noreferrer" className="underline">
                   milestone-demo {run.source}
                 </a>
-                .
+                . That run took only the 5% platform fee; today PayPal&apos;s own fees are passed on too, so $25 pays about $21.94.
               </p>
             </div>
           </div>
@@ -264,7 +292,7 @@ export function PayOnProofCheque() {
               {run.hash.slice(0, 6)}…{run.hash.slice(-4)}
             </span>
           </p>
-          <div className="flex min-h-11 items-center justify-center">
+          <div className="hidden min-h-11 items-center justify-center md:flex">
             {done && (
               <p key={`${mode}-${play}`} aria-hidden="true" className={`stamp-land whitespace-nowrap rounded-md border-2 px-3 py-1.5 text-center font-semibold uppercase tracking-wide ${stampCls}`}>
                 {run.stamp}
