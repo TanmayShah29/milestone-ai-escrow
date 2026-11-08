@@ -5,6 +5,7 @@ import { Depth } from "./landing/Depth";
 import { FollowTheMoney } from "./landing/FollowTheMoney";
 import { AgentsHire } from "./landing/AgentsHire";
 import { PayPalTrail } from "./landing/PayPalTrail";
+import { Compare } from "./landing/Compare";
 
 // The landing page is one journey (docs/design/experience-plan.md): the cheque (try it), follow the $25
 // (how it works), try to cheat it (why it holds), what's underneath (how deep it goes), then run it live.
@@ -34,6 +35,20 @@ export default function Home() {
             Create one
           </Link>
         </div>
+          <ul className="mt-5 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-ink-2" aria-label="Proof">
+            <li className="flex items-center gap-1.5">
+              <span aria-hidden="true" className="text-paid">&#10003;</span>
+              <a href="https://github.com/TanmayShah29/milestone-demo/pull/1" target="_blank" rel="noreferrer" className="underline decoration-rule-strong underline-offset-2 hover:text-ink">Real sandbox payouts on public PRs</a>
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span aria-hidden="true" className="text-paid">&#10003;</span>
+              <a href="https://github.com/TanmayShah29/milestone-demo/pull/2" target="_blank" rel="noreferrer" className="underline decoration-rule-strong underline-offset-2 hover:text-ink">Prompt injection caught, money held</a>
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span aria-hidden="true" className="text-paid">&#10003;</span>
+              <a href="#compare-h" className="underline decoration-rule-strong underline-offset-2 hover:text-ink">No AI can move money</a>
+            </li>
+          </ul>
         </div>
         <div className="mt-5 lg:mt-0">
           <PayOnProofCheque />
@@ -45,6 +60,8 @@ export default function Home() {
       <div className="mx-auto max-w-6xl px-4">
         <PayPalTrail />
       </div>
+
+      <Compare />
 
       <AttackLab />
 
