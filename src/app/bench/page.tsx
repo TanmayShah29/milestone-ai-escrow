@@ -152,19 +152,7 @@ function CaseRow({ c }: { c: BenchCaseResult }) {
   );
 }
 
-function Stat({ value, of, label, note }: { value: number; of?: number; label: string; note?: string }) {
-  return (
-    <div>
-      <dt className="text-sm text-ink-2">{label}</dt>
-      <dd className="mt-1">
-        <span className="text-4xl font-semibold tracking-tight text-ink">{value}</span>
-        {of !== undefined && <span className="text-lg text-ink-2"> of {of}</span>}
-        {note && <span className="mt-1 block text-sm text-ink-3">{note}</span>}
-      </dd>
-    </div>
-  );
-}
-
+const quoted = (cs: BenchCaseResult[]) => `${cs.length === 1 ? "the cheat" : "the cheats"} ${cs.map((c) => `“${LABELS[c.id] ?? c.id}”`).join(" and ")}`;
 const names = (cs: BenchCaseResult[]) => cs.map((c) => (LABELS[c.id] ?? c.id).toLowerCase()).join("; ");
 
 export default function BenchPage() {
@@ -184,6 +172,19 @@ export default function BenchPage() {
   const llmNoticed = attacks.filter((c) => c.llmOnly.status === "ok" && /inject|instruction|aimed at|reviewer|workflow|process\.exit/i.test(`${c.llmOnly.rawSummary} ${c.llmOnly.perCriterion.map((x) => x.reason).join(" ")}`));
   const answeredAttacks = attacks.filter((c) => c.llmOnly.status === "ok");
   const noAnswer = { error: cases.filter((c) => c.llmOnly.status === "error").length, skipped: cases.filter((c) => c.llmOnly.status === "skipped" || c.llmOnly.status === "busy").length };
+  const llmFooled = llmPaid.filter((c) => /^injection-/.test(c.id));
+  const msFooled = msPaid.filter((c) => /^injection-/.test(c.id));
+  const msFlaggedAttacks = attacks.filter((c) => shipped(c).injectionQuotes.length || shipped(c).tampering.length);
+  // The rows a judge reads first: where the two approaches actually differ, then where they tie.
+  // Colour only where one side is clearly ahead; near-ties stay neutral so the table doesn't oversell.
+  const rows: { label: string; note?: string; llm: string; llmNote?: string; llmBad?: boolean; ms: string; msNote?: string; msGood?: boolean }[] = [
+    { label: "Attacks flagged, with the exact quote", note: "prompt injections and tampering", llm: `${llmNoticed.length} of ${attacks.length}`, llmBad: llmNoticed.length < msFlaggedAttacks.length, ...(answeredAttacks.length < attacks.length ? { llmNote: `it answered ${answeredAttacks.length} of them` } : {}), ms: `${msFlaggedAttacks.length} of ${attacks.length}`, msGood: msFlaggedAttacks.length > llmNoticed.length },
+    { label: "Paid a cheat that told the reviewer to pass it", llm: llmFooled.length ? "Yes" : "No", llmBad: llmFooled.length > 0, ...(llmFooled.length ? { llmNote: names(llmFooled) } : {}), ms: msFooled.length ? "Yes" : "No", msGood: !msFooled.length && llmFooled.length > 0 },
+    { label: "Right calls", llm: `${s.llm.correct} of ${s.llm.answered}`, llmNote: s.llm.answered < s.total ? "of the cases it answered" : undefined, ms: `${s.shipped.correct} of ${s.total}` },
+    { label: "Cases with no verdict", llm: String(unanswered), llmBad: unanswered > 0, msGood: unanswered > 0, ...(unanswered ? { llmNote: [noAnswer.error ? `${noAnswer.error} with no usable reply` : "", noAnswer.skipped ? `${noAnswer.skipped} not asked` : ""].filter(Boolean).join("; ") } : {}), ms: "0", msNote: "deterministic: same input, same answer" },
+    { label: "Honest work blocked", llm: `${s.llm.blockedHonest} of ${s.honest}`, ms: `${s.shipped.blockedHonest} of ${s.honest}` },
+    { label: "Cheats paid", note: "which ones is below", llm: `${s.llm.paidCheats} of ${s.sameCheats.n}`, ...(s.sameCheats.n < s.cheats ? { llmNote: `of the ${s.sameCheats.n} it answered` } : {}), ms: `${s.shipped.paidCheats} of ${s.cheats}`, ...(s.shipped.hardened && s.milestone.paidCheats !== s.shipped.paidCheats ? { msNote: `${s.milestone.paidCheats} before its AI attacked the drafted tests` } : {}) },
+  ];
   const models = [...new Set(cases.flatMap((c) => (c.llmOnly.status === "ok" ? [c.llmOnly.model] : [])))];
 
   return (
@@ -197,31 +198,57 @@ export default function BenchPage() {
       </p>
 
       <section aria-labelledby="score-title" className="mt-10">
-        <h2 id="score-title" className="sr-only">
-          Scoreboard
+        <h2 id="score-title" className="text-xl font-semibold tracking-tight">
+          Head to head
         </h2>
-        <div className="grid border-y border-rule-strong sm:grid-cols-2">
-          <div className="py-6 sm:pr-8">
-            <h3 className="text-lg font-semibold">LLM-only approver</h3>
-            <p className="mt-1 text-sm text-ink-2">One model call: criteria, PR text and diff in; pay or don&apos;t pay out.</p>
-            <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5">
-              <Stat value={s.llm.paidCheats} of={s.sameCheats.n} label="Cheats paid" note={s.sameCheats.n < s.cheats ? `of the ${s.sameCheats.n} cheats it answered` : undefined} />
-              <Stat value={s.llm.blockedHonest} of={s.honest} label="Honest work blocked" />
-              <Stat value={s.llm.correct} of={s.llm.answered} label="Right calls" note="of the cases it answered" />
-              <Stat value={unanswered} of={s.total} label="No answer" note={unanswered ? [noAnswer.error ? `${noAnswer.error} with no usable reply from any model` : "", noAnswer.skipped ? `${noAnswer.skipped} not asked (call budget)` : ""].filter(Boolean).join("; ") : undefined} />
-            </dl>
+        <div className="mt-4 overflow-hidden rounded-xl border border-rule-strong bg-panel shadow-[var(--shadow-card)]">
+          <div className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)] border-b border-rule-strong text-sm font-semibold">
+            <span className="p-3 sm:p-4" />
+            <span className="p-3 text-ink-2 sm:p-4">
+              LLM-only approver
+              <span className="mt-0.5 block text-xs font-normal text-ink-3">asks one model &ldquo;is it done?&rdquo;</span>
+            </span>
+            <span className="bg-paid-field p-3 text-ink sm:p-4">
+              Milestone
+              <span className="mt-0.5 block text-xs font-normal text-ink-2">signed tests, checks, fixed rules</span>
+            </span>
           </div>
-          <div className="border-t border-rule py-6 sm:border-l sm:border-t-0 sm:pl-8">
-            <h3 className="text-lg font-semibold">Milestone</h3>
-            <p className="mt-1 text-sm text-ink-2">Tests attacked and hardened before signing, run through the CI harness, tampering and injection checks, then fixed rules.</p>
-            <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5">
-              <Stat value={s.shipped.paidCheats} of={s.cheats} label="Cheats paid" note={[s.sameCheats.n < s.cheats ? `${s.sameCheats.milestonePaid} of the same ${s.sameCheats.n} the LLM answered` : "", s.shipped.hardened && s.milestone.paidCheats !== s.shipped.paidCheats ? `${s.milestone.paidCheats} on the tests as first drafted` : ""].filter(Boolean).join("; ") || undefined} />
-              <Stat value={s.shipped.blockedHonest} of={s.honest} label="Honest work blocked" />
-              <Stat value={s.shipped.correct} of={s.total} label="Right calls" note="it answers every case" />
-              <Stat value={flagged.length} of={s.total} label="Flagged to a person" note="injection or tampering, with the quote" />
-            </dl>
-          </div>
+          <dl>
+            {rows.map((r) => (
+              <div key={r.label} className="grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)] border-b border-rule last:border-0">
+                <dt className="p-3 text-sm text-ink sm:p-4">
+                  {r.label}
+                  {r.note && <span className="mt-0.5 block text-xs text-ink-3">{r.note}</span>}
+                </dt>
+                <dd className="p-3 sm:p-4">
+                  <span className={`money text-xl font-semibold tracking-tight sm:text-4xl ${r.llmBad ? "text-failed" : "text-ink"}`}>{r.llm}</span>
+                  {r.llmNote && <span className="mt-0.5 block text-xs text-ink-3">{r.llmNote}</span>}
+                </dd>
+                <dd className="bg-paid-field/50 p-3 sm:p-4">
+                  <span className={`money text-xl font-semibold tracking-tight sm:text-4xl ${r.msGood ? "text-paid" : "text-ink"}`}>{r.ms}</span>
+                  {r.msNote && <span className="mt-0.5 block text-xs text-ink-2">{r.msNote}</span>}
+                </dd>
+              </div>
+            ))}
+          </dl>
         </div>
+        {(llmPaid.length > 0 || msPaid.length > 0) && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-failed/40 bg-failed-field p-4 text-sm">
+              <p className="font-semibold text-ink">What the LLM-only approver got wrong</p>
+              <p className="mt-1 text-ink-2">
+                {llmPaid.length ? <>It paid {quoted(llmPaid)}.{llmFooled.length > 0 && " The attack told the reviewer to pass the work, and it did."}</> : "It paid no cheats it answered."}
+                {unanswered > 0 && ` It gave no verdict on ${unanswered} of ${s.total}.`}
+              </p>
+            </div>
+            <div className="rounded-lg border border-rule-strong bg-panel p-4 text-sm">
+              <p className="font-semibold text-ink">What Milestone got wrong</p>
+              <p className="mt-1 text-ink-2">
+                {msPaid.length ? <>It paid {quoted(msPaid)}: every signed test passes and the code is wrong outside them. A gap in the contract both sides signed, not a trick that fooled it.</> : "Nothing in this run."}
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       <PanelBench />
