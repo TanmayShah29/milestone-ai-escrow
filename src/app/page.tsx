@@ -90,7 +90,7 @@ export default function Home() {
       </section>
 
       <p className="mx-auto max-w-6xl px-4 py-8 text-xs leading-relaxed text-ink-3">
-        Runs on PayPal&apos;s sandbox; no real money moves. Built for the PayPal AI Hackathon 2026 with the APIMatic Context Plugin (PayPal integration), a Bryntum Gantt (timeline) and Render (hosting). Source:{" "}
+        Runs on PayPal&apos;s sandbox; no real money moves. Built for the PayPal AI Hackathon 2026 with the APIMatic Context Plugin (PayPal integration), a Bryntum Gantt (timeline), AG Grid (portfolio grid) and Render (hosting). Source:{" "}
         <a href="https://github.com/TanmayShah29/milestone-ai-escrow" className="underline">
           github.com/TanmayShah29/milestone-ai-escrow
         </a>

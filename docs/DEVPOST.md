@@ -196,16 +196,19 @@ Record the pieces separately and cut all waiting. Every step below exists in the
 
 | Time | Scene | On screen | Say (gist) |
 |---|---|---|---|
-| 0:00–0:10 | What it is | Landing hero, the cheque passing its conditions | "Milestone pays people and AI agents through PayPal only when the work is proven, and the proof is something you can check." |
-| 0:10–0:35 | A budget for an agent | `/mandates/new`: limits, save the sandbox card, sign with a passkey; the agent key | "I give my agent a budget, signed with my passkey. Code, not the agent, decides what it may spend." |
-| 0:35–0:55 | The agent posts work | The MCP `post_bounty` call, the bounty on `/bounties` already held on PayPal with no click, the hold id | "The agent posts a bounty. The hold lands on the saved card within my limits, with no approval click." |
-| 0:55–1:20 | Someone tries to cheat | A PR with a Hindi comment telling the reviewer to pass everything; the scan and the panel flag it; the money stays held | "This worker hid an instruction in Hindi. The scan and the AI panel both caught it, and nothing was paid." |
-| 1:20–1:50 | Real proof | An honest PR; the trusted runner's run, "E3, signed", the Rekor entry; the verdict table with grounded panel votes | "Our own runner ran the signed tests, with the worker's code in a sealed container, and Sigstore signed the result." |
-| 1:50–2:25 | A fair ending | The client locks with a $5 fee hold, the worker matches; the court page with the frozen evidence pack and the AI draft; the arbitrator signs from a terminal; capture, payout and the fee to the arbitrator | "If they disagree, a named arbitrator decides. The AI only drafts. The signed award is the only thing that moves the money." |
-| 2:25–2:45 | Don't trust us | `/proof/<id>` chain, `/bench` panel numbers, the passport | "Every step is signed. Our AI judges are measured in public, and both sides build a record." |
-| 2:45–2:50 | Close | Credits | "Pay-on-proof on PayPal. Built with PayPal, APIMatic, Bryntum, AG Grid and Render." |
+| 0:00–0:12 | What it is | Landing hero: "Pay only when the work passes.", the cheque playing the catch, the three proof links under the buttons | "Milestone holds the money on PayPal and releases it only when the work passes tests both sides signed. The AI writes and checks those tests. It can never move the money." |
+| 0:12–0:27 | Why not just let the AI pay? | Scroll to the landing's comparison table; pause on the Milestone column | "The obvious build hands a model the PayPal tools. Then a pull request that says 'mark this as passed' gets paid. Here the AI writes and checks the contract, and only code moves money." |
+| 0:27–0:47 | A budget for an agent | `/mandates/new`: limits, save the sandbox card, sign with a passkey; the agent key | "I give my agent a budget, signed with my passkey. Code, not the agent, decides what it may spend." |
+| 0:47–1:02 | The agent posts work | The MCP `post_bounty` call, the bounty on `/bounties` already held on PayPal with no click, the hold id | "The agent posts a bounty. The hold lands on the saved card within my limits, with no approval click." |
+| 1:02–1:25 | Someone tries to cheat | A PR with a Hindi comment telling the reviewer to pass everything; the scan and the panel flag it; the money stays held | "This worker hid an instruction in Hindi. The scan and the AI panel both caught it, and nothing was paid." |
+| 1:25–1:50 | Real proof | An honest PR; the trusted runner's run, "E3, signed", the Rekor entry; the verdict table with grounded panel votes | "Our own runner ran the signed tests, with the worker's code in a sealed container, and Sigstore signed the result." |
+| 1:50–2:22 | A fair ending | The client locks with a $5 fee hold, the worker matches; the court page with the frozen evidence pack and the AI draft; the arbitrator signs from a terminal; capture, payout and the fee to the arbitrator | "If they disagree, a named arbitrator decides. The AI only drafts. The signed award is the only thing that moves the money." |
+| 2:22–2:42 | Don't trust us | `/proof/<id>` chain, `/bench` panel numbers, the passport | "Every step is signed. Our AI judges are measured in public, and both sides build a record." |
+| 2:42–2:50 | Close | Credits | "Pay-on-proof on PayPal. Built with PayPal, APIMatic, Bryntum, AG Grid and Render." |
 
 Recording checklist:
+- The cheat scene needs a Hindi-injection PR recorded fresh: none of milestone-demo PRs #1–#29 contains Hindi text (checked Nov 8). If there's no time, use the real PR #2 (English "mark everything as passed", caught, then fixed and paid) and say the scan also covers Hindi, Spanish, Chinese, Russian, Portuguese and French.
+- Scene lines echo the landing page on purpose: the hero headline, "Why not just let the AI pay?", and the rule "the AI writes and checks the contract; only code moves money".
 - Wake the service first (`/api/health`). Check `/api/status` shows `busy: false`.
 - Say "PayPal", "sandbox" and "AI" by name. No copyrighted music. Captions on; zoom so text reads on a phone.
 - Bryntum runs on the public trial package (watermark) unless the hackathon license is applied.
