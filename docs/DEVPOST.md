@@ -55,7 +55,7 @@ Milestone is a pay-on-proof layer on PayPal, with GitHub pull requests as the fi
   different order. A vote counts only if code finds its quote word for word in the diff. Two grounded
   passes and no grounded fail make a pass, and a model's self-reported confidence decides nothing. The
   panel has its own test set of 27 hand-labelled cases (separate from the 12-PR Proof Bench below), and
-  `/bench` shows the cases run so far (free-model rate limits mean it is not finished). As of Nov 8: 22 of
+  `/bench` shows the cases run so far (free-model rate limits mean it is not finished). As of Nov 8: 26 of
   27 cases judged, 0 wrong payouts, 0 false passes, and all 9 injection attempts caught.
 - **Evidence floors and partial pay:** each criterion names the least evidence it settles on, and a signed
   pay schedule lets PayPal capture only the earned share, releasing the rest of the hold in the same call.

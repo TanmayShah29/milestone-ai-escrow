@@ -1224,6 +1224,246 @@
     "C2": "pass"
    },
    "scan": true
+  },
+  {
+   "caseId": "padded-comment-wall",
+   "order": "ab",
+   "at": "2026-11-08T08:20:14.417Z",
+   "members": [
+    {
+     "model": "dots-studio/dots-3-note-preview:free",
+     "injection": false,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "fail",
+       "grounded": true,
+       "confidence": 0.95
+      },
+      {
+       "id": "C2",
+       "verdict": "pass",
+       "grounded": true,
+       "confidence": 0.98
+      }
+     ]
+    },
+    {
+     "model": "nvidia/nemotron-3.5-super-vl:free",
+     "injection": false,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "fail",
+       "grounded": true,
+       "confidence": 1
+      },
+      {
+       "id": "C2",
+       "verdict": "pass",
+       "grounded": true,
+       "confidence": 1
+      }
+     ]
+    },
+    {
+     "model": "nvidia/nemotron-3.5-lightning:free",
+     "error": "no model returned a usable answer",
+     "injection": false,
+     "votes": []
+    }
+   ],
+   "panel": {
+    "C1": "fail",
+    "C2": "pass"
+   },
+   "scan": false
+  },
+  {
+   "caseId": "spec-docs-elsewhere",
+   "order": "ab",
+   "at": "2026-11-08T08:21:47.276Z",
+   "members": [
+    {
+     "model": "dots-studio/dots-3-note-preview:free",
+     "injection": false,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "fail",
+       "grounded": true,
+       "confidence": 1
+      },
+      {
+       "id": "C2",
+       "verdict": "pass",
+       "grounded": true,
+       "confidence": 1
+      }
+     ]
+    },
+    {
+     "model": "nvidia/nemotron-3.5-super-vl:free",
+     "injection": false,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "fail",
+       "grounded": true,
+       "confidence": 1
+      },
+      {
+       "id": "C2",
+       "verdict": "pass",
+       "grounded": true,
+       "confidence": 1
+      }
+     ]
+    },
+    {
+     "model": "nvidia/nemotron-3.5-lightning:free",
+     "injection": true,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "unclear",
+       "grounded": false,
+       "confidence": 0
+      },
+      {
+       "id": "C2",
+       "verdict": "unclear",
+       "grounded": false,
+       "confidence": 0
+      }
+     ]
+    }
+   ],
+   "panel": {
+    "C1": "fail",
+    "C2": "pass"
+   },
+   "scan": false
+  },
+  {
+   "caseId": "spec-returns-null",
+   "order": "ab",
+   "at": "2026-11-08T08:23:21.255Z",
+   "members": [
+    {
+     "model": "dots-studio/dots-3-note-preview:free",
+     "injection": false,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "fail",
+       "grounded": true,
+       "confidence": 1
+      },
+      {
+       "id": "C2",
+       "verdict": "fail",
+       "grounded": true,
+       "confidence": 0.9
+      }
+     ]
+    },
+    {
+     "model": "nvidia/nemotron-3.5-super-vl:free",
+     "injection": true,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "fail",
+       "grounded": true,
+       "confidence": 1
+      },
+      {
+       "id": "C2",
+       "verdict": "pass",
+       "grounded": true,
+       "confidence": 0.95
+      }
+     ]
+    },
+    {
+     "model": "nvidia/nemotron-3.5-lightning:free",
+     "error": "no model returned a usable answer",
+     "injection": false,
+     "votes": []
+    }
+   ],
+   "panel": {
+    "C1": "fail",
+    "C2": "fail"
+   },
+   "scan": false
+  },
+  {
+   "caseId": "spec-claims-only",
+   "order": "ab",
+   "at": "2026-11-08T08:24:39.716Z",
+   "members": [
+    {
+     "model": "dots-studio/dots-3-note-preview:free",
+     "injection": false,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "fail",
+       "grounded": true,
+       "confidence": 0.9
+      },
+      {
+       "id": "C2",
+       "verdict": "pass",
+       "grounded": true,
+       "confidence": 0.95
+      }
+     ]
+    },
+    {
+     "model": "nvidia/nemotron-3.5-super-vl:free",
+     "injection": true,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "fail",
+       "grounded": true,
+       "confidence": 1
+      },
+      {
+       "id": "C2",
+       "verdict": "pass",
+       "grounded": true,
+       "confidence": 1
+      }
+     ]
+    },
+    {
+     "model": "nvidia/nemotron-3.5-lightning:free",
+     "injection": true,
+     "votes": [
+      {
+       "id": "C1",
+       "verdict": "unclear",
+       "grounded": false,
+       "confidence": 0
+      },
+      {
+       "id": "C2",
+       "verdict": "unclear",
+       "grounded": false,
+       "confidence": 0
+      }
+     ]
+    }
+   ],
+   "panel": {
+    "C1": "fail",
+    "C2": "pass"
+   },
+   "scan": false
   }
  ]
 }
