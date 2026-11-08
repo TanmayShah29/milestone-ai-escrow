@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { rememberLink } from "@/lib/client/links";
+import { DEMO_WORKER_EMAIL } from "@/lib/client/sandbox";
 import { usd } from "@/lib/client/states";
 
 // The bounty board (V2_PLAN §3.I): funded bounties anyone, human or agent, can claim. A claim signs the terms
@@ -61,6 +62,12 @@ function Card({ b }: { b: Bounty }) {
           {busy && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}Claim
         </button>
       </form>
+      <p className="mt-2 text-sm text-ink-2">
+        No PayPal sandbox account?{" "}
+        <button type="button" className="underline underline-offset-2 hover:text-ink" onClick={() => setEmail(DEMO_WORKER_EMAIL)}>
+          Use the sandbox worker account
+        </button>
+      </p>
       {error && <p className="mt-2 text-sm text-failed">{error}</p>}
       <p className="mt-2 text-xs text-ink-3">Claiming signs these exact terms. You then have 3 days to open the pull request, or the bounty reopens.</p>
     </article>

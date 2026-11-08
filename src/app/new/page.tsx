@@ -3,6 +3,7 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { heldLinks, rememberLink, type Held } from "@/lib/client/links";
+import { DEMO_WORKER_EMAIL } from "@/lib/client/sandbox";
 
 // Create a milestone: describe the work, and the AI drafts the terms straight away. The client reviews,
 // edits and signs them on the milestone page.
@@ -80,6 +81,12 @@ export default function NewMilestone() {
           <label className="block text-sm">
             <span className="font-medium">Worker&apos;s PayPal email</span>
             <input required type="email" className={field} value={f.freelancerEmail} onChange={set("freelancerEmail")} placeholder="sb-…@personal.example.com" />
+            <span className="mt-1 block text-ink-2">
+              Trying it out?{" "}
+              <button type="button" className="underline underline-offset-2 hover:text-ink" onClick={() => setF({ ...f, freelancerEmail: DEMO_WORKER_EMAIL })}>
+                Use the sandbox worker account
+              </button>
+            </span>
           </label>
         </div>
         {f.verifier === "code_pr" && (
