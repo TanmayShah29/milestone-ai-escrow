@@ -10,6 +10,10 @@ import { json } from "@/lib/http";
 // response holds the new links' tokens: they are pruned with the key.
 
 export const KEY_TTL_HOURS = 24;
+// A key still "in progress" this long after it started belongs to a request the server never finished
+// (a restart or a deploy mid-request): it is dropped so the retry can run, instead of a 409 for 24 hours.
+// Longer than the slowest request (an AI draft over three free models, about 4.5 minutes at worst).
+export const ABANDONED_AFTER_MS = 5 * 60_000;
 
 function callerScope(req: Request, path: string): string {
   const auth = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? req.headers.get("x-milestone-token") ?? "";
@@ -34,6 +38,10 @@ export async function withIdempotency(req: Request, path: string, run: () => Pro
       return withIdempotency(req, path, run);
     }
     if (!prior || prior.request_hash !== hash) return json(422, { error: "This Idempotency-Key was already used with a different request." });
+    if (prior.status === null && Date.now() - prior.created_at.getTime() > ABANDONED_AFTER_MS) {
+      await db().query("delete from idempotency_keys where scope = $1 and key = $2 and status is null", [scope, key]);
+      return withIdempotency(req, path, run);
+    }
     if (prior.status === null) return json(409, { error: "A request with this Idempotency-Key is still in progress." });
     const res = json(prior.status, prior.response);
     res.headers.set("idempotent-replayed", "true");

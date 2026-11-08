@@ -1,44 +1,92 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { heldLinks, rememberLink, type Held } from "@/lib/client/links";
 import { DEMO_WORKER_EMAIL } from "@/lib/client/sandbox";
 
 // Create a milestone: describe the work, and the AI drafts the terms straight away. The client reviews,
 // edits and signs them on the milestone page.
 
+// A request the server dropped (a cold start, a deploy restarting it) must not leave the page spinning.
+// Each try has a time limit; a dropped or timed-out create is retried with the same Idempotency-Key, so the
+// server returns the first milestone instead of opening a second one.
+type Answer = { ok: boolean; status: number; body: Record<string, unknown> };
+async function post(url: string, body: unknown, headers: Record<string, string>, timeoutMs: number): Promise<Answer | undefined> {
+  try {
+    const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
+    return { ok: r.ok, status: r.status, body: ((await r.json().catch(() => ({}))) ?? {}) as Record<string, unknown> };
+  } catch {
+    return undefined; // network error or our time limit
+  }
+}
+const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+const retryable = (a: Answer | undefined) => !a || a.status === 409 || a.status === 502 || a.status === 503 || a.status === 504;
+
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(t);
+  }, []);
+  return <span className="font-mono tabular-nums opacity-80">{Math.max(0, Math.floor((now - since) / 1000))}s</span>;
+}
+
 const field = "mt-1 w-full rounded-md border border-rule-strong bg-panel px-3 py-2 text-ink placeholder:text-ink-3";
 
 export default function NewMilestone() {
   const [held, setHeld] = useState<Held[]>([]);
-  const [busy, setBusy] = useState<string>();
+  const [busy, setBusy] = useState<{ text: string; since: number }>();
+  const step = (text: string) => setBusy({ text, since: Date.now() });
+  // One key per filled-in form: pressing the button again after a failure reuses it (safe), and editing
+  // the form starts a new one.
+  const idem = useRef<string | undefined>(undefined);
   const [error, setError] = useState<string>();
   const [f, setF] = useState({ title: "", brief: "", amount: "", freelancerEmail: "", repo: "", dueDate: "", afterMilestoneId: "", verifier: "code_pr" as "code_pr" | "rubric_text" });
   useEffect(() => setHeld(heldLinks().filter((h) => h.client)), []);
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    idem.current = undefined;
+    setF({ ...f, [k]: e.target.value });
+  };
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
     setError(undefined);
-    setBusy("Creating the milestone…");
-    const r = await fetch("/api/milestones", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(f) });
-    const b = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      setBusy(undefined);
-      return setError(b.error ?? "Couldn't create the milestone. The demo server may be waking up; try again.");
+    idem.current ??= crypto.randomUUID();
+    step("Step 1 of 2: creating the milestone…");
+    let a: Answer | undefined;
+    // Up to ~3 minutes in all: enough for a free server to wake up, or a deploy to finish restarting it.
+    for (let i = 0; i < 4; i++) {
+      a = await post("/api/milestones", f, { "idempotency-key": idem.current }, 45_000);
+      if (!retryable(a)) break;
+      if (i < 3) {
+        step(i === 0 ? "Step 1 of 2: the server is slow to answer, trying again…" : "Step 1 of 2: still waiting for the server (it may be waking up)…");
+        await wait(a?.status === 409 ? 5_000 : 3_000);
+      }
     }
-    const id = b.milestone.id as string;
+    if (!a?.ok) {
+      setBusy(undefined);
+      return setError(
+        retryable(a)
+          ? "The server didn't answer in time. It may be waking up or restarting. Press the button again: it won't create a second milestone."
+          : String(a?.body.error ?? "Couldn't create the milestone. Try again."),
+      );
+    }
+    const m = a.body.milestone as { id: string; title: string };
+    const tokens = a.body as { clientToken: string; workerToken: string };
     // This browser is the client's: the worker token is kept only to show as the link to send them.
-    rememberLink({ id, title: b.milestone.title, client: b.clientToken, shareWorker: b.workerToken });
-    setBusy("Drafting your terms with AI… (up to a minute on the free models)");
-    const d = await fetch(`/api/milestones/${id}/draft-terms`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-milestone-token": b.clientToken },
-      body: JSON.stringify({ repo: f.repo, stack: "TypeScript, node:test" }),
-    }).catch(() => undefined);
-    const err = d && !d.ok ? ((await d.json().catch(() => ({}))) as { error?: string }).error : undefined;
-    window.location.href = `/milestones/${id}${err ? `?error=${encodeURIComponent(`Terms not drafted: ${err} You can draft them from the milestone page.`)}` : ""}`;
+    rememberLink({ id: m.id, title: m.title, client: tokens.clientToken, shareWorker: tokens.workerToken });
+    idem.current = undefined;
+    step("Step 2 of 2: the AI is drafting your terms (usually under a minute on the free models)…");
+    // The draft is one AI call that falls through up to three free models; past this limit the milestone
+    // page takes over, where the terms appear when ready or can be drafted again.
+    const d = await post(`/api/milestones/${m.id}/draft-terms`, { repo: f.repo, stack: "TypeScript, node:test" }, { "x-milestone-token": tokens.clientToken, "idempotency-key": `draft-${m.id}` }, 150_000);
+    const err = !d
+      ? "The AI took longer than expected. Refresh this page in a minute; if the terms still aren't here, draft them below."
+      : !d.ok
+        ? `Terms not drafted: ${String(d.body.error ?? "the AI didn't answer")} You can draft them from this page.`
+        : undefined;
+    window.location.href = `/milestones/${m.id}${err ? `?error=${encodeURIComponent(err)}` : ""}`;
   }
 
   return (
@@ -123,7 +171,8 @@ export default function NewMilestone() {
         )}
         <button disabled={!!busy} className="inline-flex items-center gap-2 rounded-md bg-accent px-5 py-3 font-medium text-accent-ink hover:opacity-90 disabled:opacity-60">
           {busy && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
-          {busy ?? "Create and draft the terms"}
+          {busy ? busy.text : "Create and draft the terms"}
+          {busy && <Elapsed key={busy.since} since={busy.since} />}
         </button>
         <p className="text-xs text-ink-3">Nothing is charged here. Money is held on PayPal only after both sides sign the terms and you fund.</p>
       </form>

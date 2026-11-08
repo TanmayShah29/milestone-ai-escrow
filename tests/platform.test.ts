@@ -155,6 +155,15 @@ describe("Idempotency-Key on our POSTs", () => {
     assert.equal(Number((await db().query("select count(*) as n from milestones")).rows[0].n), 3);
   });
 
+  it("a key left in progress by a request the server never finished is retried after 5 minutes, not refused", async () => {
+    await post(body, "k-4");
+    // Simulate a restart mid-request: the key is still "in progress" and the first try left no answer.
+    await db().query("update idempotency_keys set status = null, response = null where key = 'k-4'");
+    assert.equal((await post(body, "k-4")).status, 409);
+    await db().query("update idempotency_keys set created_at = now() - interval '6 minutes' where key = 'k-4'");
+    assert.equal((await post(body, "k-4")).status, 201);
+  });
+
   it("a refused request (400) is the answer for its key too", async () => {
     assert.equal((await post({ title: "" }, "k-3")).status, 400);
     const again = await post({ title: "" }, "k-3");
