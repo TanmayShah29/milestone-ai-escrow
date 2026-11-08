@@ -17,7 +17,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 
 ## Stack (confirmed Oct 20)
 - Render MCP is connected: workspace "Tanmay's workspace" (`tea-dbbntvgn74is73daou00`). No services yet as of Oct 20. $50 hackathon credit applied: keep to a small web service + small Postgres
-- Next.js + TypeScript (app router), Postgres, deployed on **Render** (web service + Render Workflows for agent jobs)
+- Next.js + TypeScript (app router), Postgres, deployed on **Render** (web service; Render Workflows was planned but is not used)
 - AI: **free models on OpenRouter** through the Vercel AI SDK with the OpenRouter provider. The model is an env setting (`AI_MODEL`), never hard-coded. Key is in `.env` as `OPENROUTER_API_KEY`
   - **Current, set on Render Oct 22:**
     - `AI_MODEL=dots-studio/dots-3-note-preview:free`: about 30 s for a JSON draft, structured outputs. A live draft took 58 s.
@@ -104,4 +104,4 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - [ ] YouTube demo video under 3 minutes, showing it working end to end. No copyrighted music
 - [ ] Devpost text description, plus which tools and models were used and how
 - [ ] **Remind the user:** once the project is built (about Nov 9–11), submit APIMatic's usage form to show we used the Context Plugin: https://docs.google.com/forms/d/e/1FAIpQLScc2oCgAFACm7d6H3R4mgzv-O34DdyVnLIBNiwmUNggr_-hhA/viewform
-- [ ] Sponsor credit: README, Devpost text and video name APIMatic Context Plugin (used to build the PayPal integration; no APIMatic account needed), Bryntum (Gantt) and Render (hosting + Workflows)
+- [ ] Sponsor credit: README, Devpost text and video name APIMatic Context Plugin (used to build the PayPal integration; no APIMatic account needed), Bryntum (Gantt), AG Grid (portfolio grid) and Render (hosting only; Workflows is not used)
