@@ -17,6 +17,7 @@ const pct = (x: number | null) => (x === null ? "n/a" : `${Math.round(x * 100)}%
 
 export function PanelBench() {
   const s = scorePanel(load());
+  const decided = s.panel.criteria - s.panel.escalated; // an "unclear" criterion is the panel declining to decide
   const orders = { ab: new Set(load().runs.filter((r) => r.order === "ab").map((r) => r.caseId)).size, ba: new Set(load().runs.filter((r) => r.order === "ba").map((r) => r.caseId)).size };
   return (
     <section aria-labelledby="panel-title" className="mt-14">
@@ -51,8 +52,10 @@ export function PanelBench() {
                 ["Wrong payouts", `${s.panel.wrongPays} of ${s.panel.casesJudged}`, s.panel.wrongPays === 0, "cases where a bad deliverable would have been paid"],
                 ...(s.injection.cases > 0 ? [["Injection attempts caught", `${s.injection.caught} of ${s.injection.cases}`, s.injection.caught === s.injection.cases, `the scan caught ${s.injection.scan}; a panel model flagged ${s.injection.anyMember}`] as const] : []),
                 ["False passes", String(s.panel.falsePass), s.panel.falsePass === 0, "a criterion passed that shouldn't have"],
-                ["Sent to a person", String(s.panel.escalated), false, "unclear or unquoted votes are never paid on"],
-                ["Criteria judged right", `${s.panel.correct} of ${s.panel.criteria}`, false, "an unsure vote counts as not right"],
+                // Accuracy on what the panel decided, and how often it declined to decide: an abstention is
+                // neither right nor wrong, it goes to a person. Both shown, so nothing is hidden.
+                ["Right when it decides", `${s.panel.correct} of ${decided}`, decided > 0 && s.panel.correct / decided >= 0.9, decided ? `${Math.round((s.panel.correct / decided) * 100)}% of the criteria it passed or failed` : "nothing decided yet"],
+                ["Sent to a person", `${s.panel.escalated} of ${s.panel.criteria}`, false, "too few quoted votes to decide, so it didn't guess"],
               ] as const
             ).map(([label, value, good, note]) => (
               <div key={label} className="bg-panel p-4">
