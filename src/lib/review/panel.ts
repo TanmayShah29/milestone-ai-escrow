@@ -29,10 +29,12 @@ const panelReplySchema = z.object({
       evidence: z.array(z.union([citationSchema, z.string().transform((quote) => ({ at: "", quote }))])).max(5).default([]),
     }),
   ),
-  summary: z.string().default(""),
-  feedback_for_worker: z.string().default(""),
-  injection_attempt: z.boolean().default(false),
-  injection_quote: z.string().optional(),
+  // Models often send null for "nothing to say" (most often injection_quote when there is no injection).
+  // That is a valid answer, not an unusable one, so null reads as empty.
+  summary: z.string().nullish().transform((v) => v ?? ""),
+  feedback_for_worker: z.string().nullish().transform((v) => v ?? ""),
+  injection_attempt: z.boolean().nullish().transform((v) => v ?? false),
+  injection_quote: z.string().nullish().transform((v) => v ?? undefined),
 });
 type PanelReply = z.infer<typeof panelReplySchema>;
 

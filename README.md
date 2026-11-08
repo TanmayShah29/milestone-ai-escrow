@@ -241,7 +241,7 @@ The code is in `src/lib/resolution/`, and the case page is `/milestones/<id>/cou
 Free models on [OpenRouter](https://openrouter.ai), called through the Vercel AI SDK
 (`@openrouter/ai-sdk-provider`). The model is configuration, never code: `AI_MODEL`, `AI_MODEL_FALLBACK`,
 `AI_MODEL_FALLBACK_2` (currently `dots-studio/dots-3-note-preview:free`, `nvidia/nemotron-3.5-super-vl:free`,
-`nvidia/nemotron-3.5-lightning:free`). On a 404, 429, 5xx or unreadable output, a call falls through to the next
+`recursive/flint-v1.0:free`). On a 404, 429, 5xx or unreadable output, a call falls through to the next
 model.
 
 **The AI attacks the contract before anyone signs** (`src/lib/contract/attack.ts`). A second AI plays the cheating

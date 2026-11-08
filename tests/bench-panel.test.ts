@@ -34,6 +34,26 @@ describe("Proof Bench v2 cases", () => {
   });
 });
 
+describe("panel replies", () => {
+  it("a reply with null fields (no injection, no summary) is a usable vote, not a failed member", async () => {
+    const c = cases.find((x) => x.id === "wrong-readme-example")!;
+    const call: ModelCall = async () =>
+      JSON.stringify({
+        criteria: [
+          { id: "C1", verdict: "fail", confidence: 0.8, evidence: [{ at: "README.md:5", quote: 'slugify("Hello, World") returns "hello,-world"' }] },
+          { id: "C2", verdict: "pass", confidence: 0.8, evidence: [{ at: "src/slugify.ts:2", quote: "export function slugify(text: string): string {" }] },
+        ],
+        summary: null,
+        feedback_for_worker: null,
+        injection_attempt: false,
+        injection_quote: null,
+      });
+    const run = await runCase(c, "ab", ["a/one:free", "b/two:free"], call);
+    assert.ok(run.members.every((m) => !m.error), JSON.stringify(run.members));
+    assert.deepEqual(run.panel, { C1: "fail", C2: "pass" });
+  });
+});
+
 describe("scoring", () => {
   it("Cohen's κ: 1 for perfect agreement, 0 for chance, null without enough data", () => {
     assert.equal(kappa([["pass", "pass"], ["fail", "fail"], ["pass", "pass"], ["fail", "fail"]]), 1);

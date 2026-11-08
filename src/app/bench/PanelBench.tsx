@@ -36,13 +36,20 @@ export function PanelBench() {
         <>
           {s.panel.wrongPays === 0 && s.panel.falsePass === 0 && (
             <p className="mt-6 text-lg font-semibold text-ink">
-              When the panel is unsure, it asks a person instead of paying: <span className="text-paid">0 wrong payouts</span> in {s.panel.casesJudged} cases judged so far.
+              When the panel is unsure, it asks a person instead of paying: <span className="text-paid">0 wrong payouts</span> in {s.panel.casesJudged} cases judged so far
+              {s.injection.cases > 0 && s.injection.caught === s.injection.cases && (
+                <>
+                  , and <span className="text-paid">every injection attempt caught</span> ({s.injection.caught} of {s.injection.cases}, in seven languages and invisible characters)
+                </>
+              )}
+              .
             </p>
           )}
-          <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-rule bg-rule sm:grid-cols-4">
+          <dl className={`mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-rule bg-rule ${s.injection.cases > 0 ? "sm:grid-cols-3 lg:grid-cols-5" : "sm:grid-cols-4"}`}>
             {(
               [
                 ["Wrong payouts", `${s.panel.wrongPays} of ${s.panel.casesJudged}`, s.panel.wrongPays === 0, "cases where a bad deliverable would have been paid"],
+                ...(s.injection.cases > 0 ? [["Injection attempts caught", `${s.injection.caught} of ${s.injection.cases}`, s.injection.caught === s.injection.cases, `the scan caught ${s.injection.scan}; a panel model flagged ${s.injection.anyMember}`] as const] : []),
                 ["False passes", String(s.panel.falsePass), s.panel.falsePass === 0, "a criterion passed that shouldn't have"],
                 ["Sent to a person", String(s.panel.escalated), false, "unclear or unquoted votes are never paid on"],
                 ["Criteria judged right", `${s.panel.correct} of ${s.panel.criteria}`, false, "an unsure vote counts as not right"],

@@ -37,6 +37,19 @@ describe("AI client", () => {
     await assert.rejects(generateJson({ purpose: "t", system: "s", prompt: "p", schema, call }), AiUnreadable);
   });
 
+  it("a provider's own 400 moves on to the next model; our own 400 still throws", async () => {
+    const providerBad = new APICallError({ message: "Provider returned error", url: "https://openrouter.ai", requestBodyValues: {}, statusCode: 400, responseHeaders: { "x-openrouter-error-origin": "provider" } });
+    const call: ModelCall = async (model) => {
+      if (model === "test/primary:free") throw providerBad;
+      return '{"verdict":"pass"}';
+    };
+    assert.equal((await generateJson({ purpose: "t", system: "s", prompt: "p", schema, call })).model, "test/fallback:free");
+    const ours: ModelCall = async () => {
+      throw new APICallError({ message: "bad request", url: "https://openrouter.ai", requestBodyValues: {}, statusCode: 400 });
+    };
+    await assert.rejects(generateJson({ purpose: "t", system: "s", prompt: "p", schema, call: ours }), APICallError);
+  });
+
   it("every model busy is AiBusy", async () => {
     const call: ModelCall = async () => {
       throw busy();

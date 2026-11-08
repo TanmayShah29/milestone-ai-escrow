@@ -61,6 +61,10 @@ function retryable(err: unknown): number | undefined {
   if (APICallError.isInstance(err)) {
     const s = err.statusCode ?? 0;
     if (s === 404 || s === 408 || s === 429 || s >= 500 || err.isRetryable) return s || 503;
+    // OpenRouter marks errors from the model's host as provider errors. A free host sometimes answers a
+    // valid request with "400 bad request"; that is the host failing, so try the next model. Our own bad
+    // requests (a wrong key, a malformed body) carry no such header and still throw.
+    if (err.responseHeaders?.["x-openrouter-error-origin"] === "provider") return s || 502;
   }
   return undefined;
 }

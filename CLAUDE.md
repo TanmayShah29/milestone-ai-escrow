@@ -22,7 +22,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
   - **Current, set on Render Oct 22:**
     - `AI_MODEL=dots-studio/dots-3-note-preview:free`: about 30 s for a JSON draft, structured outputs. A live draft took 58 s.
     - `AI_MODEL_FALLBACK=nvidia/nemotron-3.5-super-vl:free`: a reasoning model; give it max_tokens ≥ 1500.
-    - `AI_MODEL_FALLBACK_2=nvidia/nemotron-3.5-lightning:free`: about 70 s; a reasoning model that needs a large token budget.
+    - `AI_MODEL_FALLBACK_2=recursive/flint-v1.0:free` (from Nov 8; replaces `nvidia/nemotron-3.5-lightning:free`, which returned empty or unclear panel votes on 13 of 13 bench cases): about 5 s, grounded JSON. **The user must set this on Render too.**
   - **No longer usable (Oct 22):**
     - `minimax/minimax-m3.1-flash:free` was removed from OpenRouter.
     - `google/gemma-4-*:free` often returns 429.
