@@ -53,8 +53,9 @@ Milestone is a pay-on-proof layer on PayPal, with GitHub pull requests as the fi
   a replayed result were both rejected.
 - **An AI panel:** three different free models judge what tests can't check, each seeing the criteria in a
   different order. A vote counts only if code finds its quote word for word in the diff. Two grounded
-  passes and no grounded fail make a pass, and a model's self-reported confidence decides nothing. Proof
-  Bench v2 measures the panel on 27 hand-labelled cases, including injections in seven languages.
+  passes and no grounded fail make a pass, and a model's self-reported confidence decides nothing. The
+  panel has its own test set of 27 hand-labelled cases (separate from the 12-PR Proof Bench below), and
+  `/bench` shows the cases run so far; free-model rate limits mean it is not finished.
 - **Evidence floors and partial pay:** each criterion names the least evidence it settles on, and a signed
   pay schedule lets PayPal capture only the earned share, releasing the rest of the hold in the same call.
 - **A neutral party at the end:** either side can lock a decision by funding a $5 fee hold. The evidence
@@ -72,9 +73,9 @@ once the work is proven, with no tool that lets the agent pay itself.
 **Measured, not claimed: Proof Bench.** Most AI escrow asks a model "is this done?". We gave that approver and
 Milestone the same signed contract and 12 pull requests: 3 honest, 9 cheats (a stub, broken code, three prompt
 injections including one hidden with invisible and look-alike characters, a rewritten CI workflow, a
-`process.exit(0)` harness escape, hard-coded test inputs, and a newline bug no test covers). Milestone paid 1 of 9
-cheats, blocked no honest work, answered every case and flagged all 5 attacks with the exact quote. The LLM-only
-approver paid 1 of the 8 cheats it judged (the hidden injection), gave no verdict on one, and mentioned none of
+`process.exit(0)` harness escape, hard-coded test inputs, and a newline bug no test covers). Milestone flagged all 5
+attacks with the exact quote, blocked no honest work, answered every case and paid only 1 of the 9 cheats. The
+LLM-only approver paid 1 of the 8 cheats it judged (the hidden injection), gave no verdict on one, and mentioned none of
 the attacks. Milestone's one miss is the newline bug: it can only be as strict as the tests both sides sign, and
 the page says so. Reproducible with `npm run bench`; a unit test re-checks Milestone's side on every run.
 
@@ -82,7 +83,8 @@ the page says so. Reproducible with `npm run bench`; a unit test re-checks Miles
 prepared branch, streams each signed test's CI status, has the AI reviewer read the diff for the one criterion no
 test can check (a nice-to-have, so it can't decide the money), then captures the hold and pays out, or catches
 the cheater with the money still held. A money rail shows where the $12.00 is at each step, and the payout line
-shows every fee. Afterwards `/timeline` and `/ledger` show these runs, with their real PayPal ids, to every
+shows every fee. Judge runs use $12.00 (the landing page follows an earlier $25.00 run). PayPal's card fee has a
+fixed part per payment, so fees take a smaller share of a larger milestone. Afterwards `/timeline` and `/ledger` show these runs, with their real PayPal ids, to every
 visitor; the Bryntum Gantt redraws itself from PayPal and review events (a failed review adds a rework bar and
 moves the later phases, a voided hold greys out what's left, a reauthorization moves the honor period).
 

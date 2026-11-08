@@ -28,7 +28,8 @@ function forRole(tasks: Task[], role: Timeline["role"]): Task[] {
 
 type Data = { tasks: unknown[]; dependencies: unknown[] };
 
-// The judge runs as one read-only chart, in the showcase's order (the paid run, then the caught cheat).
+// One judge run at a time, read only: runs hours apart in one chart squeezed each into a sliver, while a
+// single run zooms to its own minutes. The picker lists them in the showcase's order (paid run, then the cheat).
 const showcaseData = (runs: ShowcaseRunView[]): Data => ({ tasks: runs.flatMap((r) => r.timeline.tasks), dependencies: runs.flatMap((r) => r.timeline.dependencies) });
 
 export default function TimelinePage() {
@@ -36,6 +37,7 @@ export default function TimelinePage() {
   // A browser with no milestone links of its own sees the recent live judge runs instead (read only).
   const [showcase, setShowcase] = useState<ShowcaseRunView[]>();
   const [view, setView] = useState<"own" | "showcase">("own");
+  const [runIdx, setRunIdx] = useState(0);
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [warnings, setWarnings] = useState<string[]>([]);
   const [notice, setNotice] = useState<Notice>();
@@ -102,7 +104,10 @@ export default function TimelinePage() {
   const onRefuse = useCallback((message: string) => setNotice({ kind: "error", text: `The due date was not moved: ${message}` }), []);
 
   const showing = view === "showcase" && !!showcase?.length;
-  const showcaseChart = useMemo(() => (showcase?.length ? showcaseData(showcase) : undefined), [showcase]);
+  const run = showcase?.[Math.min(runIdx, (showcase?.length ?? 1) - 1)];
+  const showcaseChart = useMemo(() => (run ? showcaseData([run]) : undefined), [run]);
+  // "Honest worker · Nov 8, 06:28 UTC · $12.00" → "Honest · Nov 8, 06:28 UTC": the picker's buttons stay on one line.
+  const runName = (r: ShowcaseRunView) => String((r.timeline.tasks[0] as { name?: string } | undefined)?.name ?? "Judge run").replace(" worker", "").replace(/ · \$[\d,.]+$/, "");
   const ownCount = data?.tasks.length ?? 0;
 
   return (
@@ -117,6 +122,21 @@ export default function TimelinePage() {
         {!showing && ownCount > 0 && !!showcase?.length && <ShowcaseToggle onShow={() => setView("showcase")} />}
       </header>
       {showing && <ShowcaseNotice count={showcase!.length} onBack={ownCount > 0 ? () => setView("own") : undefined} className="mx-4 mt-2" />}
+      {showing && showcase!.length > 1 && (
+        <div role="group" aria-label="Which judge run to show" className="mx-4 mt-2 flex flex-wrap gap-2">
+          {showcase!.map((r, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-pressed={r === run}
+              onClick={() => setRunIdx(i)}
+              className={`min-h-9 rounded-md border px-3 text-sm ${r === run ? "border-ink bg-ink text-panel" : "border-rule-strong bg-panel text-ink hover:border-ink"}`}
+            >
+              {runName(r)}
+            </button>
+          ))}
+        </div>
+      )}
       <div role="status" aria-live="polite" className="empty:hidden mx-4 mt-2 flex flex-col gap-2">
         {!showing && notice && (
           <p className={`rounded-md border p-2 text-sm ${notice.kind === "error" ? "border-failed/40 bg-failed-field" : "border-paid/40 bg-paid-field"}`}>
@@ -135,7 +155,7 @@ export default function TimelinePage() {
         ) : !gantt && (showing || data.tasks.length > 0) ? (
           <TimelinePreview tasks={(showing ? showcaseChart!.tasks : data.tasks) as Task[]} onOpen={() => setGantt(true)} />
         ) : showing ? (
-          <GanttView key="showcase" data={showcaseChart!} readOnly fit />
+          <GanttView key={`showcase-${runIdx}`} data={showcaseChart!} readOnly fit />
         ) : data.tasks.length > 0 ? (
           <GanttView key="own" data={data} onReschedule={onReschedule} onRefuse={onRefuse} />
         ) : (

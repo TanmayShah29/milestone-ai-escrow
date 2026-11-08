@@ -17,6 +17,16 @@ function Countdown({ until }: { until: string }) {
   return <span className="font-semibold text-held">{s > 0 ? `${s}s left` : "Closing…"}</span>;
 }
 
+/** Seconds since a step became active, so a long wait (GitHub starting a runner) visibly moves. */
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(t);
+  }, []);
+  return <span className="font-mono text-xs text-ink-3">{Math.max(0, Math.floor((now - since) / 1000))}s</span>;
+}
+
 function StepIcon({ state }: { state: LiveStep["state"] }) {
   const base = "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border";
   if (state === "done") return <span className={`${base} border-paid bg-paid text-paper`}><Check className="size-3.5" aria-hidden="true" /></span>;
@@ -43,7 +53,8 @@ const STAMPS: { key: string; at: MoneyAt; label: string }[] = [
 /** Where the money is right now, with the real ids stamped where they happened. It only moves right when
  * code captures, and only after the tests pass. Before a run, it waits on the client's card. */
 function MoneyRail({ p, idleCents }: { p?: LiveProgress; idleCents: number }) {
-  const at = p?.moneyAt ?? "client";
+  // Once PayPal returns the capture, the money has left the hold, even if the server's moneyAt hasn't caught up.
+  const at: MoneyAt = p?.steps.some((s) => s.key === "capture" && s.id) ? "worker" : (p?.moneyAt ?? "client");
   const i = STATIONS.findIndex((s) => s.at === at);
   const stuck = !!p && p.status === "done" && p.outcome !== "paid"; // caught: it stays on hold, the worker gets nothing
   const cents = at === "worker" && p?.payoutCents != null ? p.payoutCents : (p?.amountCents ?? idleCents); // the worker gets the payout, not the hold
@@ -112,6 +123,7 @@ export function LiveRun() {
   const [dealId, setDealId] = useState<string>();
   const [error, setError] = useState<string>();
   const live = useRef(true);
+  const activeSince = useRef<Record<string, number>>({});
   useEffect(() => {
     live.current = true;
     return () => {
@@ -142,6 +154,7 @@ export function LiveRun() {
     setError(undefined);
     setProgress(undefined);
     setDealId(undefined);
+    activeSince.current = {};
     const r = await fetch("/api/demo/live", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind }) }).catch(() => undefined);
     const b = r ? await r.json().catch(() => ({})) : {};
     if (!r?.ok) {
@@ -197,7 +210,9 @@ export function LiveRun() {
       {progress && (
         <div className="mt-6 rounded-xl border border-rule bg-panel p-4 sm:p-6">
           <ol className="grid gap-x-8 gap-y-4 lg:grid-cols-2">
-            {progress.steps.map((s) => (
+            {progress.steps.map((s) => {
+              if (s.state === "active") activeSince.current[s.key] ??= Date.now();
+              return (
               <li key={s.key} className="flex gap-3">
                 <StepIcon state={s.state} />
                 <div className="min-w-0">
@@ -206,6 +221,7 @@ export function LiveRun() {
                   </p>
                   {s.detail && <p className="mt-0.5 break-words text-sm text-ink-2">{s.detail}</p>}
                   {s.until && s.state === "active" && <p className="mt-0.5 text-sm"><Countdown until={s.until} /></p>}
+                  {!s.until && s.state === "active" && activeSince.current[s.key] && <p className="mt-0.5"><Elapsed since={activeSince.current[s.key]!} /></p>}
                   {s.id && <p className="mt-0.5 break-all font-mono text-xs text-ink-3">{s.id}</p>}
                   {!!s.links?.length && (
                     <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
@@ -214,7 +230,8 @@ export function LiveRun() {
                   )}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ol>
           <Banner p={progress} />
           {dealId && progress.status !== "running" && (

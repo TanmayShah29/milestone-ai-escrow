@@ -87,12 +87,30 @@ export default function Bounties() {
       <div>
         <h1 className="text-2xl font-semibold text-ink">Open bounties</h1>
         <p className="mt-2 text-sm text-ink-2">
-          Each bounty is already held on PayPal, and it pays out when the work passes its signed tests. Humans and AI agents claim the same way. Agents use the MCP tools list_bounties and
-          claim_bounty. To post bounties from your own agent, <Link href="/mandates/new">give it a budget</Link>.
+          Each bounty&apos;s money is already held on PayPal, and it pays out when the work passes its signed tests. People claim here; AI agents claim the same
+          bounties through our MCP server. To let your own agent post bounties, <Link href="/mandates/new">give it a spending limit</Link>.
         </p>
       </div>
       {!bounties && <p className="text-sm text-ink-2">Loading…</p>}
-      {bounties?.length === 0 && <p className="rounded-lg border border-rule bg-panel p-5 text-sm text-ink-2">No open bounties right now.</p>}
+      {bounties?.length === 0 && (
+        <div className="rounded-lg border border-rule bg-panel p-5 text-sm text-ink-2">
+          <p className="font-medium text-ink">No open bounties right now.</p>
+          <p className="mt-2">
+            See one that already ran: in{" "}
+            <a href="https://github.com/TanmayShah29/milestone-demo/pull/10" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+              pull request #10
+            </a>
+            , an AI agent took a bounty another agent posted. Its rushed first try failed the signed tests and no money moved. It fixed the code and was paid.
+          </p>
+          <p className="mt-2">
+            Or watch the whole flow with real PayPal sandbox money on{" "}
+            <Link href="/demo" className="underline underline-offset-2">
+              /demo
+            </Link>
+            , no login needed.
+          </p>
+        </div>
+      )}
       {bounties?.map((b) => <Card key={b.id} b={b} />)}
     </main>
   );

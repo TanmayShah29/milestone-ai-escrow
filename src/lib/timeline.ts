@@ -209,9 +209,10 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
   const s = m.state;
   const live = !cancelled && s !== "PAID_OUT";
 
-  // What happened uses its real dates; what hasn't happened yet uses the plan. Every bar is at least five
-  // minutes long so a phase that took seconds (a live demo run) is still visible after zoom-to-fit.
-  const MIN_BAR = 5 * 60_000;
+  // What happened uses its real dates; what hasn't happened yet uses the plan. Every bar is at least 20
+  // seconds long so a phase that took a second (a live demo run) is still visible after zoom-to-fit, without
+  // padding a two-minute run out to half an hour.
+  const MIN_BAR = 20_000;
   const span = (start: number, end: number) => [start, Math.max(end, start + MIN_BAR)] as const;
   const fmt = (x?: number) => (x ? new Date(x).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "not yet");
 
@@ -334,7 +335,9 @@ export function buildTimeline(m: Milestone, audit: AuditRow[], now = Date.now())
   });
 
   // Paid: a milestone (zero-length task, drawn as a diamond) at the moment PayPal paid the worker.
-  if (paid) push({ key: "paid", name: `Paid ${money(m.payout_cents)}`, start: paid, end: paid, status: "done", note: `PayPal paid the worker ${money(m.payout_cents)} after fees${m.paypal_payout_item_id ? ` · payout item ${m.paypal_payout_item_id}` : ""} · ${fmt(paid)}`, auto: false, icon: ICON.paid! });
+  // Drawn at the payout bar's end, which is the payment time unless the bar was padded to MIN_BAR; the note
+  // keeps the exact time.
+  if (paid) push({ key: "paid", name: `Paid ${money(m.payout_cents)}`, start: payoutEnd, end: payoutEnd, status: "done", note: `PayPal paid the worker ${money(m.payout_cents)} after fees${m.paypal_payout_item_id ? ` · payout item ${m.paypal_payout_item_id}` : ""} · ${fmt(paid)}`, auto: false, icon: ICON.paid! });
 
   // A voided or expired hold (or a cancelled deal) ends everything that hadn't finished.
   if (cancelled) {

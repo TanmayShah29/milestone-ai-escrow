@@ -59,7 +59,7 @@ const PRESET: ViewPresetConfig = {
 
 // Under Tailwind's `sm` the grid shrinks to the task names so the bars stay visible.
 const NARROW = "(max-width: 639px)";
-const GRID = { wide: { name: 320, status: 140 }, narrow: { name: 150 } };
+const GRID = { wide: { name: 380, status: 120 }, narrow: { name: 150 } };
 const STATUS_LABEL: Record<string, string> = { unfunded: "not funded" };
 
 const canDrag = (t: TaskModel) => t.get("phase") === "work" && !!t.get("canReschedule");
@@ -227,7 +227,8 @@ export default function GanttView(props: { data: Data; onReschedule?: (milestone
         template: ({ baseline }: { baseline: { task: TaskModel; startDate: Date; endDate: Date } }) =>
           `<b>Planned before the rework</b><br>${StringHelper.encodeHtml(baseline.startDate.toLocaleString(undefined, DATE_TIME))} → ${StringHelper.encodeHtml(baseline.endDate.toLocaleString(undefined, DATE_TIME))}<br>${StringHelper.encodeHtml(String(baseline.task.get("movedBy") ?? ""))}`,
       },
-      timeRangesFeature: { showCurrentTimeLine: true },
+      // "Now" helps when planning your own milestones; on finished judge runs it only overlaps the header.
+      timeRangesFeature: { showCurrentTimeLine: !readOnly },
       // A hold about to lapse is outlined red on its bar (its fill is already red from the data).
       taskRenderer: ({ taskRecord, renderData }: { taskRecord: TaskModel; renderData: { cls: unknown } }) => {
         (renderData.cls as Record<string, boolean>)["ms-expiring"] = !!taskRecord.get("holdExpiring");

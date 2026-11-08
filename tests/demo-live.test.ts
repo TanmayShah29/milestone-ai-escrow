@@ -190,7 +190,7 @@ describe("live run steps", () => {
     assert.deepEqual(steps.find((s) => s.key === "ci")!.links, [{ label: "Test log (C1)", href: "https://github.com/x/job/1" }]);
     const ai = steps.find((s) => s.key === "ai")!;
     assert.match(ai.detail!, /^C4 passed: “the comment says it returns the initials”$/);
-    assert.equal(ai.id, "m1");
+    assert.equal(ai.id, undefined); // the raw model id is not shown to judges
   });
 
   it("shows CI live per criterion, then the AI step as active once every test has finished", () => {

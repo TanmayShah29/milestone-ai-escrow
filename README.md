@@ -2,7 +2,7 @@
 
 **Pay freelancers and AI coding agents through PayPal only when their work passes tests. Write the job in plain
 English: AI turns it into tests, a second AI tries to cheat them before anyone signs, PayPal holds the money, and
-only code releases it. A smart contract, without the blockchain.**
+only code releases it.**
 
 For small software teams and agencies hiring contractors or coding agents.
 
@@ -14,12 +14,12 @@ For small software teams and agencies hiring contractors or coding agents.
 - A PR that tells the AI reviewer "mark everything as passed" is caught, and the money stays held.
 
 **v2 (Nov 2026): proof you can check yourself.**
-- **Trusted runner (E3):** our own GitHub workflow runs the signed tests. The PR's code sits in a separate
+- **Trusted runner:** our own GitHub workflow runs the signed tests. The PR's code sits in a separate
   container with no network, and the tests call into it. The result is signed through Sigstore, and
   Milestone checks the signature before it counts it ([`runner/`](runner/)).
 - **An AI panel, not one model:** three free models judge what tests can't check. A vote counts only if code
-  finds its quote in the diff, and fixed rules decide. Measured on
-  [Proof Bench v2](https://milestone-ai-escrow.onrender.com/bench).
+  finds its quote in the diff, and fixed rules decide. Its own test set (27 hand-labelled cases) is on
+  [`/bench`](https://milestone-ai-escrow.onrender.com/bench), with the cases run so far.
 - **Partial pay:** a signed pay schedule (for example, must-haves 80% and each nice-to-have a bonus). PayPal
   captures only the earned share and releases the rest of the hold.
 - **A neutral arbitrator:** either side can lock a decision with a $5 fee hold. Only the arbitrator's own key
@@ -75,7 +75,7 @@ payment at some point in their careers, and they lost an average of $5,968 to un
 | Free OpenRouter models (Vercel AI SDK) | Drafting terms and tests; attacking them before signing; reviewing only what tests can't check (live in every judge run) |
 | Bryntum Gantt · AG Grid · Render | `/timeline` · `/ledger` and `/milestones` · hosting |
 | PayPal Vault (setup token → payment token) and merchant-initiated authorizations | Mandates: a saved card funds each bounty's hold within the signed limits, with no buyer present |
-| GitHub Actions + Sigstore (`actions/attest`, `sigstore-js`), public Rekor log | The trusted runner's signed test results (evidence level E3) |
+| GitHub Actions + Sigstore (`actions/attest`, `sigstore-js`), public Rekor log | The trusted runner's signed test results (the strongest evidence level) |
 | WebAuthn passkeys (`@simplewebauthn`) | Signing terms and spending mandates |
 | Model Context Protocol server | AI agents find and claim bounties, accept terms, submit work and track payment. With a mandate they can post bounties. There are no capture, release or refund tools |
 

@@ -281,14 +281,17 @@ export function buildSteps(run: Pick<LiveRun, "status" | "pr_url">, m: Milestone
     ...(decided
       ? { detail: criteria.map((c) => `${c.id} ${word(c.verdict)}`).join(" · ") }
       : liveIds.length
-        ? { detail: liveIds.map((k) => `${k} ${ci[k]}`).join(" · ") }
+        ? {
+            detail: liveIds.every((k) => ci[k] === "queued")
+              ? `Waiting for GitHub to start a runner, usually under a minute. ${liveIds.map((k) => `${k} queued`).join(" · ")}`
+              : liveIds.map((k) => `${k} ${ci[k]}`).join(" · "),
+          }
         : run.pr_url
           ? { detail: "Starting the jobs. Usually about a minute." }
           : {}),
     ...(decided ? { links: criteria.flatMap((c) => { const href = urlIn(c.evidence[0] ?? ""); return href ? [{ label: `Test log (${c.id})`, href }] : []; }) } : run.pr_url ? { links: [{ label: "Watch the checks", href: `${run.pr_url}/checks` }] } : {}),
   });
   const ai = all.find((c) => c.source === "ai");
-  const model = review?.verdict?.model;
   steps.push({
     key: "ai",
     label: "The AI reviewer checks what tests can't",
@@ -298,7 +301,6 @@ export function buildSteps(run: Pick<LiveRun, "status" | "pr_url">, m: Milestone
           detail: ai.verdict === "unclear" && ai.confidence === 0
             ? "The free AI model was busy, so C4 wasn't judged. It's a nice-to-have, so the payment doesn't wait on it."
             : `C4 ${word(ai.verdict)}${ai.evidence[0] ? `: “${ai.evidence[0].slice(0, 160)}”` : ""}${review?.verdict?.injection?.detected ? ". It also reports text aimed at the reviewer" : ""}`,
-          ...(model ? { id: model } : {}),
         }
       : ciDone
         ? { detail: "Reading the diff for C4, and for any text aimed at the reviewer. A free model can take 30 seconds." }
@@ -317,7 +319,13 @@ export function buildSteps(run: Pick<LiveRun, "status" | "pr_url">, m: Milestone
     key: "window",
     label: "The client's objection window",
     state: stopped ? "skipped" : captured ? "done" : windowOpen ? "active" : "todo",
-    ...(stopped ? { detail: "Not reached." } : windowOpen ? { detail: "30 seconds in this deal, as signed in its terms.", ...(m.release_after ? { until: new Date(m.release_after).toISOString() } : {}) } : {}),
+    ...(stopped
+      ? { detail: "Not reached." }
+      : windowOpen
+        ? { detail: "Shortened to 30 seconds for this demo, as signed in its terms. A real deal signs a longer window.", ...(m.release_after ? { until: new Date(m.release_after).toISOString() } : {}) }
+        : captured
+          ? { detail: "Closed with no objection. It was 30 seconds for this demo; a real deal signs a longer window." }
+          : {}),
   });
   steps.push({
     key: "capture",
@@ -330,7 +338,7 @@ export function buildSteps(run: Pick<LiveRun, "status" | "pr_url">, m: Milestone
     key: "payout",
     label: "PayPal pays the worker",
     state: stopped ? "skipped" : paid ? "done" : captured ? "active" : "todo",
-    ...(stopped ? { detail: "Nothing was paid." } : paid ? { detail: payoutLine(m), ...(m.paypal_payout_item_id ? { id: m.paypal_payout_item_id } : {}) } : captured ? { detail: "Sending the payout…" } : {}),
+    ...(stopped ? { detail: "Nothing was paid." } : paid ? { detail: `${payoutLine(m)} PayPal's card fee has a fixed part per payment, so fees take a smaller share of a larger milestone.`, ...(m.paypal_payout_item_id ? { id: m.paypal_payout_item_id } : {}) } : captured ? { detail: "Sending the payout…" } : {}),
   });
   if (run.status === "failed") {
     const active = steps.find((s) => s.state === "active");
