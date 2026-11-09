@@ -20,7 +20,6 @@ export const ACTION_ROLES: Record<string, Role[]> = {
   release: ["client"],
   "refresh-hold": ["client"],
   schedule: ["client"],
-  "dev-pass": ["client"],
   sync: ["client", "worker"],
   "rotate-link": ["client", "worker"],
   erase: ["client"],

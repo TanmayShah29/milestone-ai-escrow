@@ -400,7 +400,7 @@ Environment (names only; see `.env.example`):
 | `GITHUB_TOKEN` | Optional fine-grained token (PR read/write on the target repo) for higher rate limits and verdict comments. Public check runs need no Checks permission |
 | `OBJECTION_WINDOW_SECONDS` (default 120), `OBJECTION_RELEASE_SECONDS` (default 259200 = 72 h) | Review clocks |
 | `RATE_LIMIT_SALT` | Optional secret. IPs in the rate-limit table are HMAC-SHA256 hashed with it (plain salted SHA-256 if unset) |
-| `ALLOW_DEV_ACTIONS` | Dev-only routes and forced PayPal errors. Leave it unset in production |
+| `ALLOW_DEV_ACTIONS` | Forced PayPal errors (`PayPal-Mock-Response`) for local testing. Leave it unset in production |
 | `AI_PANEL_SIZE` (default 3), `PAYOUT_FEE_BPS`, `PAYOUT_FEE_CAP_CENTS` | Review panel size and the payout fee passed on to the worker |
 | `RUNNER_GITHUB_TOKEN`, `PROOF_SIGNING_KEY` | Optional: the trusted runner and the proof-chain signing key |
 | `ARBITRATOR_NAME`, `ARBITRATOR_PUBLIC_JWK`, `ARBITRATOR_PAYPAL_EMAIL`, `RESOLUTION_FEE_CENTS` | Optional: the resolution desk |

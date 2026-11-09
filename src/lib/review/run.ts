@@ -70,9 +70,31 @@ export async function submitDeliverable(milestoneId: string, input: { prUrl?: st
             : `The pull request description cites different terms. Replace that line with this one, then submit again: ${line}`,
       );
     }
+    if (await sentBack(m.id, pr.headSha)) throw new InvariantViolation(SENT_BACK);
     return transition(db(), m, "SUBMITTED", "freelancer", { pr_url: input.prUrl!.trim() }, { event: "deliverable:submitted", detail: { headSha: pr.headSha, ...(pr.author ? { githubLogin: pr.author } : {}) } });
   });
 }
+
+const SENT_BACK = "This commit was already sent back for changes. Push a new commit with the fixes, then submit again.";
+
+/**
+ * Was this commit sent back after it was reviewed: by a failing second review, or by the client asking for
+ * changes? Then its cached verdict must not pass it again, or resubmitting the same commit would undo the
+ * client's objection or change request.
+ */
+async function sentBack(milestoneId: string, headSha: string): Promise<boolean> {
+  const { rows } = await db().query(
+    `select 1 from reviews r where r.milestone_id = $1 and r.head_sha = $2 and r.status = 'done' and (
+       exists (select 1 from reviews s where s.milestone_id = $1 and s.head_sha like $2 || ':second:%' and s.status = 'done' and s.decision <> 'PASSED')
+       or exists (select 1 from audit_log a where a.milestone_id = $1 and a.event = 'review:changes_by_client' and a.created_at >= r.updated_at))
+     limit 1`,
+    [milestoneId, headSha],
+  );
+  return rows.length > 0;
+}
+
+/** First-review attempts the AI couldn't finish (busy, unreadable) are retried at most this often. */
+const REVIEW_RETRY_MS = 5 * 60_000;
 
 /** Run the verifier and apply the policy. Idempotent per commit: a commit's verdict is computed once. */
 export async function reviewMilestone(milestoneId: string, deps: ReviewDeps = defaultReviewDeps()): Promise<Milestone> {
@@ -89,13 +111,36 @@ export async function reviewMilestone(milestoneId: string, deps: ReviewDeps = de
       const ref = parsePrUrl(m.pr_url ?? "")!;
       pr = await deps.github.pr(ref.owner, ref.repo, ref.number);
       if (!termsLineProblem(pr.body, m.criteria_hash)) {
+        if (await sentBack(m.id, pr.headSha)) {
+          return transition(db(), m, "CHANGES_REQUESTED", "system", {}, { event: "review:changes_requested", detail: { reasons: [SENT_BACK], headSha: pr.headSha } });
+        }
         const prior = await db().query<{ verdict: Verdict; decision: string }>("select verdict, decision from reviews where milestone_id = $1 and head_sha = $2 and status = 'done'", [m.id, pr.headSha]);
         if (prior.rows[0]) return applyDecision(m, prior.rows[0].verdict, deps, false);
       }
     }
 
+    // After an AI failure, wait before calling the models again: page polling and tick would otherwise
+    // spend the daily AI budget in minutes during an outage.
+    const pendingKey = pr?.headSha ?? "text";
+    const { rows: busyRows } = await db().query<{ updated_at: Date }>(
+      "select updated_at from reviews where milestone_id = $1 and head_sha = $2 and status = 'pending' and reasons::text like '%AI busy%'",
+      [m.id, pendingKey],
+    );
+    if (busyRows[0] && Date.now() - busyRows[0].updated_at.getTime() < REVIEW_RETRY_MS) return m;
+
     const first = { ...deps, models: pinnedFirst(terms, deps.models ?? configuredModels()) };
-    const result = m.verifier === "code_pr" ? await verifyCodePr(m, terms, first, pr) : await verifyText(m, terms, first);
+    let result: Awaited<ReturnType<typeof verifyCodePr>>;
+    try {
+      result = m.verifier === "code_pr" ? await verifyCodePr(m, terms, first, pr) : await verifyText(m, terms, first);
+    } catch (err) {
+      if (!(err instanceof AiBusy || err instanceof AiUnreadable)) throw err;
+      await db().query(
+        `insert into reviews (milestone_id, head_sha, status, reasons) values ($1, $2, 'pending', $3)
+         on conflict (milestone_id, head_sha) do update set reasons = excluded.reasons, updated_at = now()`,
+        [m.id, pendingKey, JSON.stringify([`AI busy: ${err.message}`])],
+      );
+      throw err;
+    }
     if (result.status === "pending") {
       await db().query(
         `insert into reviews (milestone_id, head_sha, status, reasons) values ($1, $2, 'pending', $3)
@@ -356,6 +401,39 @@ export async function resolveObjection(milestoneId: string, deps: ReviewDeps = d
   });
 }
 
+/**
+ * Before an automatic release, make sure the PR still points at the commit that was reviewed. Commits
+ * pushed after approval were never checked, so the work goes back for changes (and a fresh review) instead
+ * of being paid. The client's own "release" action skips this (that is the client's call), and so does a
+ * decision the resolution desk settled.
+ */
+async function checkCommitBeforeRelease(milestoneId: string, deps: ReviewDeps): Promise<Milestone> {
+  return withMilestoneLock(milestoneId, async () => {
+    const m = await getMilestone(milestoneId);
+    if (m.state !== "PASSED" || m.verifier !== "code_pr" || !m.pr_url) return m;
+    const { rows: locks } = await db().query("select 1 from locks where milestone_id = $1 limit 1", [m.id]);
+    if (locks[0]) return m;
+    const { rows } = await db().query<{ head_sha: string }>(
+      "select head_sha from reviews where milestone_id = $1 and status = 'done' and head_sha ~ '^[0-9a-f]{7,64}(:second:|$)' order by updated_at desc, id desc limit 1",
+      [m.id],
+    );
+    const reviewed = rows[0]?.head_sha.split(":")[0];
+    if (!reviewed) return m;
+    const ref = parsePrUrl(m.pr_url)!;
+    const pr = await deps.github.pr(ref.owner, ref.repo, ref.number);
+    if (pr.headSha === reviewed) return m;
+    const verdict = movedVerdict(termsSchema.parse(m.criteria), reviewed, pr.headSha);
+    const { decision, reasons } = decide(verdict, pinsOf(m.criteria));
+    // A new commit gets a normal review and objection window, so the objection is cleared too.
+    const out = await transition(db(), m, "CHANGES_REQUESTED", "system", { contested_at: null, changes_reason: null }, {
+      event: "review:changes_requested",
+      detail: { reasons, summary: verdict.summary, headSha: pr.headSha, reviewedSha: reviewed },
+    });
+    await postComment(m, verdict, decision, reasons, deps, "Not released");
+    return out;
+  });
+}
+
 /** The worker pushed after approval: the approved commit is no longer what would be paid for. */
 function movedVerdict(terms: Terms, reviewed: string, now: string): Verdict {
   const blocked = `the pull request changed after it was approved (commit ${reviewed.slice(0, 7)} is now ${now.slice(0, 7)})`;
@@ -407,6 +485,7 @@ export async function tick(milestoneId: string, deps: ReviewDeps = defaultReview
   if (m.state === "SUBMITTED" || m.state === "IN_REVIEW") m = await reviewMilestone(m.id, deps);
   if (m.state === "CONTESTED") m = await resolveObjection(m.id, deps);
   if (m.state === "HUMAN_CHECK") m = await expireHumanCheck(m.id, deps);
+  if (m.state === "PASSED" && m.release_after && m.release_after.getTime() <= Date.now()) m = await checkCommitBeforeRelease(m.id, deps);
   if (m.state === "PASSED" && m.release_after && m.release_after.getTime() <= Date.now()) m = await releaseFunds(m.id, deps.money);
   if (m.state === "RELEASED") m = await syncMilestone(m.id, deps.money);
   return m;

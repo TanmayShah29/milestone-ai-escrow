@@ -538,7 +538,18 @@ async function endHoldIfGone(m: Milestone, deps: Deps): Promise<Milestone> {
 async function syncMilestoneLocked(milestoneId: string, deps: Deps): Promise<Milestone> {
   let m = await getMilestone(milestoneId);
   for (const claim of await unknownClaims(db(), m.id)) {
-    m = await resumeAction(m, claim, deps);
+    try {
+      m = await resumeAction(m, claim, deps);
+    } catch (err) {
+      // The milestone moved on since this claim (say, a reauthorize whose outcome was lost, then a capture):
+      // its action no longer applies here, so it can't be settled by re-running it. Leave the claim for a
+      // person, and don't let it block the rest of the sync (payout status, PAID_OUT) forever.
+      if (!(err instanceof InvariantViolation)) throw err;
+      const event = `${claim.action}:unsettled`;
+      const { rows } = await db().query("select 1 from audit_log where milestone_id = $1 and event = $2 and detail->>'requestId' = $3 limit 1", [m.id, event, claim.request_id]);
+      if (!rows[0]) await audit(db(), { milestoneId: m.id, actor: "system", event, detail: { requestId: claim.request_id, reason: err.message } });
+      m = await getMilestone(m.id);
+    }
   }
   m = await endHoldIfGone(m, deps);
   if (m.state === "RELEASED" && m.paypal_capture_id && m.capture_status !== "COMPLETED") {

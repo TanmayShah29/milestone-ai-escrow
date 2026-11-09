@@ -191,11 +191,12 @@ describe("GET /api/status", () => {
 });
 
 describe("dev actions are off unless ALLOW_DEV_ACTIONS=1", () => {
-  it("dev-pass returns 404 and leaves the milestone alone", async () => {
-    process.env.ALLOW_DEV_ACTIONS = "0";
+  it("there is no route that marks a review passed: dev-pass is refused and the milestone is left alone", async () => {
+    process.env.ALLOW_DEV_ACTIONS = "1";
     const id = await milestoneFor("ct_dev", { state: "IN_REVIEW" });
     const res = await actionReq(id, "dev-pass", "ct_dev", "192.0.2.40");
-    assert.equal(res.status, 404);
+    process.env.ALLOW_DEV_ACTIONS = "0";
+    assert.ok(res.status >= 400 && res.status < 500, `status ${res.status}`);
     assert.equal((await getMilestone(id)).state, "IN_REVIEW");
   });
 
