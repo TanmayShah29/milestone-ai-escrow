@@ -46,7 +46,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - Force errors with the `PayPal-Mock-Response: {"mock_application_codes":"INSTRUMENT_DECLINED"}` header
 
 ## Current status (updated Oct 22)
-**Phases 0–5 of `docs/MILESTONE_PLAN.md` are done and live, plus two audit rounds (Oct 21–22).** Next: the demo video, the Bryntum license, then submission. Feature freeze Nov 6.
+**Phases 0–5 of `docs/MILESTONE_PLAN.md` are done and live, plus two audit rounds (Oct 21–22).** Next: the demo video, then submission. (Nov 9: the user decided not to request a Bryntum license; it isn't required. Don't remind them.) Feature freeze Nov 6.
 - **Audit rounds shipped:**
   - Verifier hardening, together with the milestone-demo `run-tests.mjs` harness and check names `acceptance (Cn) terms <hash>`. The app and demo repo must stay in step.
   - Stale and weak tests block signing (AI tests must fail against an empty stub; `src/lib/contract/testcheck.ts`).
@@ -77,7 +77,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - **Design:** `PRODUCT.md`, `DESIGN.md`, `docs/design/deal-room.brief.md` ("Security print"). Skills in `.claude/skills/`: `frontend-design`, `impeccable`. Impeccable's binary launcher is **not** run (it downloads a binary); ask the user before enabling it.
 - **Verification tools:** Playwright + headless Chromium are installed (`node_modules/playwright`) for screenshots. The Claude in Chrome extension was not connected on Oct 21.
 - **Key code:** money flow `src/lib/money/flow.ts` (claims, locks, unknown-outcome settling), contract `src/lib/contract/terms.ts`, verifiers and policy `src/lib/review/`, webhooks `src/lib/money/webhooks.ts`, MCP server `mcp/server.mts`, judge mode `src/lib/demo.ts` + `/demo`, Gantt `src/app/timeline/`.
-- **Open user actions:** (1) set up a free keep-awake pinger (cron-job.org, every 10 min) on `/api/tick`; (2) post the Bryntum hackathon-license request in the PayPal Discord (https://discord.gg/sJ2G6DyvSK); remind them before the video; (3) APIMatic usage form: submitted Nov 9.
+- **Open user actions:** (1) set up a free keep-awake pinger (cron-job.org, every 10 min) on `/api/tick`; (2) Bryntum license: not requested, by choice (Nov 9); the trial watermark stays; (3) APIMatic usage form: submitted Nov 9.
 
 ## Money rules (do not break these)
 1. **The AI never moves money; code may fund only within a mandate a human signed.** Model output is a recommendation. Only deterministic code applies the decision policy and calls capture, void, payout or refund. Never expose those calls as tools the model can use. (Amended Nov 6 with the user's OK: an agent holding a passkey-signed spending mandate may post bounties, and fixed code funds each hold on the vaulted card only within the signed limits, `src/lib/mandates/`.)

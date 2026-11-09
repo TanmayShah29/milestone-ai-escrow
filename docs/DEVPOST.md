@@ -211,5 +211,5 @@ Recording checklist:
 - Scene lines echo the landing page on purpose: the hero headline, "Why not just let the AI pay?", and the rule "the AI writes and checks the contract; only code moves money".
 - Wake the service first (`/api/health`). Check `/api/status` shows `busy: false`.
 - Say "PayPal", "sandbox" and "AI" by name. No copyrighted music. Captions on; zoom so text reads on a phone.
-- Bryntum runs on the public trial package (watermark) unless the hackathon license is applied.
+- Bryntum runs on the public trial package, so the timeline shows a trial watermark. That's expected; no license is being requested.
 - After uploading: paste the YouTube link here and at the top of the README.
