@@ -77,7 +77,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - **Design:** `PRODUCT.md`, `DESIGN.md`, `docs/design/deal-room.brief.md` ("Security print"). Skills in `.claude/skills/`: `frontend-design`, `impeccable`. Impeccable's binary launcher is **not** run (it downloads a binary); ask the user before enabling it.
 - **Verification tools:** Playwright + headless Chromium are installed (`node_modules/playwright`) for screenshots. The Claude in Chrome extension was not connected on Oct 21.
 - **Key code:** money flow `src/lib/money/flow.ts` (claims, locks, unknown-outcome settling), contract `src/lib/contract/terms.ts`, verifiers and policy `src/lib/review/`, webhooks `src/lib/money/webhooks.ts`, MCP server `mcp/server.mts`, judge mode `src/lib/demo.ts` + `/demo`, Gantt `src/app/timeline/`.
-- **Open user actions:** (1) set up a free keep-awake pinger (cron-job.org, every 10 min) on `/api/tick`; (2) post the Bryntum hackathon-license request in the PayPal Discord (https://discord.gg/sJ2G6DyvSK); remind them before the video; (3) around Nov 9–11, submit APIMatic's usage form (link in the checklist below).
+- **Open user actions:** (1) set up a free keep-awake pinger (cron-job.org, every 10 min) on `/api/tick`; (2) post the Bryntum hackathon-license request in the PayPal Discord (https://discord.gg/sJ2G6DyvSK); remind them before the video; (3) APIMatic usage form: submitted Nov 9.
 
 ## Money rules (do not break these)
 1. **The AI never moves money; code may fund only within a mandate a human signed.** Model output is a recommendation. Only deterministic code applies the decision policy and calls capture, void, payout or refund. Never expose those calls as tools the model can use. (Amended Nov 6 with the user's OK: an agent holding a passkey-signed spending mandate may post bounties, and fixed code funds each hold on the vaulted card only within the signed limits, `src/lib/mandates/`.)
@@ -103,5 +103,5 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - [ ] Working hosted demo (Render URL) or complete run instructions
 - [ ] YouTube demo video under 3 minutes, showing it working end to end. No copyrighted music
 - [ ] Devpost text description, plus which tools and models were used and how
-- [ ] **Remind the user:** once the project is built (about Nov 9–11), submit APIMatic's usage form to show we used the Context Plugin: https://docs.google.com/forms/d/e/1FAIpQLScc2oCgAFACm7d6H3R4mgzv-O34DdyVnLIBNiwmUNggr_-hhA/viewform
+- [x] APIMatic usage form submitted by the user on Nov 9 (Participant claim). Was: once the project is built (about Nov 9–11), submit APIMatic's usage form to show we used the Context Plugin: https://docs.google.com/forms/d/e/1FAIpQLScc2oCgAFACm7d6H3R4mgzv-O34DdyVnLIBNiwmUNggr_-hhA/viewform
 - [ ] Sponsor credit: README, Devpost text and video name APIMatic Context Plugin (used to build the PayPal integration; no APIMatic account needed), Bryntum (Gantt), AG Grid (portfolio grid) and Render (hosting only; Workflows is not used)
