@@ -22,7 +22,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
   - **Current, set on Render Oct 22:**
     - `AI_MODEL=dots-studio/dots-3-note-preview:free`: about 30 s for a JSON draft, structured outputs. A live draft took 58 s.
     - `AI_MODEL_FALLBACK=nvidia/nemotron-3.5-super-vl:free`: a reasoning model; give it max_tokens ≥ 1500.
-    - `AI_MODEL_FALLBACK_2=recursive/flint-v1.0:free` (from Nov 8; replaces `nvidia/nemotron-3.5-lightning:free`, which returned empty or unclear panel votes on 13 of 13 bench cases): about 5 s, grounded JSON. **The user must set this on Render too.**
+    - `AI_MODEL_FALLBACK_2=recursive/flint-v1.0:free` (from Nov 8; replaces `nvidia/nemotron-3.5-lightning:free`, which returned empty or unclear panel votes on 13 of 13 bench cases): about 5 s, grounded JSON. Set on Render by the user (Nov 9).
   - **No longer usable (Oct 22):**
     - `minimax/minimax-m3.1-flash:free` was removed from OpenRouter.
     - `google/gemma-4-*:free` often returns 429.
@@ -67,7 +67,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
   - Judge funding rotates through PayPal's sandbox test cards, because `…0004` gets `PAYER_CANNOT_PAY` after heavy use.
 - **Docs:** the README has the threat model and limits; `docs/DEVPOST.md` has the submission text and video outline (YouTube link still a placeholder).
 - **Open user actions (Oct 22):**
-  - Set `RATE_LIMIT_SALT` on Render (`openssl rand -hex 32`).
+  - `RATE_LIMIT_SALT` set on Render by the user (Nov 9).
   - Drag a Work bar once in a real browser to confirm it saves.
   - Optionally ask in Discord about `platform_fees` for hackathon apps.
 - **Live app:** https://milestone-ai-escrow.onrender.com (Render free web service `srv-dbbpughjfumc73d08ia0`, auto-deploys from `main`; `/api/health` reports the live commit). Workspace `tea-dbbntvgn74is73daou00`. The user will not add a card anywhere: free tiers only.
@@ -77,7 +77,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - **Design:** `PRODUCT.md`, `DESIGN.md`, `docs/design/deal-room.brief.md` ("Security print"). Skills in `.claude/skills/`: `frontend-design`, `impeccable`. Impeccable's binary launcher is **not** run (it downloads a binary); ask the user before enabling it.
 - **Verification tools:** Playwright + headless Chromium are installed (`node_modules/playwright`) for screenshots. The Claude in Chrome extension was not connected on Oct 21.
 - **Key code:** money flow `src/lib/money/flow.ts` (claims, locks, unknown-outcome settling), contract `src/lib/contract/terms.ts`, verifiers and policy `src/lib/review/`, webhooks `src/lib/money/webhooks.ts`, MCP server `mcp/server.mts`, judge mode `src/lib/demo.ts` + `/demo`, Gantt `src/app/timeline/`.
-- **Open user actions:** (1) set up a free keep-awake pinger (cron-job.org, every 10 min) on `/api/tick`; (2) Bryntum license: not requested, by choice (Nov 9); the trial watermark stays; (3) APIMatic usage form: submitted Nov 9.
+- **Open user actions:** (1) keep-awake pinger on `/api/tick` (cron-job.org, every 10 min): set up by the user (Nov 9); (2) Bryntum license: not requested, by choice (Nov 9); the trial watermark stays; (3) APIMatic usage form: submitted Nov 9.
 
 ## Money rules (do not break these)
 1. **The AI never moves money; code may fund only within a mandate a human signed.** Model output is a recommendation. Only deterministic code applies the decision policy and calls capture, void, payout or refund. Never expose those calls as tools the model can use. (Amended Nov 6 with the user's OK: an agent holding a passkey-signed spending mandate may post bounties, and fixed code funds each hold on the vaulted card only within the signed limits, `src/lib/mandates/`.)
