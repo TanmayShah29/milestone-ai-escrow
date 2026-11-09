@@ -14,10 +14,14 @@ const STEPS = [
 
 export function AgentsHire() {
   const ref = useRef<HTMLOListElement>(null);
-  const [seen, setSeen] = useState(false);
+  // null until mounted: the server render (and no-JS, previews, reduced motion) shows everything; only a
+  // section still below the fold is hidden and revealed on scroll.
+  const [seen, setSeen] = useState<boolean | null>(null);
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === "undefined") return setSeen(true);
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!el || reduced || typeof IntersectionObserver === "undefined" || el.getBoundingClientRect().top < window.innerHeight) return;
+    setSeen(false);
     const io = new IntersectionObserver(([e]) => e?.isIntersecting && (setSeen(true), io.disconnect()), { threshold: 0.3 });
     io.observe(el);
     return () => io.disconnect();
@@ -37,7 +41,7 @@ export function AgentsHire() {
           style={{ transform: seen ? "scale(1)" : "scale(0)" }}
         />
         {STEPS.map((s, k) => (
-          <li key={s.title} className={`relative pl-9 md:pl-0 md:pt-9 ${seen ? "detail-in" : "opacity-0"}`} style={seen ? { animationDelay: `${k * 300}ms` } : undefined}>
+          <li key={s.title} className={`relative pl-9 md:pl-0 md:pt-9 ${seen ? "detail-in" : seen === false ? "opacity-0" : ""}`} style={seen ? { animationDelay: `${k * 300}ms` } : undefined}>
             <span className={`absolute left-0 top-0 flex size-6 items-center justify-center rounded-full border text-xs font-semibold ${k === 3 ? "border-paid bg-paid text-panel" : "border-ink bg-panel text-ink"}`}>{k + 1}</span>
             <p className="text-xs text-ink-3">{s.who}</p>
             <p className="mt-0.5 font-semibold text-ink">{s.title}</p>

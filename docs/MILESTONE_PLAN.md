@@ -5,7 +5,7 @@
 > is proven (tests, an AI judge, or a deterministic check). *The AI writes and checks the contract; only
 > code moves money.* The freelance GitHub-PR flow is the first use case and reference app. Workers can be
 > humans **or AI agents**. The sections below the "Pay-on-proof plan" are the original plan; where they
-> conflict, the new plan wins. `Milestone_Project_Plan.pdf` predates this change.
+> conflict, the new plan wins. `docs/archive/Milestone_Project_Plan.pdf` predates this change.
 
 ## Pay-on-proof plan (Oct 21)
 

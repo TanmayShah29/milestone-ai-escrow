@@ -91,7 +91,7 @@ export function liveAiCall(live: ModelCall): ModelCall {
 function defaults(): LiveDeps {
   const review = defaultReviewDeps();
   const models = configuredModels().slice(0, 1);
-  return { review: { ...review, aiCall: liveAiCall(review.aiCall ?? openRouterCall), models }, writer: githubPrWriter() };
+  return { review: { ...review, aiCall: liveAiCall(review.aiCall ?? openRouterCall), models, unclearNicesWhenBusy: true }, writer: githubPrWriter() };
 }
 
 /** Runs started in the last hour (a global brake on the free tier and the sandbox). */

@@ -13,7 +13,7 @@ const OG_TITLE = "Milestone: pay only when the work passes";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.APP_URL ?? "https://milestone-ai-escrow.onrender.com"),
-  title: "Milestone",
+  title: { default: "Milestone: pay-on-proof payments on PayPal", template: "%s · Milestone" },
   description: DESCRIPTION,
   openGraph: { type: "website", siteName: "Milestone", title: OG_TITLE, description: DESCRIPTION, url: "/", images: [OG_IMAGE] },
   twitter: { card: "summary_large_image", title: OG_TITLE, description: DESCRIPTION, images: [OG_IMAGE] },
@@ -27,31 +27,33 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           Skip to content
         </a>
         <header className="sticky top-0 z-50 border-b border-rule bg-paper/80 text-ink backdrop-blur-md supports-[backdrop-filter]:bg-paper/70">
-          <nav className="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4 text-sm sm:gap-6" aria-label="Main">
-            <Link href="/" aria-label="Milestone home" className="flex min-h-11 items-center gap-2 font-semibold tracking-tight text-ink no-underline">
+          <nav className="mx-auto flex h-14 max-w-6xl items-center gap-4 overflow-x-auto px-4 text-sm [scrollbar-width:none] sm:gap-6" aria-label="Main">
+            <Link href="/" aria-label="Milestone home" className="flex min-h-11 shrink-0 items-center gap-2 font-semibold tracking-tight text-ink no-underline">
               <svg viewBox="0 0 20 20" className="size-5" aria-hidden="true">
                 <circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
                 <path d="M5.5 10.5l3 3 6-7" fill="none" stroke="var(--paid)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <span className="hidden sm:inline">Milestone</span>
             </Link>
-            <Link href="/milestones" className="inline-flex min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink">
-              <span className="sm:hidden">Deals</span>
-              <span className="hidden sm:inline">Your milestones</span>
+            <Link href="/demo" className="inline-flex min-h-11 shrink-0 items-center font-medium text-ink no-underline">
+              Demo
             </Link>
-            <Link href="/timeline" className="inline-flex min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink">
+            <Link href="/milestones" className="inline-flex min-h-11 shrink-0 items-center text-ink-2 no-underline transition-colors hover:text-ink">
+              Milestones
+            </Link>
+            <Link href="/timeline" className="inline-flex min-h-11 shrink-0 items-center text-ink-2 no-underline transition-colors hover:text-ink">
               Timeline
             </Link>
-            <Link href="/ledger" className="hidden min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink sm:inline-flex">
+            <Link href="/ledger" className="inline-flex min-h-11 shrink-0 items-center text-ink-2 no-underline transition-colors hover:text-ink">
               Ledger
             </Link>
-            <Link href="/bounties" className="inline-flex min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink">
+            <Link href="/bounties" className="inline-flex min-h-11 shrink-0 items-center text-ink-2 no-underline transition-colors hover:text-ink">
               Bounties
             </Link>
-            <Link href="/bench" className="hidden min-h-11 items-center text-ink-2 no-underline transition-colors hover:text-ink sm:inline-flex">
+            <Link href="/bench" className="inline-flex min-h-11 shrink-0 items-center text-ink-2 no-underline transition-colors hover:text-ink">
               Proof Bench
             </Link>
-            <Link href="/new" className="ml-auto inline-flex min-h-11 items-center whitespace-nowrap rounded-md bg-accent px-3.5 font-medium text-accent-ink no-underline shadow-sm transition-opacity hover:opacity-90">
+            <Link href="/new" className="ml-auto inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-md bg-accent px-3.5 font-medium text-accent-ink no-underline shadow-sm transition-opacity hover:opacity-90">
               New<span className="hidden sm:inline">&nbsp;milestone</span>
             </Link>
           </nav>

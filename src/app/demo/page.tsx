@@ -45,8 +45,8 @@ export default function DemoPage() {
       <p className="mt-2 text-ink-2">We&apos;ll set up a small project with three milestones, each showing one part of the idea. You&apos;ll be both the client and the worker; switch sides at the top of each milestone.</p>
       <ul className="mt-6 space-y-3 text-ink">
         <li><span className="font-semibold">Place a real sandbox hold.</span> Fund a milestone with PayPal&apos;s sandbox test card and watch the hold appear. No login; sandbox test money only.</li>
-        <li><span className="font-semibold">See proof pay out.</span> A finished milestone with its verdict, proof trail and sealed terms.</li>
-        <li><span className="font-semibold">Watch a trick fail.</span> A pull request that told the AI reviewer to pass everything, caught by the rules.</li>
+        <li><span className="font-semibold">See proof pay out</span> <span className="text-sm text-ink-3">(replay of a real run)</span>. A finished milestone with its verdict, proof trail and sealed terms.</li>
+        <li><span className="font-semibold">Watch a trick fail</span> <span className="text-sm text-ink-3">(replay of real PR #2)</span>. A pull request that told the AI reviewer to pass everything, caught by the rules.</li>
       </ul>
       <button onClick={start} disabled={busy} className="mt-8 inline-flex items-center gap-2 rounded-md bg-accent px-5 py-3 font-medium text-accent-ink hover:opacity-90 disabled:opacity-60">
         {busy && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
@@ -62,7 +62,7 @@ export default function DemoPage() {
           {error}
         </p>
       )}
-      <p className="mt-10 text-sm text-ink-3">Everything runs on PayPal&apos;s sandbox. In the finished project, two of the three milestones are replays: their pull requests and CI logs are real and public on GitHub, and their PayPal ids start with DEMO- so you can tell them apart. For real PayPal ids end to end, use Run it live above, or open the <a href="/ledger" className="underline">ledger</a> to see recent live runs. The hold you place in the tour is a real sandbox hold.</p>
+      <p className="mt-10 text-sm text-ink-3">Everything runs on PayPal&apos;s sandbox. In the finished project, two of the three milestones are replays: their pull requests and CI logs are real and public on GitHub, and their PayPal ids start with DEMO- so you can tell them apart. For real PayPal ids end to end, pick a worker under Run it live above, or open the <a href="/ledger" className="underline">ledger</a> to see recent live runs. The hold you place in the tour is a real sandbox hold.</p>
     </main>
   );
 }

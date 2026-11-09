@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, CircleSlash, Loader2, X } from "lucide-react";
+import { ArrowRight, Check, CircleSlash, Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { rememberLink } from "@/lib/client/links";
 import type { LiveKind, LiveProgress, LiveStep, MoneyAt } from "@/lib/demo-live";
@@ -111,7 +111,7 @@ const STATE_WORD: Record<LiveStep["state"], string> = { done: "Done", active: "I
 function Banner({ p }: { p: LiveProgress }) {
   const amount = `$${(p.amountCents / 100).toFixed(2)}`;
   if (p.status === "running") return null;
-  if (p.status === "failed") return <p role="alert" className="mt-5 rounded-md border border-failed/40 bg-failed-field p-3 text-ink">{p.error ?? "This run stopped."} Try again in a moment, or use the replay below.</p>;
+  if (p.status === "failed") return <p role="alert" className="mt-5 rounded-md border border-failed/40 bg-failed-field p-3 text-ink">{p.error ?? "This run stopped."} Try again in a moment, or explore the finished project below.</p>;
   if (p.outcome === "paid") return <p role="status" className="mt-5 rounded-md border border-paid/40 bg-paid-field p-3 text-ink"><span className="font-semibold">Paid.</span> The signed tests passed, so code captured the hold and PayPal paid the worker. No person decided this, and the AI reviewer couldn&apos;t have: only the tests gate the money.</p>;
   if (p.outcome === "caught") return <p role="status" className="mt-5 rounded-md border border-held/40 bg-held-field p-3 text-ink"><span className="font-semibold">Caught.</span> The signed tests failed, and the line telling the AI reviewer to pass everything was flagged instead of obeyed. {amount} stays on hold at PayPal, and the worker got nothing.</p>;
   return <p role="status" className="mt-5 rounded-md border border-held/40 bg-held-field p-3 text-ink"><span className="font-semibold">Held for a person.</span> The rules wouldn&apos;t pay this automatically, so {amount} stays on hold until the client decides.</p>;
@@ -168,8 +168,13 @@ export function LiveRun() {
 
   return (
     <section aria-labelledby="live-heading">
-      <h2 id="live-heading" className="sr-only">Run it live</h2>
-      <MoneyRail p={progress} idleCents={1200} />
+      <h2 id="live-heading" className="text-lg font-semibold tracking-tight">
+        Run it live: pick a worker
+      </h2>
+
+      <div className="mt-3">
+        <MoneyRail p={progress} idleCents={1200} />
+      </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
         {/* Both look the same until one is picked; then only the chosen worker is marked. */}
         {(
@@ -194,7 +199,15 @@ export function LiveRun() {
               <span className="flex items-center gap-2 font-semibold">
                 {chosen && <Check className="size-4" aria-hidden="true" />}
                 {c.title}
-                {chosen && <span className="ml-auto text-xs font-medium opacity-80">{busy ? "Running" : "Your pick"}</span>}
+                {chosen ? (
+                  <span className="ml-auto text-xs font-medium opacity-80">{busy ? "Running" : "Your pick"}</span>
+                ) : (
+                  !other && (
+                    <span className="ml-auto inline-flex items-center gap-1 rounded-md bg-accent px-2 py-0.5 text-xs font-medium text-accent-ink">
+                      Run <ArrowRight className="size-3.5" aria-hidden="true" />
+                    </span>
+                  )
+                )}
               </span>
               <span className={`block text-sm ${chosen ? "opacity-85" : other ? "" : "text-ink-2"}`}>{c.text}</span>
             </button>

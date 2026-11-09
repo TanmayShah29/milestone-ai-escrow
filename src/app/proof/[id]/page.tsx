@@ -238,8 +238,9 @@ export default function ProofPage({ params }: { params: Promise<{ id: string }> 
                       {fmt.format(new Date(b.at))}
                     </time>
                   )}
+                  {b?.actor && <span className="text-xs text-ink-3">by {b.actor}</span>}
                   {b?.to && <span className="text-xs text-ink-2">→ {stateLabel(b.to)}</span>}
-                  {b?.backfilled && <span className="text-xs text-ink-3" title="This step happened before the proof chain existed; it was signed when the chain was added, and is linked and checked like every other step.">signed after the fact</span>}
+                  {b?.backfilled && <span className="text-xs text-ink-3">sealed with the next step (a write was retried); linked and checked like every other step</span>}
                 </p>
                 {b && (
                   <p className="mt-1 break-all font-mono text-xs text-ink-2">

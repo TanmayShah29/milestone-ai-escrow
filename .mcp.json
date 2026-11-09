@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "paypal": {
-      "command": "/Users/tanmay/Paypal/scripts/paypal-mcp.sh"
+      "command": "./scripts/paypal-mcp.sh"
     },
     "milestone": {
       "command": "npx",

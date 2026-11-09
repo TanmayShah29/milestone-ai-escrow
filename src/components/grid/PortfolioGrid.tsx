@@ -28,7 +28,7 @@ const holdComparator = (a: number | null, b: number | null, _na: unknown, _nb: u
   return a - b;
 };
 
-/** readOnly: the public showcase of judge runs. No deal-room links (this browser holds no link to them). */
+/** readOnly: the public showcase of judge runs. Rows open the public proof page (this browser holds no deal-room link). */
 export default function PortfolioGrid({ rows, readOnly = false }: { rows: PortfolioRow[]; readOnly?: boolean }) {
   const columnsKey = readOnly ? `${COLUMNS_KEY}:showcase` : COLUMNS_KEY;
   const router = useRouter();
@@ -36,7 +36,7 @@ export default function PortfolioGrid({ rows, readOnly = false }: { rows: Portfo
 
   const columnDefs = useMemo<ColDef<PortfolioRow>[]>(
     () => [
-      { field: "title", headerName: readOnly ? "Live judge run" : "Milestone", cellRenderer: readOnly ? ShowcaseTitleCell : TitleCell, tooltip: true, filter: "agTextColumnFilter", pinned: "left", lockPinned: true, flex: 1.3, minWidth: 150 },
+      { field: "title", headerName: readOnly ? "Live judge run" : "Milestone", cellRenderer: readOnly ? ShowcaseTitleCell : TitleCell, tooltip: true, filter: "agTextColumnFilter", pinned: "left", lockPinned: true, flex: 1.3, minWidth: readOnly ? 230 : 150 },
       { field: "status", headerName: "Status", cellRenderer: PortfolioStatusCell, filter: "agTextColumnFilter", width: 255 },
       {
         colId: "next",
@@ -81,7 +81,7 @@ export default function PortfolioGrid({ rows, readOnly = false }: { rows: Portfo
 
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: true, resizable: true }), []);
   const save = useCallback(() => api.current && saveColumns(api.current, columnsKey), [columnsKey]);
-  const open = (id: string | undefined) => !readOnly && id && router.push(`/milestones/${id}`);
+  const open = (id: string | undefined) => id && router.push(readOnly ? `/proof/${id}` : `/milestones/${id}`);
 
   return (
     <section aria-label={readOnly ? "Recent live judge runs" : "Your milestones"}>
@@ -94,7 +94,7 @@ export default function PortfolioGrid({ rows, readOnly = false }: { rows: Portfo
         getRowId={(p) => p.data.id}
         domLayout="autoHeight"
         tooltipShowDelay={300}
-        rowClass={readOnly ? undefined : "cursor-pointer"}
+        rowClass="cursor-pointer"
         onGridReady={(e) => {
           api.current = e.api;
           restoreColumns(e.api, columnsKey);

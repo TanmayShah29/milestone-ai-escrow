@@ -14,6 +14,8 @@ contract and attacks it before anyone signs; only code moves the money.
 cheat caught). 5 min: `/bench`. 15 min: the MCP server, or the guided tour on `/demo`.
 - Video: _(YouTube link, under 3 minutes)_
 
+**Prize categories:** Best Use of Agentic Commerce (main) · Bryntum (sponsor). Also eligible: Best Use of PayPal + AI.
+
 ---
 
 ## Inspiration
@@ -24,6 +26,10 @@ still has to decide what "done" means, and that is where disputes start. Coding 
 An agent can take a bounty and open a PR in minutes, but no one wants to give an agent the power to pay
 itself. We wanted a payment that is released by **proof**, where AI does the reading and writing and plain
 code makes the money decision.
+
+The problem is large: in a Freelancers Union survey of over 5,000 US freelancers, 71% had trouble collecting
+payment at some point, and they lost an average of $5,968 to unpaid work in a year. Milestone is for small
+software teams and agencies hiring contractors or coding agents.
 
 ## What it does
 
@@ -85,7 +91,7 @@ the page says so. Reproducible with `npm run bench`; a unit test re-checks Miles
 prepared branch, streams each signed test's CI status, has the AI reviewer read the diff for the one criterion no
 test can check (a nice-to-have, so it can't decide the money), then captures the hold and pays out, or catches
 the cheater with the money still held. A money rail shows where the $12.00 is at each step, and the payout line
-shows every fee. Judge runs use $12.00 (the landing page follows an earlier $25.00 run). PayPal's card fee has a
+shows every fee. Judge runs use $12.00 (the landing page replays an earlier $25.00 run). PayPal's card fee has a
 fixed part per payment, so fees take a smaller share of a larger milestone. Afterwards `/timeline` and `/ledger` show these runs, with their real PayPal ids, to every
 visitor; the Bryntum Gantt redraws itself from PayPal and review events (a failed review adds a rework bar and
 moves the later phases, a voided hold greys out what's left, a reauthorization moves the honor period).

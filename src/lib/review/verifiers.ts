@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { configuredModels, generateJson, type ModelCall } from "@/lib/ai/client";
+import { AiBusy, AiUnreadable, configuredModels, generateJson, type ModelCall } from "@/lib/ai/client";
 import type { Criterion, Terms } from "@/lib/contract/terms";
 import type { Milestone } from "@/lib/milestones/repo";
 import type { CheckRun, GitHub, PrFile, PullRequest, WorkflowRun } from "./github";
@@ -22,7 +22,15 @@ import { POLICY_2, type CriterionVerdict, type PanelRecord, type Verdict } from 
  * `runner` is the trusted runner (runner.ts), used for policy-2 terms; `runKey` names this review's run
  * (the commit, or the objection's second review), so a second review re-runs the tests.
  */
-export type VerifierDeps = { github: GitHub; aiCall?: ModelCall; models?: string[]; runner?: RunnerApi; runKey?: string };
+export type VerifierDeps = {
+  github: GitHub;
+  aiCall?: ModelCall;
+  models?: string[];
+  runner?: RunnerApi;
+  runKey?: string;
+  /** Judge mode only: when the AI is busy or out of budget and every untested criterion is a nice-to-have, mark them "unclear" instead of failing the review. */
+  unclearNicesWhenBusy?: boolean;
+};
 export type VerifierResult = { status: "pending"; reason: string; headSha: string | null } | { status: "done"; verdict: Verdict };
 
 const PROTECTED = /^(\.github\/|acceptance\/|\.base\/)/;
@@ -290,21 +298,28 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
   // A tested must-have that failed already decides (changes requested): spend no AI calls on it.
   const failedMust = testVerdicts.filter((c) => c.kind === "must" && c.verdict === "fail").map((c) => c.id);
   let judged: Judgement | undefined;
+  let aiNote: string | undefined;
   if (reviewCriteria.length && !failedMust.length) {
     const shown = files.filter((f) => !/(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(f.filename));
     let diff = shown.map((f) => `--- ${f.filename} (${f.status}, +${f.additions} -${f.deletions})\n${f.patch ?? "(binary or too large to show)"}`).join("\n\n");
     if (diff.length > MAX_DIFF_CHARS) diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n[diff truncated at ${MAX_DIFF_CHARS} characters]`;
-    judged = await judge(reviewCriteria, terms, deps, {
-      kindOfWork: `Pull request "${pr.title}"\n${pr.body}\n\nDiff`,
-      flat: diff,
-      context: { label: "PR", text: `${pr.title}\n${pr.body}` },
-      sources: new Map(shown.map((f) => [f.filename, patchLines(f.patch ?? "")])),
-      headers: new Map(shown.map((f) => [f.filename, `${f.filename} (${f.status}, +${f.additions} -${f.deletions})${f.patch ? "" : " (binary or too large to show)"}`])),
-    });
+    try {
+      judged = await judge(reviewCriteria, terms, deps, {
+        kindOfWork: `Pull request "${pr.title}"\n${pr.body}\n\nDiff`,
+        flat: diff,
+        context: { label: "PR", text: `${pr.title}\n${pr.body}` },
+        sources: new Map(shown.map((f) => [f.filename, patchLines(f.patch ?? "")])),
+        headers: new Map(shown.map((f) => [f.filename, `${f.filename} (${f.status}, +${f.additions} -${f.deletions})${f.patch ? "" : " (binary or too large to show)"}`])),
+      });
+    } catch (err) {
+      const nicesOnly = reviewCriteria.every((c) => c.kind !== "must");
+      if (!(deps.unclearNicesWhenBusy && nicesOnly && (err instanceof AiBusy || err instanceof AiUnreadable))) throw err;
+      aiNote = "not judged: the free AI models were busy, so this nice-to-have was left unclear";
+    }
   }
   const aiVerdicts =
     judged?.criteria ??
-    reviewCriteria.map((c): CriterionVerdict => ({ id: c.id, kind: c.kind, source: "ai", verdict: "unclear", confidence: 0, evidence: [`not judged: ${failedMust.join(", ")} failed in CI, so no AI call was spent`] }));
+    reviewCriteria.map((c): CriterionVerdict => ({ id: c.id, kind: c.kind, source: "ai", verdict: "unclear", confidence: 0, evidence: [aiNote ?? `not judged: ${failedMust.join(", ")} failed in CI, so no AI call was spent`] }));
   return {
     status: "done",
     verdict: {

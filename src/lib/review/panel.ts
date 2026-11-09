@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { z } from "zod";
 import { AiBusy, AiUnreadable, callsToday, dailyCap, generateJson, type ModelCall } from "@/lib/ai/client";
 import type { Criterion } from "@/lib/contract/terms";
-import { groundingProblems, type Citation, type Sources } from "./grounding";
+import { groundingProblems, type Citation, type Sources, MIN_QUOTE_CHARS } from "./grounding";
 import type { CriterionVerdict, PanelRecord, PanelVote } from "./policy";
 import { markLines, markText, newMarker, spotlightRules, unmark } from "./spotlight";
 
@@ -162,15 +162,27 @@ export async function runPanel(input: PanelInput): Promise<PanelOutput> {
       votes: { pass: counted.filter((v) => v.verdict === "pass").length, fail: counted.filter((v) => v.verdict === "fail").length, of: members.length },
     };
   });
-  const quotes = replies.flatMap((r) => (r.injection_attempt && r.injection_quote ? [unmark(marker, r.injection_quote).slice(0, 200)] : []));
+  // A member's injection flag counts when the text it quotes is really in the untrusted data, or when two
+  // or more members flag. One noisy model with an invented quote can't send honest work to a person.
+  const flaggers = replies.filter((r) => r.injection_attempt);
+  const quoteOf = (r: PanelReply) => (r.injection_quote ? unmark(marker, r.injection_quote) : "");
+  const haystack = squash([input.context?.text ?? "", ...[...input.sources.values()].flatMap((ls) => ls.map((l) => l.text))].join("\n"));
+  const verified = flaggers.filter((r) => {
+    const q = squash(quoteOf(r));
+    return q.replace(/\s/g, "").length >= MIN_QUOTE_CHARS && haystack.includes(q);
+  });
+  const flagged = verified.length > 0 || flaggers.length >= 2;
+  const quotes = flagged ? (verified.length ? verified : flaggers).flatMap((r) => (quoteOf(r) ? [quoteOf(r).slice(0, 200)] : [])) : [];
   return {
     criteria,
     summary: replies[0]!.summary,
     feedbackForWorker: replies.map((r) => r.feedback_for_worker).find(Boolean) ?? "",
-    injection: { flagged: replies.some((r) => r.injection_attempt), quotes },
+    injection: { flagged, quotes },
     panel: { size: models.length, members },
   };
 }
+
+const squash = (t: string) => t.replace(/\s+/g, " ").trim();
 
 function votesOf(input: PanelInput, marker: string, model: string, reply: PanelReply): PanelVote[] {
   return input.criteria.map((c) => {

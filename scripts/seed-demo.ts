@@ -3,6 +3,11 @@
 import { db } from "../src/lib/db";
 import { seedDemoProject } from "../src/lib/demo";
 
+// Load .env when present; variables already set win.
+try {
+  process.loadEnvFile();
+} catch {}
+
 async function main() {
   const base = process.argv[2] ?? "http://localhost:3000";
   const ms = await seedDemoProject();

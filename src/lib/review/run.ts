@@ -19,7 +19,7 @@ import { citedTerms, termsLineProblem, verifyCodePr, verifyText } from "./verifi
 // Deliver → review → decide → (objection window) → release. The verifier and the AI only produce a
 // Verdict; `decide` (fixed code) picks the outcome, and only releaseFunds moves money (money rule 1).
 
-export type ReviewDeps = { github: GitHub; aiCall?: ModelCall; models?: string[]; runner?: RunnerApi; money: Deps };
+export type ReviewDeps = { github: GitHub; aiCall?: ModelCall; models?: string[]; runner?: RunnerApi; money: Deps; unclearNicesWhenBusy?: boolean };
 
 export function defaultReviewDeps(): ReviewDeps {
   const runner = runnerApi();

@@ -12,9 +12,9 @@ export async function POST(req: Request) {
     const { kind } = (await req.json().catch(() => ({}))) as { kind?: unknown };
     if (kind !== "honest" && kind !== "cheat") return json(400, { error: "kind must be honest or cheat" });
     if (await liveRunBusy(kind as LiveKind)) return json(409, { error: BUSY });
-    if ((await liveRunsLastHour()) >= MAX_RUNS_PER_HOUR) return json(429, { error: "The live demo has run a lot this hour. Try again later, or use the replay below." });
+    if ((await liveRunsLastHour()) >= MAX_RUNS_PER_HOUR) return json(429, { error: "The live demo has run a lot this hour. Try again later, or explore the finished project below." });
     const v = await hit([{ key: ipKey(req, "live"), limit: 4, windowMs: HOUR }]);
-    if (!v.ok) return tooMany("You've started four live runs this hour. Try again later, or use the replay below.", v.retryAfterMs);
+    if (!v.ok) return tooMany("You've started four live runs this hour. Try again later, or explore the finished project below.", v.retryAfterMs);
     const run = await startLiveRun(kind as LiveKind);
     return run ? json(201, run) : json(409, { error: BUSY });
   } catch (err) {

@@ -166,7 +166,6 @@ export default function BenchPage() {
   const msPaid = cheats.filter((c) => shipped(c).pay);
   const closed = cheats.filter((c) => c.milestoneHardened && c.milestone.pay && !c.milestoneHardened.pay);
   const llmPaid = cheats.filter((c) => c.llmOnly.status === "ok" && c.llmOnly.pay);
-  const flagged = cases.filter((c) => shipped(c).injectionQuotes.length || shipped(c).tampering.length);
   const attacks = cases.filter((c) => /^(injection|tamper|harness)-/.test(c.id));
   const allFlagged = attacks.every((c) => shipped(c).injectionQuotes.length || shipped(c).tampering.length);
   const llmNoticed = attacks.filter((c) => c.llmOnly.status === "ok" && /inject|instruction|aimed at|reviewer|workflow|process\.exit/i.test(`${c.llmOnly.rawSummary} ${c.llmOnly.perCriterion.map((x) => x.reason).join(" ")}`));

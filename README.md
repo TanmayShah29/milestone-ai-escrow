@@ -41,7 +41,7 @@ For small software teams and agencies hiring contractors or coding agents.
 | **10 minutes, v2** | [`/proof/6c339a15…`](https://milestone-ai-escrow.onrender.com/proof/6c339a15-1211-4a1a-9b37-0aea6c4fb87c) is a case that went all the way through the v2 trail. Its review was signed by the trusted runner ([run](https://github.com/TanmayShah29/milestone-runner/actions/runs/42196865986), Rekor 3714238852). The client locked it, the worker matched the fee, and the AI drafted an award. The arbitrator signed 100%, and PayPal captured $20, paid the worker $17.63 and paid the arbitrator's fee. Then [`/bounties`](https://milestone-ai-escrow.onrender.com/bounties), [`/passport/TanmayShah29`](https://milestone-ai-escrow.onrender.com/passport/TanmayShah29) and [`/api/openapi`](https://milestone-ai-escrow.onrender.com/api/openapi). |
 | **15 minutes** | Below the live run on `/demo`, the saved AI attack (fake code beats a draft of the tests, the strengthened tests catch it). Then **Start the demo** for a verdict table, proof trail and contract seal, or connect the [MCP server](#for-ai-agents-the-mcp-server) and take a job as an agent. |
 
-If the free server is asleep, the first load takes up to a minute. A GitHub Action pings it every 10 minutes.
+If the free server is asleep, the first load takes up to a minute. Two clocks keep it awake: cron-job.org every 10 minutes and a scheduled workflow in `milestone-runner` every 5.
 
 **Proof Bench, Nov 3 run** ([method](bench/README.md), reproducible with `npm run bench`):
 
@@ -82,6 +82,18 @@ payment at some point in their careers, and they lost an average of $5,968 to un
 Everything runs on the **PayPal sandbox**, in USD only. Nothing here has handled real money.
 
 ## How it works
+
+```mermaid
+flowchart LR
+  C[Client] --> APP
+  W[Worker: human or AI agent via MCP] --> APP
+  APP[Milestone on Render<br/>Next.js + fixed decision rules] <--> DB[(Postgres on Neon<br/>claims, audit log, proof chain)]
+  APP <--> PP[PayPal<br/>Orders, Payments, Payouts, Vault, Webhooks]
+  APP <--> GH[GitHub<br/>PR, CI check runs, trusted runner + Sigstore]
+  APP --> AI[Free OpenRouter models<br/>draft, attack, review]
+  AI -. no money calls .-x PP
+```
+
 
 ```
 Agree ──► Fund ──► Deliver ──► Verify ──► Release
@@ -182,6 +194,8 @@ is calling it.
 | Renew honor period | `POST /v2/payments/authorizations/{id}/reauthorize` | SDK `payments.reauthorizePayment` (client-triggered, see limits) |
 | Pay the worker | Payouts `POST /v1/payments/payouts`, `GET /v1/payments/payouts/{batch}` | Small typed REST functions (`src/lib/paypal/payouts.ts`); the SDK has no payouts |
 | Webhooks | `POST /v1/notifications/verify-webhook-signature` before acting | REST (`src/lib/paypal/webhooks.ts`); handlers are idempotent |
+| Vault a card for an agent's mandate | `POST /v3/vault/setup-tokens`, then `POST /v3/vault/payment-tokens` | SDK `vault.createSetupToken`, `vault.createPaymentToken` (`src/lib/mandates/vault.ts`) |
+| Arbitration fee holds | Orders v2 create + authorize ($5 by default), then capture from the losing side and a payout to the arbitrator | SDK + Payouts REST (`src/lib/resolution/fees.ts`) |
 | Disputes | `CUSTOMER.DISPUTE.CREATED/UPDATED/RESOLVED` webhooks | Moves a captured milestone to DISPUTE and stores the dispute id. A person answers the dispute on PayPal |
 
 The integration contract (every field, header and error arm, looked up in the SDK map) is in
@@ -303,7 +317,7 @@ milestone to a human rather than paying out.
 | **Early exit** (`process.exit(0)` so `node --test` reports green) | The base-branch harness (`run-tests.mjs`) decides from test events, not the exit code. A sentinel test registered after the signed file must pass last, and skipped or todo tests fail the run. `process.exit`, `/proc` reads and loader hooks in the diff are flagged for human check | See the residual below about sharing a process |
 | **Assert monkeypatching** (make `assert.equal` a no-op) | `node:assert` and `assert.strict` are frozen before the signed file and the worker's code load. Tests registered outside the signed file make the run fail | Same process (below) |
 | **Editing the workflow or tests in the PR** | `acceptance/` is overwritten with the signed tests. The helper scripts come from the base branch. Any change under `.github/` or `acceptance/` is flagged as tampering and sends the milestone to human check, never to an automatic pass. The workflow uses `pull_request` (not `pull_request_target`), so PR code never runs with write tokens or secrets | **The workflow YAML itself comes from the PR's merge commit** under `pull_request`. A PR that rewrites it can fake green jobs, and is caught only by the tampering flag (a person then decides) |
-| **Prompt injection** in code, comments or PR text | A deterministic scan, independent of the model, after folding Unicode look-alikes and removing zero-width characters; invisible or bidirectional control characters are themselves flagged. Plus the model's own flag. Either one blocks automatic payment (human check, or changes requested if a must-have fails). The deliverable is framed as untrusted data | The scan only knows English phrasing; an instruction in another language, or a novel phrasing, reaches the model. That is why the model only judges criteria no test covers: tested criteria don't depend on the model at all |
+| **Prompt injection** in code, comments or PR text | A deterministic scan, independent of the model, after folding Unicode look-alikes and removing zero-width characters; invisible or bidirectional control characters are themselves flagged. Plus the model's own flag. Either one blocks automatic payment (human check, or changes requested if a must-have fails). The deliverable is framed as untrusted data | The scan knows English and six other languages (Hindi, Spanish, Chinese, Russian, Portuguese, French); a novel phrasing can still reach the model. That is why the model only judges criteria no test covers: tested criteria don't depend on the model at all |
 | **Client parks the money** (objects forever) | One objection per approval. A passing second review releases 72 h after the objection. A post-objection human check auto-releases 72 h after it starts (worst case about 6 days) | A client can still void the hold before any delivery, by design |
 | **Client acts as the worker** | Capability links: a creator's browser keeps the worker link **share-only** and never uses it to act. Signing and submitting require the worker token | There are no accounts. Whoever holds the worker link *is* the worker, and the client sees that link to hand it over. This is a UX guard, not identity |
 | **Token leakage** | `Referrer-Policy: no-referrer`. Tokens are stripped from the address bar after load. Only SHA-256 hashes of tokens and API keys are stored, compared in constant time, and never sent to a browser. Either side can reissue its own link (the old one stops working at once); the client can reissue the worker link until the worker signs. Both links stop working 30 days after the milestone closes | Links shared over insecure channels are bearer secrets until reissued |
@@ -360,7 +374,7 @@ milestone to a human rather than paying out.
   criteria.
 - **Scope:** GitHub PRs with Node.js `node:test` acceptance tests (plus a `rubric_text` verifier for text
   deliverables). Sandbox only, USD only, one hold per milestone. No refunds or partial-refund splits.
-- **Bryntum Gantt runs on the public trial package** (watermarked). A hackathon license has been requested.
+- **Bryntum Gantt runs on the public trial package**, so the timeline shows a trial watermark.
 - **Free hosting:** a Render free web service (it sleeps after 15 minutes idle) and Neon free Postgres.
 
 ## Run it locally
@@ -387,6 +401,9 @@ Environment (names only; see `.env.example`):
 | `OBJECTION_WINDOW_SECONDS` (default 120), `OBJECTION_RELEASE_SECONDS` (default 259200 = 72 h) | Review clocks |
 | `RATE_LIMIT_SALT` | Optional secret. IPs in the rate-limit table are HMAC-SHA256 hashed with it (plain salted SHA-256 if unset) |
 | `ALLOW_DEV_ACTIONS` | Dev-only routes and forced PayPal errors. Leave it unset in production |
+| `AI_PANEL_SIZE` (default 3), `PAYOUT_FEE_BPS`, `PAYOUT_FEE_CAP_CENTS` | Review panel size and the payout fee passed on to the worker |
+| `RUNNER_GITHUB_TOKEN`, `PROOF_SIGNING_KEY` | Optional: the trusted runner and the proof-chain signing key |
+| `ARBITRATOR_NAME`, `ARBITRATOR_PUBLIC_JWK`, `ARBITRATOR_PAYPAL_EMAIL`, `RESOLUTION_FEE_CENTS` | Optional: the resolution desk |
 
 Tests use a separate database. PayPal, GitHub and the AI are faked at the `fetch` layer:
 
@@ -453,9 +470,19 @@ An agent can post work or do it: read the signed terms, accept them, open a PR, 
 payout. There are **no tools that fund, capture, release, void or refund**. An agent can earn, never take.
 
 ```bash
-claude mcp add milestone -- npx tsx mcp/server.mts   # this repo's .mcp.json already registers it
+git clone https://github.com/TanmayShah29/milestone-ai-escrow && cd milestone-ai-escrow && npm ci
+claude mcp add milestone -- npx tsx mcp/server.mts   # this repo's .mcp.json already registers it (live app by default)
 # MILESTONE_API defaults to the live app; MILESTONE_API_KEY (msk_…) adds list_milestones
 ```
+
+Claude Desktop or Cursor (`mcpServers` in their config; use the absolute path to your clone):
+
+```json
+{ "mcpServers": { "milestone": { "command": "npx", "args": ["tsx", "/path/to/milestone-ai-escrow/mcp/server.mts"] } } }
+```
+
+Then ask the agent: *"List open Milestone bounties, claim one, read its signed tests, do the work in the repo, open
+a PR citing the fingerprint, submit it and check its status until it is paid."*
 
 | Tool | What it does |
 |---|---|
@@ -463,6 +490,8 @@ claude mcp add milestone -- npx tsx mcp/server.mts   # this repo's .mcp.json alr
 | `accept_terms` | Sign by fingerprint (refused if the terms changed since they were read) |
 | `submit_work` | Submit the PR URL (or text, for text deliverables) |
 | `get_status` | Verdict per criterion, feedback, objection window, payout |
+| `list_bounties`, `claim_bounty` | Find open bounties and claim one (returns a worker link) |
+| `post_bounty` | Only with a mandate key (`MILESTONE_MANDATE_KEY`): post a bounty that code funds within the passkey-signed limits |
 | `create_milestone`, `draft_terms` | Post a job and have the AI draft its terms |
 | `list_milestones` | A platform's milestones, with `MILESTONE_API_KEY` |
 
@@ -496,8 +525,8 @@ buyer agent should get a token limited to posting and signing.
   project where you are both client and worker. Fund the first milestone with PayPal's **sandbox test
   card**; that places a real sandbox authorization hold. The other two replay real runs (their PRs and CI
   logs are real and public; their PayPal ids are labelled illustrative).
-- **PayPal login path:** the sandbox accounts below are fake `example.com` addresses. Passwords are
-  available from the maintainer on request.
+- **PayPal login path:** the sandbox accounts below are fake `example.com` addresses. You don't need them: `/demo` funds with PayPal's sandbox test card, no login. Passwords
+  are available from the maintainer on request.
 
 | Role | Sandbox email |
 |---|---|

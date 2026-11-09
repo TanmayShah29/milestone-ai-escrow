@@ -33,10 +33,14 @@ const RUNS: { title: string; pr: number; outcome: string; tone: "paid" | "held";
 
 export function PayPalTrail() {
   const ref = useRef<HTMLDivElement>(null);
-  const [seen, setSeen] = useState(false);
+  // null until mounted: the server render (and no-JS, previews, reduced motion) shows everything; only a
+  // section still below the fold is hidden and revealed on scroll.
+  const [seen, setSeen] = useState<boolean | null>(null);
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === "undefined") return setSeen(true);
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!el || reduced || typeof IntersectionObserver === "undefined" || el.getBoundingClientRect().top < window.innerHeight) return;
+    setSeen(false);
     const io = new IntersectionObserver(([e]) => e?.isIntersecting && (setSeen(true), io.disconnect()), { threshold: 0.4 });
     io.observe(el);
     return () => io.disconnect();
@@ -45,7 +49,7 @@ export function PayPalTrail() {
   return (
     <div ref={ref} className="mt-6 rounded-xl border border-rule bg-panel p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-sm font-semibold text-ink">What PayPal returned on two real runs</p>
+        <p className="text-sm font-semibold text-ink">What PayPal returned on two live $12 judge runs</p>
         <a href="/ledger" className="text-sm text-ink-2 underline">
           Every PayPal call, in the ledger
         </a>
@@ -61,7 +65,7 @@ export function PayPalTrail() {
             </p>
             <ol className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-2">
               {r.steps.map((s, k) => (
-                <li key={s.id} className={`flex items-center gap-1.5 ${seen ? "detail-in" : "opacity-0"}`} style={seen ? { animationDelay: `${(ri * 4 + k) * 120}ms` } : undefined}>
+                <li key={s.id} className={`flex items-center gap-1.5 ${seen ? "detail-in" : seen === false ? "opacity-0" : ""}`} style={seen ? { animationDelay: `${(ri * 4 + k) * 120}ms` } : undefined}>
                   {k > 0 && (
                     <span className="text-ink-3" aria-hidden="true">
                       →
@@ -76,7 +80,7 @@ export function PayPalTrail() {
                   </span>
                 </li>
               ))}
-              <li className={`text-xs font-medium ${r.tone === "paid" ? "text-paid" : "text-held"} ${seen ? "detail-in" : "opacity-0"}`} style={seen ? { animationDelay: `${(ri * 4 + r.steps.length) * 120}ms` } : undefined}>
+              <li className={`text-xs font-medium ${r.tone === "paid" ? "text-paid" : "text-held"} ${seen ? "detail-in" : seen === false ? "opacity-0" : ""}`} style={seen ? { animationDelay: `${(ri * 4 + r.steps.length) * 120}ms` } : undefined}>
                 {r.outcome}
               </li>
             </ol>

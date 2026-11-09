@@ -70,7 +70,9 @@ export function ShowcaseTitleCell({ data }: CustomCellRendererProps<PortfolioRow
   if (!data) return null;
   return (
     <span className="flex min-w-0 items-center gap-2">
-      <span className="min-w-0 truncate font-medium text-ink">{data.title}</span>
+      <Link href={`/proof/${data.id}`} className="min-w-0 truncate font-medium text-ink underline-offset-2 hover:underline">
+        {data.title}
+      </Link>
       {data.prUrl && (
         <a href={data.prUrl} target="_blank" rel="noreferrer" tabIndex={-1} className="shrink-0 text-sm text-ink-2 underline hover:text-ink">
           Pull request

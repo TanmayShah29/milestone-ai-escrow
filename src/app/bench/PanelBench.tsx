@@ -67,7 +67,7 @@ export function PanelBench() {
           </dl>
           <details className="mt-4 rounded-lg border border-rule bg-panel p-4">
             <summary className="cursor-pointer text-sm font-medium text-ink">
-              Per-model results (run in progress: {orders.ab} of {cases.length} cases)
+              Per-model results ({orders.ab} of {cases.length} cases judged so far)
             </summary>
             {s.injection.cases > 0 && (
               <p className="mt-3 text-sm text-ink-3">

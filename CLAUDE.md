@@ -8,7 +8,7 @@ The user is in IST.
 ## Key docs (read these before big decisions)
 - `docs/MILESTONE_PLAN.md`: states, transitions, API map, build order, demo script (text version of the PDF)
 - `PayPal_Sandbox_Guide.md`: how the sandbox behaves, verified by live calls. Section 0 is the current account status
-- `Milestone_Project_Plan.pdf`: the same plan with diagrams, for humans
+- `docs/archive/Milestone_Project_Plan.pdf`: the same plan with diagrams, for humans
 - `PayPal_AI_Hackathon_2026.md`: rules, judging criteria, prizes
 - `agent-toolkit/`: cloned `paypal/agent-toolkit` v1.11.0, **reference only**, not part of our app (gitignored)
 

@@ -353,6 +353,8 @@ async function releaseFundsLocked(milestoneId: string, deps: Deps, opts: { mock?
     const captureCents = captureFor(m);
     // Money rule 3: never capture more than was authorized.
     if (captureCents > m.authorized_cents) throw new InvariantViolation("The capture would be more than the amount held, so it was stopped.");
+    // A share too small to cover the fees would be captured with nothing left to pay out: stop before capturing.
+    if (splitFor(m, captureCents, null).split.payoutCents <= 0) throw new InvariantViolation("The earned share is too small to pay out after fees, so nothing was captured.");
     const authorizationId = m.paypal_authorization_id;
     const orderId = m.paypal_order_id;
     const cur = m;
@@ -438,8 +440,11 @@ async function cancelHoldLocked(milestoneId: string, deps: Deps, opts: CancelOpt
   const m = await getMilestone(milestoneId);
   const actor = opts.actor ?? "client";
   if (m.state === "DRAFT" || (m.state === "AGREED" && !m.paypal_authorization_id)) {
+    // An authorize whose answer was lost may have placed a hold: settle it (sync) before cancelling.
+    const authorizing = m.state === "AGREED" ? await liveClaim(db(), m.id, "authorize") : undefined;
+    if (authorizing && (authorizing.status === "unknown" || (authorizing.status === "pending" && !isStalePending(authorizing)))) throw new InProgress("The PayPal hold is still being confirmed. Refresh in a moment, then cancel.");
     // No hold exists yet; an unapproved order simply expires.
-    return transition(db(), m, "CANCELLED", "client");
+    return transition(db(), m, "CANCELLED", actor);
   }
   if (actor === "system") requireState(m, ...HOLD_STATES);
   else requireState(m, ...CANCEL_STATES);

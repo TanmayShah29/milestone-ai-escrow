@@ -96,6 +96,14 @@ export default function CourtPage({ params }: { params: Promise<{ id: string }> 
       <main className="mx-auto max-w-2xl px-4 py-16">
         <h1 className="text-xl font-semibold">Resolution desk</h1>
         <p className="mt-2 text-ink-2">Open this milestone with its client or worker link first.</p>
+        <p className="mt-4 flex flex-wrap gap-4">
+          <Link href={`/proof/${id}`} className="underline">
+            Public proof page
+          </Link>
+          <Link href="/demo" className="underline">
+            Run a deal on /demo
+          </Link>
+        </p>
       </main>
     );
   }

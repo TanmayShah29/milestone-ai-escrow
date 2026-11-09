@@ -37,11 +37,24 @@ function CourtLink({ m }: { m: MilestoneView }) {
 }
 
 /** The page can't open the milestone: no link in this browser, or a link that isn't for it. */
-function LinkCard({ title, children }: { title: string; children: React.ReactNode }) {
+function LinkCard({ title, children, proofId }: { title: string; children: React.ReactNode; proofId?: string }) {
   return (
     <main className="mx-auto max-w-xl px-4 py-16">
       <h1 className="text-xl font-semibold">{title}</h1>
       <p className="mt-2 text-ink-2">{children}</p>
+      {proofId && (
+        <p className="mt-4 text-ink-2">
+          Anyone can check what happened to it on its{" "}
+          <Link href={`/proof/${proofId}`} className="font-medium text-ink underline">
+            public proof page
+          </Link>
+          , or{" "}
+          <Link href="/demo" className="font-medium text-ink underline">
+            run a deal of your own on /demo
+          </Link>{" "}
+          to see the client and worker screens.
+        </p>
+      )}
       <div className="mt-4 flex flex-wrap gap-4">
         <Link href="/milestones" className="underline">
           Your milestones
@@ -214,7 +227,7 @@ export default function MilestonePage({ params }: { params: Promise<{ id: string
 
   if (ready && !as) {
     return (
-      <LinkCard title="This milestone needs its link">
+      <LinkCard title="This milestone needs its link" proofId={id}>
         Open it from the client or worker link you were given (it ends with <span className="font-mono">?t=…</span>). Links are the keys: there are no accounts.
       </LinkCard>
     );
