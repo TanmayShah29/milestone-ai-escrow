@@ -15,7 +15,8 @@ const primary = "inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2.5
 type Pub = { id: string; status: string; card: { last4: string | null } | null; document: { maxPerBountyCents: number; totalCents: number; maxOpenBounties: number; allowedRepos: string[]; expiresAt: string } | null };
 
 export default function NewMandate() {
-  const [f, setF] = useState({ name: "", maxPerBounty: "50.00", total: "150.00", maxOpenBounties: "3", allowedRepos: "", days: "14" });
+  // Prefilled so a judge (or a demo) can create a mandate in one click; every field stays editable.
+  const [f, setF] = useState({ name: "Acme procurement agent", maxPerBounty: "50.00", total: "150.00", maxOpenBounties: "3", allowedRepos: "TanmayShah29/milestone-demo", days: "14" });
   const [owner, setOwner] = useState<string>();
   const [mandate, setMandate] = useState<Pub>();
   const [agentToken, setAgentToken] = useState<string>();
