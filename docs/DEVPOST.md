@@ -12,7 +12,7 @@ contract and attacks it before anyone signs; only code moves the money.
 **Judge's path:** 30 s: `/timeline` or `/ledger` show the latest live judge runs with real sandbox PayPal ids.
 2 min: `/demo` → **Run it live** (real hold, real PR, real CI, a live AI review, then capture and payout, or the
 cheat caught). 5 min: `/bench`. 15 min: the MCP server, or the guided tour on `/demo`.
-- Video: _(YouTube link, under 3 minutes)_
+- Video (2:54): https://www.youtube.com/watch?v=F6OGXNGaR5g
 
 **Prize categories:** Best Use of Agentic Commerce (main) · Bryntum (sponsor). Also eligible: Best Use of PayPal + AI.
 

@@ -20,3 +20,15 @@ next-env.d.ts
 *.pem
 npm-debug.log*
 .vercel
+
+# Demo video takes (one contains an unblurred agent key)
+/Video-*.mp4
+/Milestone-demo*.mp4
+/end.mp4
+/video-*.mp4
+/Milestone-demo-audio.mp3
+/Milestone-demo.srt
+/intro*.mp4
+/intro-add-audio.mp3
+/Milestone-demo*.srt
+/Milestone-thumbnail.png

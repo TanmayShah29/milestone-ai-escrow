@@ -101,7 +101,7 @@ GitHub: https://github.com/TanmayShah29/milestone-ai-escrow (public; no code or 
 - [ ] Public GitHub repo with an OSS license visible in the About section
 - [ ] README: what it does, PayPal APIs and AI used, setup steps, sandbox test logins for client and freelancer
 - [ ] Working hosted demo (Render URL) or complete run instructions
-- [ ] YouTube demo video under 3 minutes, showing it working end to end. No copyrighted music
+- [x] YouTube demo video under 3 minutes, showing it working end to end. No copyrighted music. Done Nov 10: https://www.youtube.com/watch?v=F6OGXNGaR5g (2:54, captions burned in)
 - [ ] Devpost text description, plus which tools and models were used and how
 - [x] APIMatic usage form submitted by the user on Nov 9 (Participant claim). Was: once the project is built (about Nov 9–11), submit APIMatic's usage form to show we used the Context Plugin: https://docs.google.com/forms/d/e/1FAIpQLScc2oCgAFACm7d6H3R4mgzv-O34DdyVnLIBNiwmUNggr_-hhA/viewform
 - [ ] Sponsor credit: README, Devpost text and video name APIMatic Context Plugin (used to build the PayPal integration; no APIMatic account needed), Bryntum (Gantt), AG Grid (portfolio grid) and Render (hosting only; Workflows is not used)

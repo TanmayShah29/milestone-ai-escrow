@@ -29,7 +29,7 @@ For small software teams and agencies hiring contractors or coding agents.
 - **Passports, webhooks, an API:** signed worker and client records, HMAC-signed platform webhooks, policy
   hooks that can only block, `Idempotency-Key`, and OpenAPI 3.1.
 
-> **Demo video:** _link coming soon_ · **Live app:** https://milestone-ai-escrow.onrender.com
+> **Demo video (2:54):** https://www.youtube.com/watch?v=F6OGXNGaR5g · **Live app:** https://milestone-ai-escrow.onrender.com
 
 ### Judge it
 
