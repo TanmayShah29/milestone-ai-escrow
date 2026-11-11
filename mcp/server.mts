@@ -335,7 +335,7 @@ server.registerTool(
       const login = github_login.trim().replace(/^@/, "");
       const agent = await agentSignature(bounty, "worker", fingerprint, login);
       const b = await call("POST", `/api/bounties/${bounty}/claim`, undefined, { githubLogin: login, paypalEmail: paypal_email, hash: fingerprint, agent });
-      return text({ state: (b.milestone as M).state, workerLink: `${API}/milestones/${bounty}?t=${b.workerToken as string}`, note: "Keep this link: it is your worker link for get_milestone, submit_work and get_status. Submit a pull request within 3 days." });
+      return text({ state: (b.milestone as M).state, workerLink: `${API}/milestones/${bounty}?t=${b.workerToken as string}`, claimLine: b.claimLine, note: "Keep this link: it is your worker link for get_milestone, submit_work and get_status. Open the pull request from the GitHub account you named, with both the Milestone-Terms line and this claimLine in its description, and submit it within 3 days." });
     } catch (e) {
       return fail(e);
     }

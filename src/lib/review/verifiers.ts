@@ -28,6 +28,12 @@ export type VerifierDeps = {
   models?: string[];
   runner?: RunnerApi;
   runKey?: string;
+  /**
+   * The second review after an objection: the PR title and description are left out of the scan and the
+   * prompt. Others (the repo owner) can edit them after the first review, so text there must not turn a
+   * passing review into a void; the first review already scanned what the worker wrote.
+   */
+  secondReview?: boolean;
   /** Judge mode only: when the AI is busy or out of budget and every untested criterion is a nice-to-have, mark them "unclear" instead of failing the review. */
   unclearNicesWhenBusy?: boolean;
 };
@@ -35,6 +41,8 @@ export type VerifierResult = { status: "pending"; reason: string; headSha: strin
 
 const PROTECTED = /^(\.github\/|acceptance\/|\.base\/)/;
 const MAX_DIFF_CHARS = 60_000;
+/** The PR description shown to the model is capped, so a long one can't crowd the code out of the prompt. */
+const MAX_DESCRIPTION_CHARS = 4_000;
 const CI_TIMEOUT_MS = 20 * 60_000;
 /** The PR file list API returns at most 300 files; beyond that the protected-file scan can't see everything. */
 const MAX_SCANNED_FILES = 300;
@@ -107,10 +115,28 @@ const HARNESS_ESCAPES: { re: RegExp; what: string; testFilesOk?: boolean }[] = [
 ];
 const TEST_FILE = /(^|\/)(tests?|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 
+/** Protected paths the PR touches, including a protected file renamed or moved away (its old name). */
+export function protectedTouched(files: PrFile[]): string[] {
+  const out: string[] = [];
+  for (const f of files) {
+    if (PROTECTED.test(f.filename)) out.push(f.filename);
+    else if (f.previous_filename && PROTECTED.test(f.previous_filename)) out.push(`${f.previous_filename} (renamed to ${f.filename})`);
+  }
+  return out;
+}
+
+// Text files GitHub sends no patch for (too large to diff) can't be scanned for injection or harness
+// escapes. Binary assets (images, fonts) have no patch either and are left alone.
+const TEXT_FILE = /\.([cm]?[jt]sx?|json|md|txt|ya?ml|py|rb|go|rs|java|kt|cs|php|sh|html?|css|scss|sql|toml|ini|cfg|env)$/i;
+const LOCKFILE = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|[^/]+\.min\.(js|css))$/;
+export function unscannedFiles(files: PrFile[]): string[] {
+  return files.filter((f) => f.status !== "removed" && !f.patch && f.additions > 0 && TEXT_FILE.test(f.filename) && !LOCKFILE.test(f.filename)).map((f) => f.filename);
+}
+
 export function harnessEscapes(files: PrFile[]): string[] {
   const out: string[] = [];
   for (const f of files) {
-    if (PROTECTED.test(f.filename)) continue; // already flagged as a protected file
+    if (PROTECTED.test(f.filename) || (f.previous_filename && PROTECTED.test(f.previous_filename))) continue; // already flagged as a protected file
     const added = addedLines(f.patch ?? "");
     const hits = HARNESS_ESCAPES.filter((h) => !(h.testFilesOk && TEST_FILE.test(f.filename)) && h.re.test(added)).map((h) => h.what);
     if (hits.length) out.push(`${f.filename} (${hits.join(", ")})`);
@@ -286,12 +312,15 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
   // Under the trusted runner the PR's workflow and tests count for nothing and its code ran only in the
   // worker container, so protected files and harness escapes aren't tampering there.
   const tampering = [
-    ...(trusted ? [] : files.filter((f) => PROTECTED.test(f.filename)).map((f) => f.filename)),
+    ...(trusted ? [] : protectedTouched(files)),
     ...(trusted ? [] : harnessEscapes(files)),
     ...(tooBig ? [`the pull request changes ${pr.changedFiles ?? `${files.length}+`} files; only the first ${MAX_SCANNED_FILES} can be scanned`] : []),
+    ...unscannedFiles(files).slice(0, 5).map((f) => `${f} is too large for GitHub to show a diff, so it couldn't be scanned`),
     ...untrusted,
   ];
-  const written = [pr.title, pr.body, ...files.map((f) => addedLines(f.patch ?? ""))].join("\n");
+  // File names reach the prompt too (headers and line labels), so they are scanned with the text.
+  const description = deps.secondReview ? "" : `${pr.title}\n${(pr.body ?? "").slice(0, MAX_DESCRIPTION_CHARS)}`;
+  const written = [...(deps.secondReview ? [] : [pr.title, pr.body]), ...files.map((f) => f.filename), ...files.map((f) => addedLines(f.patch ?? ""))].join("\n");
   const quotes = scanForInjection(written);
 
   const reviewCriteria = terms.criteria.filter((c) => !c.test);
@@ -302,12 +331,16 @@ export async function verifyCodePr(m: Milestone, terms: Terms, deps: VerifierDep
   if (reviewCriteria.length && !failedMust.length) {
     const shown = files.filter((f) => !/(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(f.filename));
     let diff = shown.map((f) => `--- ${f.filename} (${f.status}, +${f.additions} -${f.deletions})\n${f.patch ?? "(binary or too large to show)"}`).join("\n\n");
-    if (diff.length > MAX_DIFF_CHARS) diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n[diff truncated at ${MAX_DIFF_CHARS} characters]`;
+    if (diff.length > MAX_DIFF_CHARS) {
+      diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n[diff truncated at ${MAX_DIFF_CHARS} characters]`;
+      // The model saw only part of the work: a person looks unless every must-have still passed.
+      tampering.push(`the diff is longer than ${MAX_DIFF_CHARS} characters; the AI reviewed only the first part`);
+    }
     try {
       judged = await judge(reviewCriteria, terms, deps, {
-        kindOfWork: `Pull request "${pr.title}"\n${pr.body}\n\nDiff`,
+        kindOfWork: deps.secondReview ? "Pull request (description not shown on the second review)\n\nDiff" : `Pull request\n${description}\n\nDiff`,
         flat: diff,
-        context: { label: "PR", text: `${pr.title}\n${pr.body}` },
+        ...(description ? { context: { label: "PR", text: description } } : {}),
         sources: new Map(shown.map((f) => [f.filename, patchLines(f.patch ?? "")])),
         headers: new Map(shown.map((f) => [f.filename, `${f.filename} (${f.status}, +${f.additions} -${f.deletions})${f.patch ? "" : " (binary or too large to show)"}`])),
       });

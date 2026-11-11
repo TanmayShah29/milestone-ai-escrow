@@ -169,7 +169,12 @@ function decide1(v: Verdict, pins: Pins): { decision: Decision; reasons: string[
  * Anything else (a protected path, a harness escape, or any entry this doesn't recognise) is tampering.
  */
 export function isProceduralFlag(entry: string): boolean {
-  return /^CI result for \S+ not trusted: /.test(entry) || /^the pull request changes \S+ files; only the first \d+ can be scanned$/.test(entry);
+  return (
+    /^CI result for \S+ not trusted: /.test(entry) ||
+    /^the pull request changes \S+ files; only the first \d+ can be scanned$/.test(entry) ||
+    / is too large for GitHub to show a diff, so it couldn't be scanned$/.test(entry) ||
+    /^the diff is longer than \d+ characters; the AI reviewed only the first part$/.test(entry)
+  );
 }
 
 export type TimeoutOutcome = "release" | "void" | "wait";
@@ -178,9 +183,10 @@ export type TimeoutOutcome = "release" | "void" | "wait";
  * What fixed rules do with a HUMAN_CHECK the client leaves undecided past its deadline:
  *  - tampering (protected files, harness escapes) or text aimed at the reviewer → "void": the hold goes
  *    back to the client; such work is never paid by default;
- *  - only procedural flags (untrusted CI, a PR too large to scan) → "release" if every must-have still
- *    passed with full confidence, otherwise "wait" (nothing automatic; the client must decide);
- *  - no flags (low confidence, an unfinished second review) → "release" to the worker.
+ *  - otherwise (procedural flags such as untrusted CI or a PR too large to scan, or no flags at all) →
+ *    "release" only if every must-have passed at its floor (policy-2) or confidence (policy-1); a
+ *    must-have that is unclear, failed or below its floor → "wait" (nothing automatic; the client or the
+ *    arbitrator must decide, and an expired hold returns the money). A hesitant model never pays by default.
  * No verdict on record, or one that isn't shaped like a verdict, → "wait": money never moves on missing evidence.
  */
 type TimeoutInput = Pick<Verdict, "tampering" | "injection"> & { criteria: (Pick<CriterionVerdict, "verdict" | "confidence"> & Partial<Pick<CriterionVerdict, "id" | "source" | "level">> & { kind: string })[] };
@@ -192,19 +198,21 @@ export function humanTimeoutOutcome(v: TimeoutInput | null | undefined, pins: Pi
   const tampering = (v?.tampering ?? []).filter((t) => !isProceduralFlag(t));
   const procedural = (v?.tampering ?? []).filter(isProceduralFlag);
   if (tampering.length || v?.injection?.detected) return { outcome: "void", reasons: flags({ tampering, injection: v?.injection ?? { detected: false, quotes: [] } }) };
+  const musts = (v?.criteria ?? []).filter((c) => c.kind === "must");
+  // policy-2 confirms a must-have by its evidence floor, policy-1 by the model's confidence.
+  const confirmed =
+    pins.policyVersion === POLICY_2
+      ? (c: (typeof musts)[number]) => c.level !== undefined && rank(c.level) >= rank(pins.floors?.[c.id ?? ""] ?? defaultFloor(c.source ?? "ai"))
+      : (c: (typeof musts)[number]) => c.confidence >= CONFIDENCE_FLOOR;
+  const allPassed = musts.length > 0 && musts.every((c) => c.verdict === "pass" && confirmed(c));
   if (procedural.length) {
-    const musts = (v?.criteria ?? []).filter((c) => c.kind === "must");
-    // policy-2 confirms a must-have by its evidence floor, policy-1 by the model's confidence.
-    const confirmed =
-      pins.policyVersion === POLICY_2
-        ? (c: (typeof musts)[number]) => c.level !== undefined && rank(c.level) >= rank(pins.floors?.[c.id ?? ""] ?? defaultFloor(c.source ?? "ai"))
-        : (c: (typeof musts)[number]) => c.confidence >= CONFIDENCE_FLOOR;
-    const allPassed = musts.length > 0 && musts.every((c) => c.verdict === "pass" && confirmed(c));
     return allPassed
       ? { outcome: "release", reasons: ["every must-have passed; the review was held only for a check it couldn't complete", ...procedural] }
       : { outcome: "wait", reasons: ["the rules can't settle this on their own: a must-have wasn't confirmed and a check couldn't be completed", ...procedural] };
   }
-  return { outcome: "release", reasons: ["the review flagged no tampering or text aimed at the reviewer"] };
+  return allPassed
+    ? { outcome: "release", reasons: ["every must-have passed and the review flagged no tampering or text aimed at the reviewer"] }
+    : { outcome: "wait", reasons: ["the rules can't settle this on their own: a must-have was unclear or below its evidence floor, so nothing is paid by default"] };
 }
 
 function flags(v: Pick<Verdict, "tampering" | "injection">): string[] {

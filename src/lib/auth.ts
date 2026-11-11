@@ -21,7 +21,7 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-function sameHash(a: string, b: string | null): boolean {
+export function sameHash(a: string, b: string | null): boolean {
   if (!b || a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
@@ -70,9 +70,19 @@ export function requireRole(role: Role, ...allowed: Role[]): void {
  * rules (after an objection, or before the hold expires without one), or null. The client's reasons
  * (objection_reason, changes_reason) are always included, so the worker can read them.
  */
+/**
+ * A bounty claim's code, which the claimer's pull request must carry ("Milestone-Claim: <code>"). It comes
+ * from this claim's worker link, so it changes with every claim: a pull request opened under an earlier
+ * claim can't be handed in by a later claimer who signed with the same GitHub login.
+ */
+export function claimCode(m: Pick<Milestone, "open_bounty" | "worker_token_hash">): string | null {
+  if (!m.open_bounty || !m.worker_token_hash) return null;
+  return `mc-${createHash("sha256").update(`claim:${m.worker_token_hash}`).digest("hex").slice(0, 12)}`;
+}
+
 export function publicMilestone(m: Milestone) {
   const { client_token_hash: _c, worker_token_hash: _w, ...rest } = m;
   void _c;
   void _w;
-  return { ...rest, objection_reason: m.objection_reason ?? null, changes_reason: m.changes_reason ?? null, decide_by: humanCheckDeadline(m), fee_schedule: feeSchedule(), links_expire_at: linksExpireAt(m) ?? null, erase_blocker: eraseBlocker(m) ?? null };
+  return { ...rest, claim_code: claimCode(m), objection_reason: m.objection_reason ?? null, changes_reason: m.changes_reason ?? null, decide_by: humanCheckDeadline(m), fee_schedule: feeSchedule(), links_expire_at: linksExpireAt(m) ?? null, erase_blocker: eraseBlocker(m) ?? null };
 }

@@ -24,7 +24,7 @@ export type PullRequest = {
   changedFiles?: number;
   createdAt?: string;
 };
-export type PrFile = { filename: string; status: string; additions: number; deletions: number; patch?: string };
+export type PrFile = { filename: string; status: string; additions: number; deletions: number; patch?: string; previous_filename?: string };
 export type CheckRun = {
   name: string;
   status: string;
@@ -131,7 +131,7 @@ export function githubClient(fetchImpl: typeof fetch = fetch, token = process.en
       const out: PrFile[] = [];
       for (let page = 1; page <= 3; page++) {
         const batch = await get<PrFile[]>(`/repos/${owner}/${repo}/pulls/${n}/files?per_page=100&page=${page}`);
-        out.push(...batch.map(({ filename, status, additions, deletions, patch }) => ({ filename, status, additions, deletions, ...(patch ? { patch } : {}) })));
+        out.push(...batch.map(({ filename, status, additions, deletions, patch, previous_filename }) => ({ filename, status, additions, deletions, ...(patch ? { patch } : {}), ...(previous_filename ? { previous_filename } : {}) })));
         if (batch.length < 100) break;
       }
       return out;

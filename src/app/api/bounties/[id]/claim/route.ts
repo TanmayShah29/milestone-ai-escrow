@@ -1,4 +1,4 @@
-import { publicMilestone } from "@/lib/auth";
+import { claimCode, publicMilestone } from "@/lib/auth";
 import { claimBounty } from "@/lib/bounties/bounty";
 import { json, toHttp } from "@/lib/http";
 import { HOUR, hit, ipKey, tooMany, waitText } from "@/lib/ratelimit";
@@ -18,7 +18,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     ]);
     if (!v.ok) return tooMany(`Too many claims for now. Try again in ${waitText(v.retryAfterMs)}.`, v.retryAfterMs);
     const { milestone, workerToken } = await claimBounty(id, body);
-    return json(200, { milestone: publicMilestone(milestone), workerToken });
+    return json(200, { milestone: publicMilestone(milestone), workerToken, claimLine: `Milestone-Claim: ${claimCode(milestone)}` });
   } catch (err) {
     return toHttp(err);
   }

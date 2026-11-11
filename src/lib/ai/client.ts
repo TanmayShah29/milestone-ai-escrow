@@ -45,10 +45,13 @@ export async function callsToday(): Promise<number> {
   return Number(rows[0]!.n);
 }
 
-/** Pull the JSON object out of a reply that may be wrapped in a code fence or prose. */
+/**
+ * Pull the JSON object out of a reply that may be wrapped in a code fence or prose. With several fences the
+ * last one wins: a deliverable that gets the model to echo a forged block first can't have it parsed.
+ */
 export function extractJson(text: string): unknown {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
-  const body = (fenced?.[1] ?? text).trim();
+  const fences = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
+  const body = (fences.at(-1)?.[1] ?? text).trim();
   const start = body.indexOf("{");
   const end = body.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("no JSON object in reply");

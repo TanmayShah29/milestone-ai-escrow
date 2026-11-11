@@ -4,6 +4,7 @@ import { db, withMilestoneLock } from "@/lib/db";
 import { stateLabel } from "@/lib/client/states";
 import { InvariantViolation } from "@/lib/errors";
 import { audit, getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
+import { claimCode } from "@/lib/auth";
 import { cancelHold, defaultDeps, releaseFunds, syncMilestone, type Deps } from "@/lib/money/flow";
 import { privacySweep } from "@/lib/privacy";
 import { githubClient, parsePrUrl, type GitHub, type PullRequest } from "./github";
@@ -58,6 +59,11 @@ export async function submitDeliverable(milestoneId: string, input: { prUrl?: st
     // The worker signed as this GitHub account: someone else's pull request isn't their delivery.
     if (m.worker_github_login && pr.author && pr.author.toLowerCase() !== m.worker_github_login.toLowerCase()) {
       throw new InvariantViolation(`That pull request was opened by @${pr.author}, but the worker signed the terms as @${m.worker_github_login}. Submit a pull request opened from that account.`);
+    }
+    // A bounty claim proves the pull request was opened for this claim, not one an earlier claimer opened.
+    const code = claimCode(m);
+    if (code && !(pr.body ?? "").includes(`Milestone-Claim: ${code}`)) {
+      throw new InvariantViolation(`Add this line to the pull request description, then submit again: Milestone-Claim: ${code}`);
     }
     const { count } = citedTerms(pr.body);
     if (termsLineProblem(pr.body, m.criteria_hash)) {
@@ -362,12 +368,14 @@ export async function resolveObjection(milestoneId: string, deps: ReviewDeps = d
     if (prior?.status === "done" && prior.verdict) return applySecondDecision(m, key, prior.verdict, releaseAt, first?.model ?? null, deps, false);
     if (prior?.status === "pending" && Date.now() - prior.updated_at.getTime() < SECOND_REVIEW_RETRY_MS && Date.now() < releaseAt.getTime()) return m;
 
-    // A different model than the first review; if only that one model is configured, it is used again.
+    // Different models than the first review where any are configured; the first review's `model` lists
+    // every panel member ("a, b, c"). With no other model available, the same ones vote again on a fresh run.
     const terms = termsSchema.parse(m.criteria);
     const pool = pinnedFirst(terms, configuredModels());
-    const others = pool.filter((x) => x !== first?.model);
+    const used = new Set((first?.model ?? "").split(",").map((x) => x.trim()).filter(Boolean));
+    const others = pool.filter((x) => !used.has(x));
     // runKey: the second review re-runs the signed tests on the trusted runner, not just re-reads them.
-    const verifierDeps = { ...deps, models: others.length ? others : pool, runKey: key };
+    const verifierDeps = { ...deps, models: others.length ? others : pool, runKey: key, secondReview: true };
 
     let waiting: string;
     try {

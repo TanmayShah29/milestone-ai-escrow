@@ -3,10 +3,14 @@
 
 const PATTERNS: RegExp[] = [
   /ignore (all |any )?(previous|prior|above|earlier) (instructions|rules|prompts?)/i,
-  /\b(ai|llm|gpt|claude|model|assistant)\s*(reviewer|grader|judge|auditor)?\s*[:,-]?\s*(please\s+)?(mark|rate|grade|score|approve|pass|accept)\b/i,
+  // Addressed to the reviewer: "AI reviewer, mark…", "Claude: approve this". A bare "AI rate limit" or "model score"
+  // in honest code has no reviewer word or vocative colon before the verb, so it doesn't match.
+  /\b(ai|llm|gpt|claude|model|assistant)[ \t]*(reviewer|grader|judge|auditor)[ \t]*[:,-]?[ \t]*(please[ \t]+)?(mark|rate|grade|score|approve|pass|accept)\b/i,
+  /\b(ai|llm|gpt|claude|assistant)[ \t]*[:,][ \t]*(please[ \t]+)?(mark|grade|approve|pass|accept)[ \t]+(this|all|every|the|it)\b/i,
   /\b(mark|treat|consider|grade|rate)\s+(all|every|each|the)\s+(criteria|criterion|requirements?|checks?)\s+(as\s+)?(pass(ed|ing)?|met|satisfied|complete)/i,
   /\byou are (now )?(an?|the) (ai|assistant|reviewer|grader|judge)/i,
-  /\b(system|developer)\s*(prompt|message|instruction)s?\s*:/i,
+  // "System prompt: …" as prose; the identifier `systemPrompt: string` (no space) is ordinary code.
+  /\b(system|developer)[ \t]+(prompt|message|instruction)s?[ \t]*:[ \t]*\S/i,
   /\breviewer\s*(note|instruction)s?\s*:/i,
   /\boverride\b.{0,40}\b(verdict|review|policy|criteria)\b/i,
 ];
@@ -37,7 +41,7 @@ const MULTILINGUAL: RegExp[] = [
 
 // Invisible characters (zero-width, soft hyphen, word joiners, BOM) split words so a regex misses them,
 // and bidi controls reorder what a human sees ("Trojan Source"). Either in a deliverable is itself a flag.
-const INVISIBLE = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/g;
+const INVISIBLE = /[­᠎​-‏⁠-⁤﻿ㅤ]|[\u{E0000}-\u{E007F}]/gu;
 const BIDI = /[\u202A-\u202E\u2066-\u2069]/g;
 // Look-alike letters from other scripts that NFKC leaves alone (Cyrillic and Greek → Latin).
 const HOMOGLYPHS: Record<string, string> = {
@@ -76,7 +80,8 @@ export function scanForInjection(text: string): string[] {
   const hits: string[] = [];
   if (BIDI.test(text)) hits.push("contains bidirectional control characters that reorder what a reader sees");
   BIDI.lastIndex = 0;
-  if (/[\u200B-\u200F\u2060-\u2064]/.test(text)) hits.push("contains invisible zero-width characters");
+  if (/[᠎​-‏⁠-⁤ㅤ]/.test(text)) hits.push("contains invisible zero-width characters");
+  if (/[\u{E0000}-\u{E007F}]/u.test(text)) hits.push("contains invisible Unicode tag characters");
   for (const line of text.split("\n")) {
     const clean = normalizeForScan(line);
     if (PATTERNS.some((p) => p.test(clean))) hits.push(clean.trim().slice(0, 200));

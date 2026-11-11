@@ -4,7 +4,7 @@ import { contractDocument, editTerms, signBlocker, termsSchema } from "@/lib/con
 import { validLogin } from "@/lib/contract/signatures";
 import { db, withMilestoneLock } from "@/lib/db";
 import { InvariantViolation } from "@/lib/errors";
-import { checkLimits, type Mandate } from "@/lib/mandates/mandate";
+import { checkLimits, getMandate, type Mandate } from "@/lib/mandates/mandate";
 import { fundFromMandate } from "@/lib/mandates/vault";
 import { audit, createMilestone, getMilestone, transition, type Milestone } from "@/lib/milestones/repo";
 import { valueToCents } from "@/lib/money/amounts";
@@ -43,6 +43,8 @@ export async function postBounty(mandate: Mandate, input: BountyInput, deps: Dep
 
   // One mandate's posts run one at a time, so two can't both fit under the same remaining budget.
   return withMilestoneLock(`mandate:${mandate.id}`, async () => {
+    // Re-read inside the lock: a revoke that landed while this post waited must stop it.
+    mandate = await getMandate(mandate.id);
     await checkLimits(mandate, { amountCents, repo, verifier: "code_pr" });
     const { milestone } = await createMilestone({ title, brief: typeof input.brief === "string" ? input.brief.slice(0, 5000) : "", amountCents, freelancerEmail: UNCLAIMED_EMAIL, verifier: "code_pr", dueAt });
     await db().query("update milestones set mandate_id = $2, open_bounty = true where id = $1", [milestone.id, mandate.id]);

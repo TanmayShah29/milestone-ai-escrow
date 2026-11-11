@@ -346,6 +346,12 @@ export function NextStep(props: { m: MilestoneView; role: Role; review: Review |
                 Open a pull request in <span className="font-mono">{String(m.repo ?? "the repository")}</span>{due ? ` by ${due}` : ""}, with this line in its description so CI runs the signed tests:
               </p>
               <CopyLine text={`Milestone-Terms: ${hash}`} label="Copy terms line" />
+              {m.claim_code ? (
+                <>
+                  <p className="text-sm text-ink-2">This bounty also needs your claim code on its own line, so only a pull request opened for your claim counts:</p>
+                  <CopyLine text={`Milestone-Claim: ${String(m.claim_code)}`} label="Copy claim line" />
+                </>
+              ) : null}
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input
                   className="min-w-0 flex-1 rounded-md border border-rule-strong bg-panel px-3 py-2 text-sm aria-[invalid=true]:border-failed"

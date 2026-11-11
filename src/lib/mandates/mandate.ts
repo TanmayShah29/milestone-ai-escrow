@@ -8,7 +8,7 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { isoBase64URL } from "@simplewebauthn/server/helpers";
-import { hashToken, newToken, Unauthorized } from "@/lib/auth";
+import { hashToken, sameHash, newToken, Unauthorized } from "@/lib/auth";
 import { coseToJwk, type Site } from "@/lib/contract/signatures";
 import { db } from "@/lib/db";
 import { InvariantViolation } from "@/lib/errors";
@@ -135,7 +135,7 @@ export const mandateStatement = (id: string, hash: string, nonce: string) => `mi
 export async function mandateForOwner(id: string, token: string | undefined): Promise<Mandate> {
   if (!token) throw new Unauthorized("Open this mandate with its owner link.");
   const m = await getMandate(id);
-  if (hashToken(token) !== (m as unknown as { owner_token_hash: string }).owner_token_hash) throw new Unauthorized("This link doesn't manage that mandate.");
+  if (!sameHash(hashToken(token), (m as unknown as { owner_token_hash: string }).owner_token_hash)) throw new Unauthorized("This link doesn't manage that mandate.");
   return m;
 }
 
