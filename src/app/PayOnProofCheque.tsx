@@ -201,11 +201,6 @@ export function PayOnProofCheque() {
                 </p>
                 <div className="flex w-full items-center gap-2 sm:w-auto">
                   <div role="radiogroup" aria-labelledby="who-label" onKeyDown={onKey} className="relative grid flex-1 grid-cols-2 rounded-md sm:flex-none border border-rule-strong bg-paper p-0.5 text-sm">
-                    <span
-                      aria-hidden="true"
-                      className="absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-[7px] border border-rule-strong bg-panel transition-transform duration-[var(--t-state)] ease-[var(--ease-out)]"
-                      style={{ transform: mode === "cheat" ? "translateX(100%)" : "none" }}
-                    />
                     {(["honest", "cheat"] as const).map((m) => (
                       <button
                         key={m}
@@ -215,7 +210,7 @@ export function PayOnProofCheque() {
                         aria-checked={mode === m}
                         tabIndex={mode === m ? 0 : -1}
                         onClick={() => start(m)}
-                        className={`relative min-h-11 whitespace-nowrap rounded-[7px] px-2.5 transition-colors sm:px-3 duration-[var(--t-tap)] ${mode === m ? "font-semibold text-ink" : "text-ink-2 hover:text-ink"}`}
+                        className={`relative min-h-11 whitespace-nowrap rounded-[7px] px-2.5 transition-colors sm:px-3 duration-[var(--t-tap)] ${mode === m ? "border border-rule-strong bg-panel font-semibold text-ink" : "border border-transparent text-ink-2 hover:text-ink"}`}
                       >
                         {m === "honest" ? "Honest worker" : "Cheating worker"}
                       </button>

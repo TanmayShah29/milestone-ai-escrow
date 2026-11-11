@@ -27,7 +27,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           Skip to content
         </a>
         <header className="sticky top-0 z-50 border-b border-rule bg-paper/80 text-ink backdrop-blur-md supports-[backdrop-filter]:bg-paper/70">
-          <nav className="mx-auto flex h-14 max-w-6xl items-center gap-4 overflow-x-auto px-4 text-sm [scrollbar-width:none] sm:gap-6" aria-label="Main">
+          <nav className="mx-auto flex h-14 max-w-6xl items-center gap-3.5 overflow-x-auto px-4 text-sm [scrollbar-width:none] [mask-image:linear-gradient(to_right,black_88%,transparent)] sm:gap-6 sm:[mask-image:none]" aria-label="Main">
             <Link href="/" aria-label="Milestone home" className="flex min-h-11 shrink-0 items-center gap-2 font-semibold tracking-tight text-ink no-underline">
               <svg viewBox="0 0 20 20" className="size-5" aria-hidden="true">
                 <circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -35,7 +35,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               </svg>
               <span className="hidden sm:inline">Milestone</span>
             </Link>
-            <Link href="/demo" className="inline-flex min-h-11 shrink-0 items-center font-medium text-ink no-underline">
+            <Link href="/demo" className="inline-flex min-h-11 shrink-0 items-center text-ink-2 no-underline transition-colors hover:text-ink">
               Demo
             </Link>
             <Link href="/milestones" className="inline-flex min-h-11 shrink-0 items-center text-ink-2 no-underline transition-colors hover:text-ink">
