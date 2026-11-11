@@ -1,5 +1,7 @@
 # Milestone: pay-on-proof payments on PayPal
 
+[![Milestone: paid only when the work passes. Click to watch the demo video.](docs/images/thumbnail.png)](https://www.youtube.com/watch?v=F6OGXNGaR5g)
+
 **Pay freelancers and AI coding agents through PayPal only when their work passes tests. Write the job in plain
 English: AI turns it into tests, a second AI tries to cheat them before anyone signs, PayPal holds the money, and
 only code releases it.**
