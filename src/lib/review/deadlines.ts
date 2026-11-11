@@ -3,7 +3,7 @@ import type { Milestone } from "@/lib/milestones/repo";
 // The review clocks, from the signed terms or env. Pure (no db, no AI), so the API's public view can use them too.
 
 export function objectionWindowMs(): number {
-  const s = Number(process.env.OBJECTION_WINDOW_SECONDS ?? "120"); // 48 h in production; 2 min for the demo
+  const s = Number(process.env.OBJECTION_WINDOW_SECONDS ?? "120"); // 2 min: the live app is a sandbox demo, so judges can watch a release. Set 172800 (48 h) for real use
   return (Number.isFinite(s) && s >= 0 ? s : 120) * 1000;
 }
 

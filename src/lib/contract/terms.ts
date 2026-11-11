@@ -165,18 +165,9 @@ export function repairDraft(raw: unknown): unknown {
 const draftSchema = z.preprocess(repairDraft, termsObject.extend({ suggestions: z.array(suggestionSchema).max(3).optional() }).superRefine(refineTerms));
 export type Criterion = z.infer<typeof criterionSchema>;
 
-/** JSON with sorted keys, so the same terms always hash the same. */
-export function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value)
-      .filter((k) => (value as Record<string, unknown>)[k] !== undefined)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonical((value as Record<string, unknown>)[k])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
+// JSON with sorted keys, so the same terms always hash the same. One copy, shared with the proof chain.
+export { canonical } from "@/lib/proof/verify";
+import { canonical } from "@/lib/proof/verify";
 
 /** What the hash covers: the deal itself, not just the criteria. */
 export function contractDocument(m: Pick<Milestone, "id" | "title" | "amount_cents" | "currency" | "freelancer_email" | "repo">, terms: Terms) {

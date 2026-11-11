@@ -1,3 +1,4 @@
+import { STATES } from "@/lib/milestones/states";
 import { ACTION_ROLES } from "./actions";
 
 // The OpenAPI 3.1 description of the public API (served at GET /api/openapi). Hand-written, with the action
@@ -33,7 +34,7 @@ export const openapi = {
         properties: {
           id: { type: "string", format: "uuid" },
           title: { type: "string" },
-          state: { type: "string", enum: ["DRAFT", "AGREED", "FUNDED", "SUBMITTED", "IN_REVIEW", "CHANGES_REQUESTED", "HUMAN_CHECK", "PASSED", "CONTESTED", "RELEASED", "PAID_OUT", "PAYOUT_FAILED", "DISPUTE", "CANCELLED", "LOCKED", "ARBITRATION"] },
+          state: { type: "string", enum: [...STATES] },
           amount_cents: { type: "integer" },
           criteria_hash: { type: ["string", "null"], description: "SHA-256 fingerprint of the signed terms" },
           share_bps: { type: ["integer", "null"], description: "Earned share a PASSED decision captures" },
