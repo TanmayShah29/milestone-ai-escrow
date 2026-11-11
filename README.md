@@ -4,6 +4,8 @@
 English: AI turns it into tests, a second AI tries to cheat them before anyone signs, PayPal holds the money, and
 only code releases it.**
 
+**[Demo video (2:54)](https://www.youtube.com/watch?v=F6OGXNGaR5g)** · **[Live app](https://milestone-ai-escrow.onrender.com)** · **[Run it live in 2 minutes](https://milestone-ai-escrow.onrender.com/demo)**
+
 For small software teams and agencies hiring contractors or coding agents.
 
 - The client's money sits as a PayPal **authorization hold**: proof it exists, but nothing is charged yet.
@@ -307,7 +309,10 @@ limits on drafting. When the budget runs out, the app shows "AI busy, retry" and
 and sometimes get removed from OpenRouter without notice. The fallback chain, the budget and the "busy"
 state keep the app usable, but a real deployment would use a paid model with an SLA. The design limits how
 much this matters: tests, not the model, decide the tested criteria, and a model that hesitates sends the
-milestone to a human rather than paying out.
+milestone to a human rather than paying out. In the panel bench (`bench/panel/results.json`, 26 of the 27
+cases run, Nov 6–8), 21 of 78 model calls failed and 14 of 52 criteria came back "unclear" and went to a
+person. Of the 38 the panel did decide, 37 matched the label; the one miss (`spec-returns-null` C2) failed
+honest work, which blocks payment rather than paying a cheat.
 
 ## Threat model
 
