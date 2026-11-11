@@ -136,7 +136,9 @@ Agree ──► Fund ──► Deliver ──► Verify ──► Release
    and sends a PayPal payout of the captured amount minus the platform fee (5% by default).
 
 **Objections.** During the window the client can object once. The money stays held, and **one** second
-review runs on the **same commit** with a **different model** (CI results are re-read, not re-run).
+review runs on the **same commit**, on **other models** where any are configured. Under policy-2 the trusted
+runner re-runs the signed tests; otherwise CI results are re-read. The PR description is left out of the
+second review, since others can edit it after the first.
 - If it passes, the money releases 72 hours after the objection, and the client can't object again.
 - If it fails, the milestone returns to changes requested, and a fixed resubmission gets a normal window.
 - If no usable second review arrives within 72 hours (AI busy), it goes to human check.
@@ -326,6 +328,12 @@ honest work, which blocks payment rather than paying a cheat.
 | **Editing the workflow or tests in the PR** | `acceptance/` is overwritten with the signed tests. The helper scripts come from the base branch. Any change under `.github/` or `acceptance/` is flagged as tampering and sends the milestone to human check, never to an automatic pass. The workflow uses `pull_request` (not `pull_request_target`), so PR code never runs with write tokens or secrets | **The workflow YAML itself comes from the PR's merge commit** under `pull_request`. A PR that rewrites it can fake green jobs, and is caught only by the tampering flag (a person then decides) |
 | **Prompt injection** in code, comments or PR text | A deterministic scan, independent of the model, after folding Unicode look-alikes and removing zero-width characters; invisible or bidirectional control characters are themselves flagged. Plus the model's own flag. Either one blocks automatic payment (human check, or changes requested if a must-have fails). The deliverable is framed as untrusted data | The scan knows English and six other languages (Hindi, Spanish, Chinese, Russian, Portuguese, French); a novel phrasing can still reach the model. That is why the model only judges criteria no test covers: tested criteria don't depend on the model at all |
 | **Client parks the money** (objects forever) | One objection per approval. A passing second review releases 72 h after the objection. A post-objection human check auto-releases 72 h after it starts (worst case about 6 days) | A client can still void the hold before any delivery, by design |
+| **Client voids after reading the work** | The worker submits as soon as the PR is open, which ends the FUNDED window. After an objection, a human check can't be voided by the client | Before submission, after changes are requested, or in a human check with no objection, the client can still void a hold after reading a public PR. Routing those voids to the arbitrator is next |
+| **A hesitant model pays by default** | An undecided human check releases at its deadline only if every must-have passed at its evidence floor. Anything unclear, failed or below its floor waits for a person, and an expired hold returns the money (changed Nov 11) | A client who never decides leaves an unclear review to lapse back to them |
+| **Hiding work from the review** (huge diffs, files GitHub won't diff, renaming the workflow) | A diff longer than the prompt budget, a text file with no diff, or a PR over 300 files is a procedural flag (human check unless every must-have passed). Renaming or moving anything under `.github/` or `acceptance/` counts as touching it. The PR description is capped in the prompt and file names are scanned for injection | The scans read added lines; a payload split across files can still reach the model, which only judges untested criteria |
+| **Tests a worker can game** | AI-written tests must fail against an empty stub, then an AI attacker writes fake implementations and the tests are hardened before signing | Signed tests are visible in advance, so a lookup table can pass literal asserts. Property-based or hidden tests on the trusted runner are next. Harness-escape detection (`process.exit` etc.) is a regex heuristic |
+| **Grounding** | Each AI vote must quote a line that exists at the cited place in the diff | It checks that the citation exists, not that it proves the criterion |
+| **Bounty claim takeover** | Each claim gets a `Milestone-Claim:` code the PR must carry, so a PR opened under an earlier claim can't be handed in by a later claimer using the same GitHub login | GitHub login ownership isn't proven by OAuth; anyone can claim and hold an open bounty for 3 days |
 | **Client acts as the worker** | Capability links: a creator's browser keeps the worker link **share-only** and never uses it to act. Signing and submitting require the worker token | There are no accounts. Whoever holds the worker link *is* the worker, and the client sees that link to hand it over. This is a UX guard, not identity |
 | **Token leakage** | `Referrer-Policy: no-referrer`. Tokens are stripped from the address bar after load. Only SHA-256 hashes of tokens and API keys are stored, compared in constant time, and never sent to a browser. Either side can reissue its own link (the old one stops working at once); the client can reissue the worker link until the worker signs. Both links stop working 30 days after the milestone closes | Links shared over insecure channels are bearer secrets until reissued |
 | **Personal data kept forever** | Webhook payloads are emptied after 30 days (event ids stay, so redeliveries are still recognised). The client can erase a cancelled milestone at once, or a paid one after PayPal's 180-day dispute window; the sweep erases them automatically then. Erasure removes the title, brief, emails, terms, deliverable and reviews, and revokes both links | PayPal ids, amounts and the audit trail are kept, as the money rules require |
@@ -376,9 +384,9 @@ honest work, which blocks payment rather than paying a cheat.
   through Partner Referrals, set `payee.merchant_id` to the worker, and capture with
   `payment_instruction.platform_fees`. The worker is then paid in one step with no payout, and the worker,
   not the platform, is merchant of record for disputes.
-- **CI is re-read, not re-run, on an objection.** The fine-grained GitHub token has no Actions permission,
-  so the second review re-reads the same commit's check runs and gets a fresh AI review of the untested
-  criteria.
+- **On an objection, tests re-run only on the trusted runner.** Without `RUNNER_GITHUB_TOKEN` the
+  fine-grained token has no Actions permission, so the second review re-reads the same commit's check runs
+  and gets a fresh AI review of the untested criteria.
 - **Scope:** GitHub PRs with Node.js `node:test` acceptance tests (plus a `rubric_text` verifier for text
   deliverables). Sandbox only, USD only, one hold per milestone. No refunds or partial-refund splits.
 - **Bryntum Gantt runs on the public trial package**, so the timeline shows a trial watermark.
@@ -474,7 +482,8 @@ and point `MILESTONE_API` at your deployment.
 ## For AI agents: the MCP server
 
 An agent can post work or do it: read the signed terms, accept them, open a PR, submit it and track the
-payout. There are **no tools that fund, capture, release, void or refund**. An agent can earn, never take.
+payout. There are **no tools that capture, release, void or refund**. The only tool that funds a hold,
+`post_bounty`, needs a mandate key and works only inside the limits a person signed with a passkey.
 
 ```bash
 git clone https://github.com/TanmayShah29/milestone-ai-escrow && cd milestone-ai-escrow && npm ci

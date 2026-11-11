@@ -14,7 +14,7 @@ contract and attacks it before anyone signs; only code moves the money.
 cheat caught). 5 min: `/bench`. 15 min: the MCP server, or the guided tour on `/demo`.
 - Video (2:54): https://www.youtube.com/watch?v=F6OGXNGaR5g
 
-**Prize categories:** Best Use of Agentic Commerce (main) · Bryntum (sponsor). Also eligible: Best Use of PayPal + AI.
+**Prize categories:** Best Use of Agentic Commerce (main) · Best Use of PayPal + AI · Bryntum (Gantt timeline) · AG Grid (portfolio ledger) · APIMatic (Context Plugin used to build the PayPal integration; usage form submitted).
 
 ---
 
@@ -46,8 +46,8 @@ Milestone is a pay-on-proof layer on PayPal, with GitHub pull requests as the fi
    the criteria that tests can't check. A fixed policy decides: pass, changes requested, or a human check.
    Text in the PR aimed at the AI reviewer is detected and blocks automatic payment.
 5. **Release.** After an objection window, code captures the hold and pays the worker through PayPal
-   Payouts, minus a platform fee. If the client objects, one second review runs on the same commit with a
-   different model. If it passes, the money releases 72 hours later. If it can't decide, the client has 72
+   Payouts, minus a platform fee. If the client objects, one second review runs on the same commit, on
+   other models where any are configured (the trusted runner re-runs the tests). If it passes, the money releases 72 hours later. If it can't decide, the client has 72
    hours to decide before the money releases. A client can't park the money forever: the worst case is
    about 6 extra days, inside PayPal's 29-day hold.
 
@@ -99,8 +99,9 @@ moves the later phases, a voided hold greys out what's left, a reauthorization m
 Real sandbox runs are public: PR #1 passed and was paid; PR #2 hid a prompt injection, was caught with the
 money still held, then fixed and paid; PR #3 was done end to end by an AI agent through our MCP server and
 paid; PR #10 was an agent hired by another agent: its rushed first attempt failed the signed tests with no
-money moved, it fixed the code from the verdict, and it was paid. The MCP server has **no** tools that fund,
-capture, release or refund. An agent can earn, never take.
+money moved, it fixed the code from the verdict, and it was paid. The MCP server has **no** tools that capture,
+release, void or refund. The one tool that funds, `post_bounty`, works only with a passkey-signed mandate, and
+fixed code checks every hold against the limits the person signed.
 
 ## How we built it
 
@@ -182,7 +183,7 @@ Playwright, Claude Code.
 
 | Tool / model | How it was used |
 |---|---|
-| `dots-studio/dots-3-note-preview:free` (primary), `nvidia/nemotron-3.5-super-vl:free`, `recursive/flint-v1.0:free` (fallbacks), via OpenRouter + Vercel AI SDK | In the product: drafting criteria and tests, regenerating a test, fixing a test that doesn't bite, attacking the tests with fake code and strengthening them, reviewing untested criteria, and the post-objection second review on a different model. One structured call per task. The model's output is a recommendation; fixed code decides |
+| `dots-studio/dots-3-note-preview:free` (primary), `nvidia/nemotron-3.5-super-vl:free`, `recursive/flint-v1.0:free` (fallbacks), via OpenRouter + Vercel AI SDK | In the product: drafting criteria and tests, regenerating a test, fixing a test that doesn't bite, attacking the tests with fake code and strengthening them, reviewing untested criteria, and the post-objection second review (other models where configured). One structured call per task. The model's output is a recommendation; fixed code decides |
 | PayPal APIs (sandbox) | Orders v2 (AUTHORIZE), authorizations (capture, void, reauthorize), Payouts, webhook signature verification, dispute webhooks |
 | APIMatic Context Plugin + the APIMatic-generated PayPal TypeScript SDK | Used in Claude Code while building the PayPal integration. Every SDK signature, header and error arm in `paypal-plan.md` was looked up in the SDK map |
 | Claude Code (Anthropic) | Development assistant for writing code, tests, docs and audits. Not part of the running product |
@@ -218,4 +219,3 @@ Recording checklist:
 - Wake the service first (`/api/health`). Check `/api/status` shows `busy: false`.
 - Say "PayPal", "sandbox" and "AI" by name. No copyrighted music. Captions on; zoom so text reads on a phone.
 - Bryntum runs on the public trial package, so the timeline shows a trial watermark. That's expected; no license is being requested.
-- After uploading: paste the YouTube link here and at the top of the README.
