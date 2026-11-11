@@ -33,7 +33,8 @@ export function siteFor(req: Request): Site {
     throw new InvariantViolation("Passkeys need the request's origin. Sign from the Milestone page.");
   }
   const appHost = process.env.APP_URL ? new URL(process.env.APP_URL).hostname : undefined;
-  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  // localhost only outside production: a caller sets Origin, so production accepts only the app's own host.
+  const local = process.env.NODE_ENV !== "production" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
   if (url.hostname !== appHost && !local) throw new InvariantViolation(`Passkeys only work on ${appHost ?? "this app's own address"}.`);
   return { rpId: url.hostname, origin: url.origin };
 }
